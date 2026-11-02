@@ -1,0 +1,164 @@
+"""Builds the three player drones in Blender and exports each one as an FBX for Unity.
+
+Run from the project root (Blender 4.x or 5.x):
+    blender --background --python Tools/Blender/make_drones.py -- Assets/DroneSandbox/Resources/Models [preview_dir]
+
+Each drone is a root empty with its parts as children. Propellers are separate objects named
+"Prop_N" with their origin at the hub, so the game can spin them. Noses point down Blender's -Y,
+which becomes +Z (forward) in Unity.
+"""
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from common import box, cylinder, export, material, render_preview, reset_scene, root, sphere  # noqa: E402
+
+import bpy  # noqa: E402
+
+args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+OUT_DIR = os.path.abspath(args[0] if args else ".")
+PREVIEW_DIR = os.path.abspath(args[1]) if len(args) > 1 else None
+
+# ---------- shared parts ----------
+
+M = {}
+
+
+def make_materials():
+    M["carbon"] = material("Carbon", (0.025, 0.025, 0.028), roughness=0.35)
+    M["shell_gray"] = material("ShellGray", (0.10, 0.105, 0.11), roughness=0.5)
+    M["olive"] = material("Olive", (0.13, 0.15, 0.08), roughness=0.75)
+    M["motor"] = material("MotorMetal", (0.35, 0.36, 0.38), metallic=0.9, roughness=0.3)
+    M["prop"] = material("Prop", (0.03, 0.03, 0.03), roughness=0.4)
+    M["lens"] = material("Lens", (0.01, 0.01, 0.02), metallic=0.2, roughness=0.05)
+    M["led_green"] = material("LedGreen", (0.1, 0.9, 0.2), emission=(0.1, 1.0, 0.2))
+    M["led_red"] = material("LedRed", (0.9, 0.1, 0.05), emission=(1.0, 0.1, 0.05))
+    M["warhead"] = material("Warhead", (0.20, 0.21, 0.12), roughness=0.7)
+    M["tip_red"] = material("TipRed", (0.45, 0.06, 0.04), roughness=0.6)
+    M["white"] = material("MissileWhite", (0.75, 0.75, 0.72), roughness=0.5)
+
+
+def propeller(name, parent, hub, diameter, blades=2):
+    """Blades with a little pitch twist; origin at the hub so the game can spin it."""
+    parts = []
+    hub_obj = cylinder(name, 0.018, 0.03, hub, M["motor"], None, verts=16)
+    blade_len = diameter / 2
+    for i in range(blades):
+        a = 2 * math.pi * i / blades
+        cx = hub[0] + math.cos(a) * blade_len / 2
+        cy = hub[1] + math.sin(a) * blade_len / 2
+        blade = box(f"{name}_b{i}", (blade_len, diameter * 0.075, 0.006), (cx, cy, hub[2] + 0.004),
+                    M["prop"], None, rot=(math.radians(12), 0, a), bevel=0.002)
+        parts.append(blade)
+    bpy.ops.object.select_all(action="DESELECT")
+    for p in parts:
+        p.select_set(True)
+    hub_obj.select_set(True)
+    bpy.context.view_layer.objects.active = hub_obj
+    bpy.ops.object.join()
+    hub_obj.parent = parent
+    return hub_obj
+
+
+def arm_with_motor(parent, i, angle, inner, length, tube, motor_r, prop_d, z):
+    """A carbon tube arm from the body out to a motor and propeller."""
+    mid = inner + length / 2
+    cylinder(f"Arm_{i}", tube, length, (math.cos(angle) * mid, math.sin(angle) * mid, z), M["carbon"], parent,
+             rot=(0, math.radians(90), angle), verts=12)
+    tip = inner + length
+    mx, my = math.cos(angle) * tip, math.sin(angle) * tip
+    cylinder(f"Motor_{i}", motor_r, motor_r * 1.3, (mx, my, z + motor_r * 0.6), M["motor"], parent)
+    propeller(f"Prop_{i}", parent, (mx, my, z + motor_r * 1.4), prop_d)
+
+
+# ---------- drones ----------
+
+def build_scout():
+    r = root("Drone_Scout")
+    # Body: lower frame plate plus a rounded top shell, nose toward -Y.
+    box("Frame", (0.30, 0.46, 0.04), (0, 0, 0), M["carbon"], r, bevel=0.008)
+    box("Shell", (0.24, 0.38, 0.09), (0, 0.01, 0.06), M["shell_gray"], r, bevel=0.03)
+    cylinder("GpsPuck", 0.045, 0.02, (0, 0.08, 0.115), M["shell_gray"], r)
+    for i, a in enumerate([45, 135, 225, 315]):
+        arm_with_motor(r, i, math.radians(a), 0.12, 0.30, 0.014, 0.035, 0.36, 0.0)
+    # Camera gimbal under the nose.
+    cylinder("GimbalMount", 0.02, 0.04, (0, -0.17, -0.04), M["motor"], r)
+    sphere("CameraBall", 0.045, (0, -0.17, -0.08), M["shell_gray"], r)
+    cylinder("CameraLens", 0.022, 0.02, (0, -0.21, -0.08), M["lens"], r, rot=(math.radians(90), 0, 0))
+    # Landing skids.
+    for side in (-1, 1):
+        cylinder(f"SkidLeg_{side}", 0.006, 0.12, (side * 0.12, 0, -0.07), M["carbon"], r, verts=8)
+        cylinder(f"Skid_{side}", 0.008, 0.36, (side * 0.12, 0, -0.13), M["carbon"], r,
+                 rot=(math.radians(90), 0, 0), verts=8)
+    # Nav lights: green at the nose, red at the tail.
+    sphere("LedFront", 0.012, (0, -0.235, 0.0), M["led_green"], r)
+    sphere("LedRear", 0.012, (0, 0.235, 0.0), M["led_red"], r)
+    return r
+
+
+def build_strike():
+    r = root("Drone_Strike")
+    box("Frame", (0.50, 0.70, 0.06), (0, 0, 0), M["carbon"], r, bevel=0.01)
+    box("Shell", (0.42, 0.62, 0.16), (0, 0, 0.10), M["olive"], r, bevel=0.05)
+    box("Battery", (0.24, 0.36, 0.08), (0, 0.06, 0.21), M["carbon"], r, bevel=0.015)
+    cylinder("GpsMast", 0.008, 0.10, (0, 0.20, 0.28), M["carbon"], r, verts=8)
+    cylinder("GpsPuck", 0.05, 0.022, (0, 0.20, 0.34), M["olive"], r)
+    for i in range(6):
+        a = math.radians(30 + 60 * i)
+        arm_with_motor(r, i, a, 0.20, 0.46, 0.022, 0.05, 0.50, 0.02)
+    # Twin missile rails under the body.
+    for side in (-1, 1):
+        x = side * 0.17
+        box(f"Rail_{side}", (0.03, 0.55, 0.03), (x, 0, -0.06), M["carbon"], r, bevel=0.005)
+        cylinder(f"Missile_{side}", 0.035, 0.55, (x, -0.02, -0.11), M["white"], r, rot=(math.radians(90), 0, 0))
+        sphere(f"MissileSeeker_{side}", 0.035, (x, -0.295, -0.11), M["tip_red"], r, scale=(1, 1.6, 1))
+        for k in range(4):
+            fa = math.radians(45 + 90 * k)
+            box(f"Fin_{side}_{k}", (0.004, 0.06, 0.05),
+                (x + math.cos(fa) * 0.045, 0.23, -0.11 + math.sin(fa) * 0.045), M["white"], r,
+                rot=(0, fa, 0), bevel=0)
+    cylinder("TargetingPod", 0.05, 0.1, (0, -0.30, -0.06), M["olive"], r, rot=(math.radians(90), 0, 0))
+    cylinder("PodLens", 0.035, 0.012, (0, -0.355, -0.06), M["lens"], r, rot=(math.radians(90), 0, 0))
+    sphere("LedFront", 0.015, (0, -0.36, 0.02), M["led_green"], r)
+    sphere("LedRear", 0.015, (0, 0.36, 0.02), M["led_red"], r)
+    return r
+
+
+def build_kamikaze():
+    r = root("Drone_Kamikaze")
+    # Bare FPV racing frame with a warhead strapped underneath, pointing forward.
+    box("Frame", (0.10, 0.22, 0.02), (0, 0, 0), M["carbon"], r, bevel=0.004)
+    box("Stack", (0.07, 0.08, 0.04), (0, 0.01, 0.03), M["carbon"], r, bevel=0.006)
+    box("Battery", (0.06, 0.14, 0.035), (0, 0.02, 0.07), M["shell_gray"], r, bevel=0.008)
+    box("FpvCam", (0.035, 0.03, 0.03), (0, -0.10, 0.03), M["shell_gray"], r, rot=(math.radians(-20), 0, 0), bevel=0.004)
+    cylinder("FpvLens", 0.011, 0.012, (0, -0.118, 0.035), M["lens"], r, rot=(math.radians(70), 0, 0), verts=12)
+    for i, a in enumerate([45, 135, 225, 315]):
+        arm_with_motor(r, i, math.radians(a), 0.05, 0.13, 0.009, 0.025, 0.20, 0.0)
+    cylinder("Antenna", 0.003, 0.09, (0, 0.11, 0.06), M["carbon"], r, rot=(math.radians(-35), 0, 0), verts=6)
+    # Warhead: an RPG-style round with a stand-off probe.
+    cylinder("Warhead", 0.04, 0.30, (0, -0.03, -0.06), M["warhead"], r, rot=(math.radians(90), 0, 0))
+    sphere("WarheadNose", 0.04, (0, -0.18, -0.06), M["warhead"], r, scale=(1, 1.8, 1))
+    cylinder("Probe", 0.006, 0.08, (0, -0.28, -0.06), M["motor"], r, rot=(math.radians(90), 0, 0), verts=8)
+    cylinder("Band", 0.043, 0.02, (0, 0.05, -0.06), M["tip_red"], r, rot=(math.radians(90), 0, 0))
+    for side in (-1, 1):
+        box(f"Strap_{side}", (0.01, 0.012, 0.07), (side * 0.03, 0.0, -0.025), M["carbon"], r, bevel=0)
+    return r
+
+def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    builds = [("Drone_Scout", build_scout, 1.4), ("Drone_Strike", build_strike, 2.2), ("Drone_Kamikaze", build_kamikaze, 0.9)]
+    for name, build, cam_distance in builds:
+        reset_scene()
+        M.clear()
+        make_materials()
+        r = build()
+        export(r, os.path.join(OUT_DIR, name + ".fbx"))
+        print(f"EXPORTED {name}")
+        if PREVIEW_DIR:
+            os.makedirs(PREVIEW_DIR, exist_ok=True)
+            render_preview(os.path.join(PREVIEW_DIR, name + ".png"), cam_distance)
+            print(f"PREVIEW {name}")
+
+
+main()
