@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox
 {
@@ -20,7 +21,7 @@ namespace DroneSandbox
         static readonly Dictionary<Color, Material> matte = new Dictionary<Color, Material>();
         static readonly Dictionary<Color, Material> glowing = new Dictionary<Color, Material>();
 
-        // A new material using the project's lit shader, so colours show up correctly
+        // A new material using the project's lit shader (HDRP Lit), so colours show up correctly
         // (no pink "missing shader" boxes).
         public static Material NewMaterial(Color color, bool glow = false)
         {
@@ -28,19 +29,17 @@ namespace DroneSandbox
             if (glowTemplate == null) glowTemplate = LoadTemplate("Materials/BaseLitGlow");
             var m = new Material(glow ? glowTemplate : template);
             m.color = color;
-            m.SetFloat("_Glossiness", 0.15f); // Built-in Standard shader
-            m.SetFloat("_Smoothness", 0.15f); // URP Lit shader
-            if (glow)
-            {
-                m.EnableKeyword("_EMISSION");
-                m.SetColor("_EmissionColor", color);
-            }
+            m.SetFloat("_Smoothness", 0.15f);
+            if (glow) Glow(m, color);
             return m;
         }
 
-        // URP Lit material assets saved by ProjectSetup. Loading them from Resources keeps the shader (and its
-        // emission variant) in player builds, where a primitive's default material is the unsupported
-        // Built-in one. Without them, fall back to whatever material a new primitive gets.
+        // Makes a material glow this colour. The glow template ignores the camera's exposure, so a glow reads the
+        // same at noon and at midnight (muzzle flashes, lit windows, the thermal view's hot vehicles).
+        public static void Glow(Material m, Color color) => m.SetColor("_EmissiveColor", color.linear * 1.5f);
+
+        // HDRP Lit material assets saved by ProjectSetup. Loading them from Resources keeps the shader in player
+        // builds. Without them, fall back to whatever material a new primitive gets.
         static Material LoadTemplate(string path)
         {
             var m = Resources.Load<Material>(path);
@@ -49,9 +48,9 @@ namespace DroneSandbox
             m = probe.GetComponent<Renderer>().sharedMaterial;
             Discard(probe);
             if (m != null) return m;
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
-            if (shader == null) shader = Shader.Find("Standard");
-            return new Material(shader);
+            m = new Material(Shader.Find("HDRP/Lit"));
+            HDMaterial.ValidateMaterial(m);
+            return m;
         }
 
         public static Material Shared(Color color, bool glow = false)
@@ -82,14 +81,48 @@ namespace DroneSandbox
         // when there's no such model, so callers can fall back to primitive shapes.
         public static GameObject TryModel(string name, Transform parent, float scale = 1f)
         {
-            var prefab = Resources.Load<GameObject>("Models/" + name);
+            var prefab = Resources.Load<GameObject>("Models/" + Variant(name, parent != null ? parent.position : Vector3.zero));
             if (prefab == null) return null;
             var go = Object.Instantiate(prefab, parent, false);
             go.name = name;
             go.transform.localScale = Vector3.one * scale;
             foreach (var c in go.GetComponentsInChildren<Collider>()) Discard(c);
             UsePhotoMaterials(go);
+            var lods = go.GetComponent<LODGroup>();
+            if (lods != null) TuneLods(lods);
             return go;
+        }
+
+        static readonly Dictionary<string, int> variantCounts = new Dictionary<string, int>();
+
+        // Some models come in several versions, "<name>", "<name>_V2", "<name>_V3".. (the trees, so a wood isn't
+        // the same tree over and over). Picks one by where it stands, so the same place always gets the same one.
+        static string Variant(string name, Vector3 at)
+        {
+            if (!variantCounts.TryGetValue(name, out int extra))
+            {
+                while (Resources.Load<GameObject>("Models/" + name + "_V" + (extra + 2)) != null) extra++;
+                variantCounts[name] = extra;
+            }
+            if (extra == 0) return name;
+            int hash = (Mathf.FloorToInt(at.x * 3.7f) * 73856093) ^ (Mathf.FloorToInt(at.z * 3.7f) * 19349663);
+            int pick = (hash & 0x7fffffff) % (extra + 1);
+            return pick == 0 ? name : name + "_V" + (pick + 1);
+        }
+
+        // Models with _LOD0/_LOD1/_LOD2 meshes get a LOD group from the importer. Trees (three levels): full detail
+        // while the model fills more than about a fifth of the screen's height, the lighter version down to a
+        // twentieth, then the flat billboard; gone when it's a speck. The photo scans (Tools/Blender/import_scans.py)
+        // have no billboard, so their last level has to last until they're a speck: rocks and shrubs (two levels)
+        // switch to the decimated mesh below about a seventh of the screen, and small plants (one level) only drop
+        // out when they're a few pixels tall.
+        static void TuneLods(LODGroup group)
+        {
+            var lods = group.GetLODs();
+            float[] heights = lods.Length >= 3 ? new[] { 0.22f, 0.05f, 0.003f }
+                : lods.Length == 2 ? new[] { 0.15f, 0.005f } : new[] { 0.008f };
+            for (int i = 0; i < lods.Length && i < heights.Length; i++) lods[i].screenRelativeTransitionHeight = heights[i];
+            group.SetLODs(lods);
         }
 
         static Dictionary<string, Material> photoMaterials;

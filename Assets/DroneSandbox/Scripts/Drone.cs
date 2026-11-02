@@ -3,12 +3,17 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    public enum DroneType { Scout, Strike, Kamikaze }
+    public enum DroneType { Scout, Strike, Kamikaze, Bomber }
 
     // A player drone. It flies at its own cruise altitude, follows move and attack
     // orders, and fires on enemies in range by itself when it has nothing to do.
+    // The Nightjar bomber (from the tech shop) drops bombs instead, then flies home to rearm.
     public class Drone : Unit
     {
+        public const int BomberLoad = 3;
+        const float RearmSeconds = 15f;
+        const float BombHitMoving = 0.7f, BombHitStill = 0.95f; // odds a bomb lands on target
+
         public DroneType type;
         public float speed;
         public float altitude;
@@ -24,14 +29,25 @@ namespace DroneSandbox
         float bobOffset;
         Transform body;
         readonly List<Transform> rotors = new List<Transform>();
+        readonly List<GameObject> bombModels = new List<GameObject>();
+        bool returning;    // a bomber out of bombs, on its way home
+        float rearmTimer;  // a bomber loading up over its pad
+        Vector3 homePad;
 
         public bool IsKamikaze => type == DroneType.Kamikaze;
+        public bool IsBomber => type == DroneType.Bomber;
+        public int BombsLeft { get; private set; }
+        public Unit AttackTarget => attackTarget;
+
+        // The Nightjar always carries a thermal camera; Scouts do once the Wren-T camera is bought.
+        public bool HasThermal => IsBomber || (type == DroneType.Scout && Tech.Active(TechId.ThermalCamera));
 
         public string Status
         {
             get
             {
-                if (attackTarget != null) return (IsKamikaze ? "Diving on " : "Attacking ") + attackTarget.unitName;
+                if (IsBomber && BombsLeft == 0) return returning ? "Returning to rearm" : $"Rearming ({Mathf.CeilToInt(rearmTimer)} s)";
+                if (attackTarget != null) return (IsKamikaze ? "Diving on " : IsBomber ? "Bombing " : "Attacking ") + attackTarget.unitName;
                 if (moveTarget.HasValue) return "Moving";
                 return "Hovering";
             }
@@ -77,7 +93,22 @@ namespace DroneSandbox
                     weaponRange = 0f; weaponDamage = 110f; fireInterval = 0f;
                     modelScale = 2.2f;
                     break;
+
+                case DroneType.Bomber:
+                    // Drops a bomb when it's over the target (weaponRange is across the ground), one at a time
+                    // so the first can land before the next falls.
+                    unitName = "Nightjar";
+                    maxHp = 130f; speed = 8f; altitude = 12f; radius = 1.6f;
+                    weaponRange = 2.5f; weaponDamage = 75f; fireInterval = 1.4f;
+                    modelScale = 1.6f;
+                    BombsLeft = BomberLoad;
+                    break;
             }
+
+            // Upgrades from the tech shop.
+            if (Tech.Active(TechId.Armour)) maxHp *= Tech.ArmourBonus;
+            if (Tech.Active(TechId.Motors)) speed *= Tech.MotorBonus;
+            if (Tech.Active(TechId.Warheads)) weaponDamage *= Tech.WarheadBonus;
             hp = maxHp;
             bobOffset = Random.value * 10f;
 
@@ -86,7 +117,11 @@ namespace DroneSandbox
             if (model != null)
             {
                 foreach (var t in model.GetComponentsInChildren<Transform>())
+                {
                     if (t.name.StartsWith("Prop")) rotors.Add(t);
+                    if (t.name.StartsWith("Bomb_")) bombModels.Add(t.gameObject);
+                }
+                bombModels.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             }
             else
             {
@@ -113,6 +148,12 @@ namespace DroneSandbox
                     Art.Part(PrimitiveType.Capsule, body, new Vector3(0f, -0.05f, 0.4f), new Vector3(0.22f, 0.3f, 0.22f),
                         Art.EnemyRed, new Vector3(90f, 0f, 0f)); // warhead
                     break;
+                case DroneType.Bomber:
+                    BuildQuadcopter(1.2f, 0.9f, Art.EnemyOliveDark);
+                    for (int i = 0; i < BomberLoad; i++)
+                        bombModels.Add(Art.Part(PrimitiveType.Capsule, body, new Vector3(i % 2 == 0 ? -0.15f : 0.15f, -0.35f, i < 2 ? 0.2f : -0.2f),
+                            new Vector3(0.12f, 0.18f, 0.12f), Art.Dark, new Vector3(90f, 0f, 0f)));
+                    break;
             }
         }
 
@@ -137,14 +178,19 @@ namespace DroneSandbox
 
         // ---- Orders ----
 
+        // A bomber out of bombs ignores orders until it has rearmed.
+        bool BusyRearming => IsBomber && BombsLeft == 0;
+
         public void MoveTo(Vector3 point)
         {
+            if (BusyRearming) return;
             moveTarget = point;
             attackTarget = null;
         }
 
         public void Attack(Unit target)
         {
+            if (BusyRearming) return;
             attackTarget = target;
             attackOrdered = true;
             moveTarget = null;
@@ -152,6 +198,7 @@ namespace DroneSandbox
 
         public void Stop()
         {
+            if (BusyRearming) return;
             moveTarget = null;
             attackTarget = null;
         }
@@ -165,6 +212,11 @@ namespace DroneSandbox
             fireCooldown -= dt;
 
             if (attackTarget != null && !attackTarget.IsAlive) attackTarget = null;
+            if (BusyRearming)
+            {
+                Rearm(dt);
+                return;
+            }
 
             // Idle gun and missile drones engage the nearest enemy in range on their own.
             if (attackTarget == null && !moveTarget.HasValue && !IsKamikaze)
@@ -280,8 +332,49 @@ namespace DroneSandbox
             return push;
         }
 
+        // An empty bomber flies back to its pad, settles low over it and loads a new set of bombs.
+        void Rearm(float dt)
+        {
+            Vector3 pad = Ground.OnGround(homePad);
+            if (returning)
+            {
+                Vector3 flat = pad - transform.position;
+                flat.y = 0f;
+                if (flat.magnitude < 1f)
+                {
+                    returning = false;
+                    rearmTimer = RearmSeconds;
+                }
+                Fly(new Vector3(pad.x, CruiseHeight(pad), pad.z), false, dt);
+                return;
+            }
+            rearmTimer -= dt;
+            Fly(pad + Vector3.up * 1.6f, false, dt);
+            if (rearmTimer > 0f) return;
+            BombsLeft = BomberLoad;
+            foreach (var bomb in bombModels) bomb.SetActive(true);
+        }
+
+        void DropBomb()
+        {
+            BombsLeft--;
+            if (BombsLeft < bombModels.Count) bombModels[BombsLeft].SetActive(false);
+            float hitChance = attackTarget is EnemyUnit enemy && enemy.IsMoving ? BombHitMoving : BombHitStill;
+            Projectile.Bomb(transform.position + Vector3.down * 0.7f, attackTarget, team, weaponDamage, 4.5f, velocity, hitChance);
+            if (BombsLeft > 0) return;
+            returning = true;
+            attackTarget = null;
+            moveTarget = null;
+            homePad = SandboxGame.Instance.basePosition + new Vector3(Random.Range(-5f, 5f), 0f, Random.Range(-5f, 5f));
+        }
+
         void Fire()
         {
+            if (IsBomber)
+            {
+                DropBomb();
+                return;
+            }
             Vector3 muzzle = transform.position + transform.forward * radius * 0.6f + Vector3.down * 0.2f;
             if (type == DroneType.Scout)
                 Projectile.Bullet(muzzle, attackTarget, team, weaponDamage, 0.8f, new Color(1f, 0.9f, 0.4f));

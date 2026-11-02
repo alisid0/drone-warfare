@@ -55,6 +55,26 @@ namespace DroneSandbox
             p.velocity = (launchDirection + Vector3.down * 0.3f).normalized * p.speed * 0.6f;
         }
 
+        // A bomb dropped from a hovering bomber. It falls with the drone's own speed and its fins steer it
+        // onto the target. hitChance is the odds (0-1) it lands on target; a miss lands 6-8 m away.
+        public static void Bomb(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 dropVelocity,
+            float hitChance)
+        {
+            var p = Spawn(from, target, team, new Vector3(0.2f, 0.32f, 0.2f), new Color(0.2f, 0.21f, 0.13f));
+            if (Random.value > hitChance)
+            {
+                Vector2 off = Random.insideUnitCircle.normalized * Random.Range(6f, 8f);
+                p.aimPoint = Ground.OnGround(target.transform.position + new Vector3(off.x, 0f, off.y));
+                p.target = null;
+            }
+            p.speed = 20f;
+            p.damage = damage;
+            p.blastRadius = blastRadius;
+            p.turnRate = 4f;
+            p.life = 6f;
+            p.velocity = dropVelocity + Vector3.down * 2f;
+        }
+
         void Update()
         {
             float dt = Time.deltaTime;

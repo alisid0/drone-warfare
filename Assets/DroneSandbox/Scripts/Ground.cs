@@ -10,7 +10,7 @@ namespace DroneSandbox
     {
         public const float Size = 480f;   // terrain is Size x Size metres, centred on the map
         const float Sink = 8f;            // terrain sits this far below y = 0, so the river and hollows can dip below the flat sites
-        const float HeightRange = 60f;
+        const float HeightRange = 80f;
         const int HeightRes = 513;
         const int SplatRes = 1024;
 
@@ -104,6 +104,7 @@ namespace DroneSandbox
                     world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
                 }
             }
+            Reservoir(world, step); // before the roads, so a road past the lake follows its banks
 
             // Roads follow a smoothed copy of the ground, sunk in a little.
             for (int i = 0; i < roads.points.Count; i++) roads.values[i] = Sample(world, roads.points[i]);
@@ -148,7 +149,7 @@ namespace DroneSandbox
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
                     float d = river.Query(x, z, out float water, out _);
-                    if (d > hw + 45f) continue;
+                    if (d > hw + 45f || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
                     float h = world[zi, xi];
                     if (d <= hw)
                     {
@@ -164,11 +165,83 @@ namespace DroneSandbox
                 }
             }
 
+            BelowDam(world, step, river.values[0]);
+
             var heights = new float[HeightRes, HeightRes];
             for (int zi = 0; zi < HeightRes; zi++)
                 for (int xi = 0; xi < HeightRes; xi++)
                     heights[zi, xi] = Mathf.Clamp01((world[zi, xi] + Sink) / HeightRange);
             return heights;
+        }
+
+        // The lake: a basin under the water with a shallow shelf at the edge, then banks rising gently out of it
+        // (about 12 degrees) and easing into the natural hills further out. Where the dam's ends meet the valley
+        // sides the ground comes up to the road on its crest.
+        static void Reservoir(float[,] world, float step)
+        {
+            float level = MapLayout.LakeLevel, crest = level + 2.1f;
+            for (int zi = 0; zi < HeightRes; zi++)
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float s = MapLayout.LakeDistance(x, z);
+                    Vector2 local = MapLayout.DamLocal(x, z);
+                    bool nearDam = local.x > -20f && local.x < 25f && Mathf.Abs(local.y) < 80f;
+                    if (s > 60f && !nearDam) continue;
+                    float h = world[zi, xi];
+                    float bumps = (Mathf.PerlinNoise(x * 0.07f + 13f, z * 0.07f + 77f) - 0.5f) * 2.5f;
+                    if (s < 0f)
+                    {
+                        h = Mathf.Min(h, level - Mathf.Min(14f, 0.4f - s * 0.28f) + bumps * 0.3f);
+                    }
+                    else if (local.x < -1f || Mathf.Abs(local.y) > MapLayout.DamHalfSpan)
+                    {
+                        float bank = level + 0.3f + s * 0.21f + bumps * Mathf.Clamp01(s / 8f);
+                        float natural = Mathf.SmoothStep(0f, 1f, (s - 10f) / 45f);
+                        float upstream = 1f - Mathf.SmoothStep(0f, 1f, (local.x - 5f) / 25f); // nothing to bank downstream
+                        h = Mathf.Lerp(h, Mathf.Lerp(bank, h, natural), upstream);
+                    }
+                    // The valley sides the dam is built into, up to the road on its crest.
+                    float side = Mathf.Abs(local.y);
+                    if (nearDam && side > MapLayout.DamHalfSpan)
+                    {
+                        float abutment = crest + Mathf.Max(0f, side - 44f) * 0.35f + bumps * 0.5f;
+                        float weight = (1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(local.x - 2f) - 14f) / 8f))
+                                     * (1f - Mathf.SmoothStep(0f, 1f, (side - 70f) / 10f));
+                        h = Mathf.Lerp(h, Mathf.Max(h, abutment), weight);
+                    }
+                    world[zi, xi] = h;
+                }
+            }
+        }
+
+        // Below the dam: a rocky gorge whose sides climb from the river to the ends of the dam, opening out
+        // downstream, and a wide plunge pool where the spillway lands.
+        static void BelowDam(float[,] world, float step, float water)
+        {
+            float crest = MapLayout.LakeLevel + 2.1f;
+            for (int zi = 0; zi < HeightRes; zi++)
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    Vector2 local = MapLayout.DamLocal(x, z);
+                    if (local.x < -2f || local.x > 50f || Mathf.Abs(local.y) > 60f) continue;
+                    float h = world[zi, xi];
+                    float side = Mathf.Abs(local.y);
+                    float bumps = (Mathf.PerlinNoise(x * 0.11f + 31f, z * 0.11f + 5f) - 0.5f) * 2f;
+                    float open = 1f - Mathf.SmoothStep(0f, 1f, (local.x - 22f) / 26f);
+                    if (side > 12f)
+                    {
+                        float wall = Mathf.Lerp(water + 0.5f, crest, Mathf.SmoothStep(0f, 1f, (side - 12f) / 20f)) + bumps;
+                        h = Mathf.Lerp(h, Mathf.Max(h, wall), open);
+                    }
+                    float pool = Mathf.Pow((local.x - 12f) / 13f, 2f) + Mathf.Pow(local.y / 12f, 2f);
+                    if (pool < 1.2f) h = Mathf.Min(h, water - 0.3f - 1.6f * Mathf.Clamp01(1.2f - pool));
+                    world[zi, xi] = h;
+                }
+            }
         }
 
         // Height above y = 0 before flattening, in metres.
@@ -180,7 +253,7 @@ namespace DroneSandbox
             // Ridges beyond the playable area so the battlefield sits in a valley, with a gap for the river.
             float edge = Mathf.InverseLerp(95f, 230f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
             float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f) / 55f);
-            h += edge * edge * 32f * (0.7f + 0.6f * Mathf.PerlinNoise(x * 0.015f, z * 0.015f)) * valley;
+            h += edge * edge * 40f * (0.7f + 0.6f * Mathf.PerlinNoise(x * 0.015f, z * 0.015f)) * valley;
             return h;
         }
 
@@ -270,7 +343,7 @@ namespace DroneSandbox
                 normalMapTexture = normal,
                 tileSize = new Vector2(tile, tile),
                 diffuseRemapMin = Vector4.zero,
-                diffuseRemapMax = diffuse != null ? (Vector4)tint : Vector4.one, // URP Terrain Lit multiplies the layer by this
+                diffuseRemapMax = diffuse != null ? (Vector4)tint : Vector4.one, // the terrain shader multiplies the layer by this
             };
         }
 
@@ -302,6 +375,14 @@ namespace DroneSandbox
                     // Muddy river banks.
                     float dRiver = river.Distance(x, z);
                     if (dRiver < hw + 4f) dirt = Mathf.Max(dirt, 0.9f * (1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw - 0.5f) / 3f)));
+                    // The lake: a stony shore just above the water, and a rocky bed you see through the shallows.
+                    float lake = MapLayout.LakeDistance(x, z);
+                    if (lake < 3f)
+                    {
+                        float shore = 1f - Mathf.SmoothStep(0f, 1f, (lake - 0.5f) / 2.5f);
+                        rock = Mathf.Max(rock, shore * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.15f + 50f, z * 0.15f) * 1.6f - 0.3f));
+                        dirt = Mathf.Max(dirt, shore);
+                    }
                     // A few worn patches.
                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
                     float variation = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.013f + 70f, z * 0.013f + 20f) * 0.7f

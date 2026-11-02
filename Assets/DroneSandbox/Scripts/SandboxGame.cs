@@ -11,6 +11,7 @@ namespace DroneSandbox
     // - Sandbox: free play. Destroyed enemies respawn and you can launch drones any time.
     // - Mission (Asset Hunt): destroy a mission's targets with a fixed stock of drones. Some targets are
     //   hidden until a drone flies close, a convoy may try to get away, and you earn stars for using few drones.
+    //   Every enemy destroyed earns points for the tech shop (see Tech), which adds drones and upgrades.
     public class SandboxGame : MonoBehaviour
     {
         public const int MaxDrones = 30;
@@ -43,13 +44,15 @@ namespace DroneSandbox
         public int DronesUsed { get; private set; }
         public int TargetsTotal { get; private set; }
         public int TargetsDestroyed { get; private set; }
+        public int PointsEarned { get; private set; }  // this mission, kills plus the bonus for new stars
+        public int StarBonus { get; private set; }
         public string Message { get; private set; }
         public float MessageUntil { get; private set; }
 
         // Menus, the briefing and the results panel take the mouse and keyboard.
         public bool UiBlocking => Mode == GameMode.Menu || BriefingOpen || Result != MissionResult.None;
 
-        readonly int[] stock = new int[3];
+        readonly int[] stock = new int[4];
         RtsController rts;
 
         void Awake()
@@ -66,6 +69,7 @@ namespace DroneSandbox
             var hud = gameObject.AddComponent<SandboxHud>();
             rts.Init(this, hud, cam, basePosition + new Vector3(12f, 0f, 12f));
             hud.Init(this, rts);
+            gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
             OpenMenu();
         }
 
@@ -102,7 +106,7 @@ namespace DroneSandbox
             Mode = GameMode.Mission;
             MissionIndex = index;
             Mission = Missions.All[index];
-            for (int t = 0; t < 3; t++) stock[t] = Mission.Stock((DroneType)t);
+            for (int t = 0; t < stock.Length; t++) stock[t] = MissionStock(Mission, (DroneType)t);
             rts.Orbit(false);
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
 
@@ -161,6 +165,19 @@ namespace DroneSandbox
         // -1 in the sandbox, where launches are unlimited.
         public int StockLeft(DroneType type) => Mode == GameMode.Mission ? stock[(int)type] : -1;
 
+        // A mission's own drones plus what the tech shop adds: the supply contract's extra drones and the Nightjar.
+        public static int MissionStock(Mission mission, DroneType type)
+        {
+            if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) ? 1 : 0;
+            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0);
+        }
+
+        // The Nightjar's launch button shows in free play, and in missions once it's bought.
+        public bool BomberAvailable => Mode == GameMode.Sandbox || (Mode == GameMode.Mission && Tech.Owns(TechId.Nightjar));
+
+        // How close a drone must fly to spot a hidden enemy; long-range optics push it out.
+        public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;
+
         public static int BestStars(int missionIndex) => PlayerPrefs.GetInt($"mission{missionIndex}.stars", 0);
 
         public static bool Unlocked(int missionIndex) => missionIndex == 0 || BestStars(missionIndex - 1) > 0;
@@ -182,21 +199,27 @@ namespace DroneSandbox
             Result = MissionResult.None;
             BriefingOpen = false;
             MissionTime = 0f;
-            DronesUsed = TargetsTotal = TargetsDestroyed = 0;
+            DronesUsed = TargetsTotal = TargetsDestroyed = PointsEarned = StarBonus = 0;
             Message = null;
             Time.timeScale = 1f;
         }
 
         // ---- Mission flow ----
 
-        // Thermal view comes from a Scout's camera, so it needs one in the air.
+        // Thermal view comes from a drone's thermal camera (a Wren-T Scout or a Nightjar), so it needs one in the air.
+        bool ThermalInAir => drones.Exists(d => d.HasThermal);
+
         public void ToggleThermal()
         {
             var dayNight = DayNight.Instance;
             if (dayNight == null || UiBlocking) return;
-            if (!dayNight.Thermal && !drones.Exists(d => d.type == DroneType.Scout))
+            if (!dayNight.Thermal && !ThermalInAir)
             {
-                ShowMessage("Thermal view needs a Scout in the air");
+                bool scouts = Tech.Active(TechId.ThermalCamera), nightjar = BomberAvailable;
+                ShowMessage(scouts && nightjar ? "Thermal view needs a Scout or Nightjar in the air"
+                    : scouts ? "Thermal view needs a Scout in the air"
+                    : nightjar ? "Thermal view needs the Nightjar in the air"
+                    : "No thermal camera: buy the Wren-T in the Tech shop", 3.5f);
                 return;
             }
             dayNight.SetThermal(!dayNight.Thermal);
@@ -205,21 +228,23 @@ namespace DroneSandbox
         void Update()
         {
             var dayNight = DayNight.Instance;
-            if (dayNight != null && dayNight.Thermal && !drones.Exists(d => d.type == DroneType.Scout))
+            if (dayNight != null && dayNight.Thermal && !ThermalInAir)
             {
                 dayNight.SetThermal(false);
-                ShowMessage("Thermal lost: no Scout in the air");
+                ShowMessage("Thermal lost: no thermal camera in the air");
             }
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
             MissionTime += Time.deltaTime;
             SpotHidden();
-            bool dronesLeft = drones.Count > 0 || stock[0] + stock[1] + stock[2] > 0;
+            bool dronesLeft = drones.Count > 0;
+            foreach (int left in stock) dronesLeft |= left > 0;
             if (!dronesLeft && TargetsDestroyed < TargetsTotal) Finish(false, "Out of drones.");
         }
 
-        // A hidden enemy shows itself once any of your drones flies within SpotRange of it.
+        // A hidden enemy shows itself once any of your drones flies within SpotDistance of it.
         void SpotHidden()
         {
+            float spot = SpotDistance;
             foreach (var e in enemies.ToArray())
             {
                 if (e == null || !e.Hidden) continue;
@@ -227,7 +252,7 @@ namespace DroneSandbox
                 {
                     Vector3 offset = d.transform.position - e.transform.position;
                     offset.y = 0f;
-                    if (offset.magnitude > SpotRange) continue;
+                    if (offset.magnitude > spot) continue;
                     e.Reveal();
                     break;
                 }
@@ -248,6 +273,12 @@ namespace DroneSandbox
             Result = won ? MissionResult.Won : MissionResult.Failed;
             ResultReason = reason;
             Stars = !won ? 0 : DronesUsed <= Mission.par ? 3 : DronesUsed <= Mission.par + 2 ? 2 : 1;
+            StarBonus = Mathf.Max(0, Stars - BestStars(MissionIndex)) * Tech.PointsPerNewStar; // only stars you didn't have
+            if (StarBonus > 0)
+            {
+                Tech.Earn(StarBonus);
+                PointsEarned += StarBonus;
+            }
             if (SaveProgress && Stars > BestStars(MissionIndex))
             {
                 PlayerPrefs.SetInt($"mission{MissionIndex}.stars", Stars);
@@ -278,11 +309,12 @@ namespace DroneSandbox
             {
                 if (stock[(int)type] <= 0)
                 {
-                    ShowMessage($"No {type} drones left");
+                    ShowMessage(type == DroneType.Bomber ? (BomberAvailable ? "The Nightjar is already flying" : "Buy the Nightjar in the Tech shop")
+                        : $"No {type} drones left");
                     return null;
                 }
                 stock[(int)type]--;
-                DronesUsed++;
+                DronesUsed += type == DroneType.Bomber ? 2 : 1; // the Nightjar counts double towards the stars
             }
             Vector3 pad = basePosition + new Vector3(Random.Range(-5f, 5f), 1f, Random.Range(-5f, 5f));
             var drone = Drone.Create(type, pad);
@@ -317,11 +349,17 @@ namespace DroneSandbox
                     Vector3 respawnAt = enemy.IsMobile ? RandomEnemyPoint() : enemy.transform.position;
                     StartCoroutine(RespawnLater(enemy.type, respawnAt));
                 }
-                else if (Mode == GameMode.Mission && enemy.isTarget && Result == MissionResult.None)
+                else if (Mode == GameMode.Mission)
                 {
-                    TargetsDestroyed++;
-                    ShowMessage($"{enemy.unitName} destroyed  ({TargetsDestroyed}/{TargetsTotal})");
-                    if (TargetsDestroyed >= TargetsTotal) Finish(true, "All targets destroyed.");
+                    int value = Tech.KillValue(enemy.type);
+                    Tech.Earn(value);
+                    PointsEarned += value;
+                    if (enemy.isTarget && Result == MissionResult.None)
+                    {
+                        TargetsDestroyed++;
+                        ShowMessage($"{enemy.unitName} destroyed  ({TargetsDestroyed}/{TargetsTotal})   +{value} pts");
+                        if (TargetsDestroyed >= TargetsTotal) Finish(true, "All targets destroyed.");
+                    }
                 }
             }
         }

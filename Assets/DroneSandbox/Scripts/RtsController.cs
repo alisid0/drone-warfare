@@ -51,6 +51,12 @@ namespace DroneSandbox
         {
             if (Cam == null) return;
             selected.RemoveAll(d => d == null || !d.IsAlive);
+            if (PhotoMode.Active)
+            {
+                IsDragging = false;
+                HoveredEnemy = null;
+                return; // the photo camera has the controls
+            }
             if (game.UiBlocking)
             {
                 // Menus and mission panels have the mouse; only the menu's slow orbit moves the camera.
@@ -93,6 +99,9 @@ namespace DroneSandbox
             ApplyCamera();
         }
 
+        // Puts the camera back where the RTS view had it (after photo mode).
+        public void Restore() => ApplyCamera();
+
         void ApplyCamera()
         {
             // Look more steeply down when zoomed out, flatter when zoomed in.
@@ -118,6 +127,7 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Launch1)) game.SpawnDrone(DroneType.Scout);
             if (GameInput.Pressed(GameKey.Launch2)) game.SpawnDrone(DroneType.Strike);
             if (GameInput.Pressed(GameKey.Launch3)) game.SpawnDrone(DroneType.Kamikaze);
+            if (GameInput.Pressed(GameKey.Launch4) && game.BomberAvailable) game.SpawnDrone(DroneType.Bomber);
             if (GameInput.Pressed(GameKey.Thermal)) game.ToggleThermal();
             if (GameInput.Pressed(GameKey.SkipTime) && game.Mode == GameMode.Sandbox && DayNight.Instance != null)
                 DayNight.Instance.SetTime(DayNight.Instance.hour + 2f, DayNight.Instance.hoursPerMinute);

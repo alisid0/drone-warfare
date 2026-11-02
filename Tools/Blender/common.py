@@ -196,9 +196,10 @@ def box_uvs(obj):
     """Box-projected UVs in world metres (1 UV unit = 1 m), so Unity can lay tiling photo textures over the
     model at a real-world scale. Each face takes the two axes across its normal."""
     import bmesh
+    single_uv_layer(obj)
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    uv = bm.loops.layers.uv.verify()
+    uv = bm.loops.layers.uv["UVMap"]
     world = obj.matrix_world
     turn = world.to_3x3()
     for face in bm.faces:
@@ -209,6 +210,27 @@ def box_uvs(obj):
             loop[uv].uv = (co.y, co.z) if axis == 0 else (co.x, co.z) if axis == 1 else (co.x, co.y)
     bm.to_mesh(obj.data)
     bm.free()
+
+
+SECOND_UV = "UVFall"  # an optional second UV set (Unity's uv2), kept through joins; see make_dam.water_sheet
+
+
+def single_uv_layer(obj, second=False):
+    """Gives a mesh exactly one UV layer, named UVMap (plus UVFall, second, when asked). Meshes built from raw
+    vertices start with none, and bmesh would name a new one Float2; when parts with different layer names are
+    joined, the model ends up with two layers and Unity reads only the first, so half the parts got all-zero UVs
+    (one flat colour)."""
+    layers = obj.data.uv_layers
+    if "UVMap" not in layers:
+        if len(layers) > 0 and layers[0].name != SECOND_UV:
+            layers[0].name = "UVMap"
+        else:
+            layers.new(name="UVMap")
+    for layer in [l for l in layers if l.name != "UVMap" and not (second and l.name == SECOND_UV)]:
+        layers.remove(layer)
+    if second and SECOND_UV not in layers:
+        layers.new(name=SECOND_UV)
+    layers.active = layers["UVMap"]
 
 
 def box_uv_all(root_obj):
@@ -237,9 +259,12 @@ def join_meshes(root_obj):
         o.select_set(True)
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.convert(target="MESH")
+    # If any part has a second UV set, every part gets one (unused, a copy of its first), so they line up.
+    second = any(SECOND_UV in o.data.uv_layers for o in meshes)
     for o in meshes:
         if not o.get("keep_uv"):  # leaf cards keep their own 0-1 UVs
             box_uvs(o)
+        single_uv_layer(o, second)
     bpy.ops.object.join()
     joined = bpy.context.view_layer.objects.active
     joined.name = root_obj.name + "_Mesh"

@@ -4,7 +4,6 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.Rendering.Universal;
 
 namespace DroneSandbox.EditorTools
 {
@@ -50,7 +49,7 @@ namespace DroneSandbox.EditorTools
             cam.transform.LookAt(new Vector3(-20f, 0f, -20f));
             cam.farClipPlane = 900f;
             cam.allowHDR = true;
-            cameraObject.AddComponent<UniversalAdditionalCameraData>().renderPostProcessing = true;
+            Atmosphere.SetUpCamera(cam);
             var target = new RenderTexture(1600, 900, 24);
             cam.targetTexture = target;
             cam.Render();

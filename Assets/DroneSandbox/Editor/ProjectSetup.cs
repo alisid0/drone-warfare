@@ -8,9 +8,9 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox.EditorTools
 {
-    // One-time project configuration: player settings, URP shadow quality, fog stripping, the assets the game
-    // loads from Resources (materials, water, post-processing profile, HDRI sky), and the main scene's lighting
-    // and map preview. Safe to run again.
+    // One-time project configuration: player settings, the HDRP pipeline (see HdrpSetup), the assets the game
+    // loads from Resources (HDRP Lit materials, the environment and photo-mode profiles, the night sky), and the
+    // main scene's lighting and map preview. Safe to run again.
     // Command line:  Unity.exe -batchmode -quit -projectPath . -executeMethod DroneSandbox.EditorTools.ProjectSetup.Configure
     public static class ProjectSetup
     {
@@ -29,16 +29,20 @@ namespace DroneSandbox.EditorTools
             PlayerSettings.resizableWindow = true;
             PlayerSettings.runInBackground = true;
 
-            TuneRenderPipelines();
-            KeepLinearFog();
+            HdrpSetup.UsePipeline();
             CreateBaseMaterials();
             CreateTerrainMaterial();
             CreatePostProcessingProfile();
+            CreatePhotoFocusProfile();
             ImportTerrainTextures();
-            CreateSkyMaterial();
-            CreateWaterMaterial();
+            ImportNightSky();
+            CreateWhiteWater();
+            CreateDamConcrete();
+            CreateGrassMaterials();
+            CreatePatchwork();
             CreateDecalMaterial();
             CreatePbrMaterials();
+            WeatheringSetup.CreateDamDecals();
             AssetDatabase.SaveAssets();
             SetUpMainScene();
 
@@ -46,44 +50,20 @@ namespace DroneSandbox.EditorTools
             Debug.Log("Drone Sandbox: project configured.");
         }
 
-        // Long shadow distance for the high RTS camera, soft shadows, four cascades.
-        static void TuneRenderPipelines()
-        {
-            foreach (string guid in AssetDatabase.FindAssets("t:UniversalRenderPipelineAsset"))
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!path.StartsWith("Assets/")) continue; // package assets are read-only
-                var asset = AssetDatabase.LoadMainAssetAtPath(path);
-                var so = new SerializedObject(asset);
-                Set(so, "m_ShadowDistance", 260f);
-                SetInt(so, "m_ShadowCascadeCount", 4);
-                SetBool(so, "m_SoftShadowsSupported", true);
-                SetInt(so, "m_MainLightShadowmapResolution", 4096);
-                so.ApplyModifiedPropertiesWithoutUndo();
-                Debug.Log("Tuned " + path);
-            }
-        }
-
-        // Templates for the game's runtime-coloured materials (see Art.NewMaterial): a plain URP Lit one and an
-        // emissive one, so player builds keep the Lit shader and its emission variant.
+        // Templates for the game's runtime-coloured materials (see Art.NewMaterial): plain HDRP Lit and an emissive
+        // copy, so player builds keep the Lit shader.
         static void CreateBaseMaterials()
         {
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = HdrpSetup.Lit;
             if (shader == null) return;
             EnsureMaterialsFolder();
             foreach (bool glow in new[] { false, true })
             {
-                string path = Root + (glow ? "/Materials/BaseLitGlow.mat" : "/Materials/BaseLit.mat");
-                if (AssetDatabase.LoadAssetAtPath<Material>(path) != null) continue;
-                var material = new Material(shader);
-                material.SetFloat("_Smoothness", 0.15f);
-                if (glow)
-                {
-                    material.EnableKeyword("_EMISSION");
-                    material.SetColor("_EmissionColor", Color.white);
-                    material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-                }
-                AssetDatabase.CreateAsset(material, path);
+                var material = HdrpSetup.LoadOrCreate(Root + (glow ? "/Materials/BaseLitGlow.mat" : "/Materials/BaseLit.mat"), shader);
+                HdrpSetup.Surface(material, 0.15f, 0f);
+                material.SetColor("_EmissiveColor", glow ? Color.white : Color.black);
+                material.SetFloat("_EmissiveExposureWeight", 0f); // glows read the same in any light (see Art.Glow)
+                HdrpSetup.Finish(material);
             }
         }
 
@@ -92,26 +72,16 @@ namespace DroneSandbox.EditorTools
             if (!AssetDatabase.IsValidFolder(Root + "/Materials")) AssetDatabase.CreateFolder(Root, "Materials");
         }
 
+        // HDRP's terrain shader. The keyword turns on the layers' normal maps, which the terrain inspector would
+        // set in the editor but a terrain built in a player never does.
         static void CreateTerrainMaterial()
         {
-            var shader = Shader.Find("Universal Render Pipeline/Terrain/Lit");
+            var shader = Shader.Find("HDRP/TerrainLit");
             if (shader == null) return;
             EnsureMaterialsFolder();
-            string path = Root + "/Materials/TerrainLit.mat";
-            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (material == null)
-            {
-                material = new Material(shader);
-                AssetDatabase.CreateAsset(material, path);
-            }
-            // In the editor the terrain inspector sets this from the layers; a terrain built in a player never
-            // does. Setting it on the asset turns on the layers' normal maps and keeps that shader variant.
+            var material = HdrpSetup.LoadOrCreate(Root + "/Materials/TerrainLit.mat", shader);
             material.EnableKeyword("_NORMALMAP");
-            // The terrain draws without instancing (see Ground.Build), so leave the instanced-only options off.
-            material.SetFloat("_EnableInstancedPerPixelNormal", 0f);
-            material.DisableKeyword("_TERRAIN_INSTANCED_PERPIXEL_NORMAL");
-            material.enableInstancing = false;
-            EditorUtility.SetDirty(material);
+            HdrpSetup.Finish(material, instancing: false);
         }
 
         // Saves the post-processing grade as an asset. URP strips post-processing shader variants that no saved
@@ -120,28 +90,38 @@ namespace DroneSandbox.EditorTools
         static void CreatePostProcessingProfile()
         {
             string path = Root + "/PostProcessing.asset";
+            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+            if (profile == null)
+            {
+                profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                AssetDatabase.CreateAsset(profile, path);
+            }
+            Atmosphere.ConfigureProfile(profile); // re-applied each time, so changes to the grade reach the saved profile
+            foreach (var component in profile.components)
+            {
+                if (AssetDatabase.Contains(component)) continue;
+                component.hideFlags = HideFlags.HideInInspector | HideFlags.HideInHierarchy;
+                AssetDatabase.AddObjectToAsset(component, profile);
+                EditorUtility.SetDirty(component);
+            }
+            foreach (var component in profile.components) EditorUtility.SetDirty(component);
+            EditorUtility.SetDirty(profile);
+        }
+
+        // Photo mode's depth of field, saved as its own profile so player builds keep the Bokeh shader.
+        static void CreatePhotoFocusProfile()
+        {
+            string path = Root + "/PhotoFocus.asset";
             if (AssetDatabase.LoadAssetAtPath<VolumeProfile>(path) != null) return;
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             AssetDatabase.CreateAsset(profile, path);
-            Atmosphere.ConfigureProfile(profile);
+            PhotoMode.ConfigureFocus(profile);
             foreach (var component in profile.components)
             {
                 component.hideFlags = HideFlags.HideInInspector | HideFlags.HideInHierarchy;
                 AssetDatabase.AddObjectToAsset(component, profile);
             }
             EditorUtility.SetDirty(profile);
-        }
-
-        // The game turns on linear fog at runtime, but the scene has none, so "Automatic" fog stripping would
-        // drop the fog shader variants from builds. Keep linear fog explicitly.
-        static void KeepLinearFog()
-        {
-            var settings = new SerializedObject(GraphicsSettings.GetGraphicsSettings());
-            SetInt(settings, "m_FogStripping", 1); // custom
-            SetBool(settings, "m_FogKeepLinear", true);
-            SetBool(settings, "m_FogKeepExp", false);
-            SetBool(settings, "m_FogKeepExp2", false);
-            settings.ApplyModifiedPropertiesWithoutUndo();
         }
 
         // Marks downloaded *_nor textures as normal maps.
@@ -164,116 +144,382 @@ namespace DroneSandbox.EditorTools
             }
         }
 
-        // Turns Resources/Sky/sky.hdr (an equirectangular HDRI) into a panoramic skybox material.
-        static void CreateSkyMaterial()
+        // The starry night sky (Tools/fetch_textures.py) as a cubemap, for the physically based sky's space
+        // emission (see Atmosphere). Day and sunset skies come from HDRP's atmosphere itself.
+        static void ImportNightSky()
         {
-            string dir = Root + "/Sky";
-            string hdr = dir + "/sky.hdr";
-            if (!File.Exists(hdr)) return;
-            if (AssetImporter.GetAtPath(hdr) is TextureImporter importer)
-            {
-                importer.textureShape = TextureImporterShape.Texture2D;
-                importer.maxTextureSize = 4096;
-                importer.mipmapEnabled = false;
-                importer.wrapModeU = TextureWrapMode.Repeat;
-                importer.wrapModeV = TextureWrapMode.Clamp;
-                importer.SaveAndReimport();
-            }
-            var shader = Shader.Find("Skybox/Panoramic");
-            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(hdr);
-            if (shader == null || texture == null) return;
-            string path = dir + "/SkyMaterial.mat";
-            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (material == null)
-            {
-                material = new Material(shader);
-                AssetDatabase.CreateAsset(material, path);
-            }
-            material.SetTexture("_MainTex", texture);
-            material.SetFloat("_Mapping", 1f);   // latitude-longitude layout
-            material.SetFloat("_ImageType", 0f); // 360 degrees
-            material.SetFloat("_Exposure", 1.0f);
-            EditorUtility.SetDirty(material);
+            string path = Root + "/Sky/sky_night.hdr";
+            if (!(AssetImporter.GetAtPath(path) is TextureImporter importer)) return;
+            if (importer.textureShape == TextureImporterShape.TextureCube) return;
+            importer.textureShape = TextureImporterShape.TextureCube;
+            importer.generateCubemap = TextureImporterGenerateCubemap.Cylindrical;
+            importer.maxTextureSize = 2048;
+            importer.mipmapEnabled = true;
+            importer.SaveAndReimport();
         }
 
-        // Template for painted emblems and flags (Factions): URP Lit with alpha cut-out, so the emblem's shape
-        // is cut from its square. The game copies it and sets the texture.
+        // Template for painted emblems and flags (Factions): HDRP Lit cut out by the texture's alpha. The game
+        // copies it and sets the texture.
         static void CreateDecalMaterial()
         {
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = HdrpSetup.Lit;
             if (shader == null) return;
             EnsureMaterialsFolder();
-            string path = Root + "/Materials/Decal.mat";
-            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (material == null)
-            {
-                material = new Material(shader);
-                AssetDatabase.CreateAsset(material, path);
-            }
-            material.SetFloat("_AlphaClip", 1f);
-            material.SetFloat("_Cutoff", 0.5f);
-            material.EnableKeyword("_ALPHATEST_ON");
-            material.SetFloat("_Smoothness", 0.25f);
-            material.SetOverrideTag("RenderType", "TransparentCutout");
-            material.renderQueue = (int)RenderQueue.AlphaTest;
-            EditorUtility.SetDirty(material);
+            var material = HdrpSetup.LoadOrCreate(Root + "/Materials/Decal.mat", shader);
+            HdrpSetup.Surface(material, 0.3f, 0f);
+            HdrpSetup.Cutout(material, 0.5f, doubleSided: false);
+            HdrpSetup.Finish(material);
         }
 
-        // The river's material: the DroneSandbox/River water shader with a generated ripple normal map.
-        static void CreateWaterMaterial()
+        // The white water down the dam's spillway: HDRP Lit, alpha-blended foam (white where the generated foam
+        // noise is high, see-through between), scrolled downhill by Flow. It goes in Materials/PBR, named after
+        // the dam model's material, so Art.TryModel swaps it in. The lake, river and pool are HDRP water surfaces
+        // (see Water.cs) and need no material.
+        static void CreateWhiteWater()
         {
-            var shader = Shader.Find("DroneSandbox/River");
+            var shader = HdrpSetup.Lit;
             if (shader == null) return;
-            EnsureMaterialsFolder();
-            string texturePath = Root + "/Textures/RiverRipples.png";
-            if (!File.Exists(texturePath))
+            string pbr = Root + "/Materials/PBR";
+            if (!AssetDatabase.IsValidFolder(pbr)) AssetDatabase.CreateFolder(Root + "/Materials", "PBR");
+            // The spillway's three kinds of water (see water_sheet in Tools/Blender/make_dam.py). Churned foam where
+            // the water lands: lumpy white with thinner, see-through patches.
+            var churn = GeneratedTexture(Root + "/Textures/FoamAlpha.png",
+                () => FoamPng(1, new Color(0.62f, 0.72f, 0.75f, 0.35f), new Color(0.95f, 0.97f, 0.98f, 1f), 0.25f), clamp: false);
+            var spill = HdrpSetup.LoadOrCreate(pbr + "/WhiteWater.mat", shader);
+            HdrpSetup.Albedo(spill, churn, new Color(0.82f, 0.9f, 0.92f, 0.9f), new Vector2(1f / 1.2f, 1f / 1.2f));
+            HdrpSetup.Surface(spill, 0.35f, 0f);
+            HdrpSetup.Transparent(spill);
+            HdrpSetup.Finish(spill);
+
+            // The falling sheets. Their colour and see-through-ness come from FallGradient on the sheets' second UV
+            // set (glassy and dark at the lip, streaky, then white churn where they land; the model gives each
+            // strand its own slice of it), and white streaks moving down the fall from a detail map on the first.
+            var fall = GeneratedTexture(Root + "/Textures/FallGradient.png", FallGradientPng, clamp: false);
+            if (AssetImporter.GetAtPath(Root + "/Textures/FallGradient.png") is TextureImporter fallImporter)
             {
-                File.WriteAllBytes(texturePath, RipplesPng());
-                AssetDatabase.ImportAsset(texturePath);
+                fallImporter.wrapModeV = TextureWrapMode.Clamp;
+                fallImporter.SaveAndReimport();
             }
-            if (AssetImporter.GetAtPath(texturePath) is TextureImporter importer && importer.textureType != TextureImporterType.NormalMap)
+            var streaks = GeneratedTexture(Root + "/Textures/SheetStreaks.png", SheetStreaksPng, clamp: false);
+            if (AssetImporter.GetAtPath(Root + "/Textures/SheetStreaks.png") is TextureImporter streakImporter)
             {
-                importer.textureType = TextureImporterType.NormalMap;
-                importer.anisoLevel = 4;
+                streakImporter.sRGBTexture = false; // a detail map: grey albedo, normal and smoothness as data
+                streakImporter.SaveAndReimport();
+            }
+            var sheet = HdrpSetup.LoadOrCreate(pbr + "/SpillSheet.mat", shader);
+            HdrpSetup.Albedo(sheet, fall, Color.white, Vector2.one);
+            sheet.SetFloat("_UVBase", 1f);
+            sheet.SetColor("_UVMappingMask", new Color(0f, 1f, 0f, 0f));
+            sheet.SetTexture("_DetailMap", streaks);
+            sheet.SetTextureScale("_DetailMap", new Vector2(1f / 1.6f, 1f / 3f));
+            sheet.SetFloat("_UVDetail", 0f);
+            sheet.SetColor("_UVDetailsMappingMask", new Color(1f, 0f, 0f, 0f));
+            sheet.SetFloat("_DetailAlbedoScale", 1.6f);
+            sheet.SetFloat("_DetailNormalScale", 0f);
+            sheet.SetFloat("_DetailSmoothnessScale", 0.5f);
+            HdrpSetup.Surface(sheet, 0.72f, 0f);
+            HdrpSetup.Transparent(sheet);
+            HdrpSetup.Finish(sheet);
+
+            // The dark, glassy water running across the spillway's treads, rippled by the old river normal map.
+            var flow = HdrpSetup.LoadOrCreate(pbr + "/SpillWater.mat", shader);
+            HdrpSetup.Albedo(flow, null, new Color(0.025f, 0.1f, 0.12f, 0.88f), new Vector2(1f / 3f, 1f / 4f));
+            var ripples = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Textures/RiverRipples.png");
+            if (ripples != null) HdrpSetup.Normal(flow, ripples, 0.7f);
+            HdrpSetup.Surface(flow, 0.92f, 0f);
+            HdrpSetup.Transparent(flow);
+            HdrpSetup.Finish(flow);
+        }
+
+        // Grass and wildflower clumps for the terrain (see Grass.cs): painted blades on a transparent card, alpha-cut,
+        // both sides drawn, GPU instanced (the terrain draws detail meshes with instancing).
+        static void CreateGrassMaterials()
+        {
+            var shader = HdrpSetup.Lit;
+            if (shader == null) return;
+            foreach (var (name, kind) in new[] { ("Grass", 0), ("Flowers", 1), ("Reeds", 2) })
+            {
+                var texture = GeneratedTexture(Root + "/Textures/" + name + "Blades.png", () => BladesPng(kind), clamp: true);
+                var material = LoadOrCreateMaterial(Root + "/Materials/" + name + ".mat", shader);
+                HdrpSetup.Albedo(material, texture, Color.white, Vector2.one);
+                HdrpSetup.Surface(material, 0.08f, 0f);
+                HdrpSetup.Cutout(material, 0.4f, doubleSided: true, keepNormals: true);
+                HdrpSetup.Finish(material);
+            }
+        }
+
+        // Blades of grass growing up from the bottom edge, dark at the root and lighter (some dry) at the tip.
+        // Kind 1 (flowers): a few blades carry a white, yellow or purple flower head. Kind 2 (reeds): tall, thin,
+        // nearly straight stems, some topped with a brown cattail.
+        static byte[] BladesPng(int kind)
+        {
+            bool flowers = kind == 1, reeds = kind == 2;
+            const int size = 256;
+            var pixels = new Color[size * size];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color(0.25f, 0.34f, 0.12f, 0f); // fringe colour for mipmaps
+            var rng = new System.Random(3 + kind);
+            float Rand() => (float)rng.NextDouble();
+            void Paint(int x, int y, Color c, float cover)
+            {
+                if (x < 0 || y < 0 || x >= size || y >= size || cover <= 0f) return;
+                var old = pixels[y * size + x];
+                var mixed = Color.Lerp(old.a > 0f ? old : c, c, cover);
+                mixed.a = Mathf.Max(old.a, cover);
+                pixels[y * size + x] = mixed;
+            }
+            int blades = flowers ? 26 : reeds ? 36 : 52;
+            for (int b = 0; b < blades; b++)
+            {
+                float x0 = size * (0.05f + 0.9f * Rand()), height = size * (reeds ? 0.65f + 0.33f * Rand() : 0.4f + 0.55f * Rand());
+                float width = reeds ? 2.5f + 2f * Rand() : 3.5f + 4.5f * Rand();
+                float bend = (Rand() - 0.5f) * size * (reeds ? 0.08f : 0.3f), shade = 0.75f + 0.35f * Rand();
+                var root = new Color(0.09f, 0.15f, 0.05f);
+                var tip = reeds
+                    ? Color.Lerp(new Color(0.42f, 0.47f, 0.2f), new Color(0.62f, 0.55f, 0.32f), Rand() * 0.6f)
+                    : Color.Lerp(new Color(0.34f, 0.47f, 0.13f), new Color(0.58f, 0.57f, 0.25f), Rand() < 0.2f ? 0.8f : Rand() * 0.3f);
+                for (int y = 0; y < height; y++)
+                {
+                    float t = y / height;
+                    float cx = x0 + bend * t * t, half = width * Mathf.Pow(1f - t, 0.8f) * 0.5f + 0.35f;
+                    var c = Color.Lerp(root, tip, Mathf.Pow(t, 0.7f)) * shade;
+                    for (int x = Mathf.FloorToInt(cx - half - 1f); x <= Mathf.CeilToInt(cx + half + 1f); x++)
+                        Paint(x, y, c, Mathf.Clamp01(half + 0.5f - Mathf.Abs(x + 0.5f - cx)));
+                }
+                if (reeds && Rand() < 0.3f)
+                {
+                    // A cattail: a brown sausage just below the tip.
+                    float cx = x0 + bend * 0.8f, cy = height * 0.82f;
+                    for (int y = Mathf.FloorToInt(cy - 14f); y <= cy + 14f; y++)
+                        for (int x = Mathf.FloorToInt(cx - 5f); x <= cx + 5f; x++)
+                        {
+                            float d = new Vector2((x + 0.5f - cx) / 4f, (y + 0.5f - cy) / 13f).magnitude;
+                            Paint(x, y, new Color(0.3f, 0.19f, 0.1f) * (1.1f - 0.3f * d), Mathf.Clamp01((1f - d) * 4f));
+                        }
+                }
+                if (!flowers || Rand() > 0.55f) continue;
+                var petals = new[] { new Color(0.95f, 0.95f, 0.9f), new Color(0.98f, 0.82f, 0.2f), new Color(0.62f, 0.46f, 0.86f) }[rng.Next(3)];
+                float fx = x0 + bend, fy = height, r = 5f + 4f * Rand();
+                for (int y = Mathf.FloorToInt(fy - r - 1); y <= fy + r + 1; y++)
+                    for (int x = Mathf.FloorToInt(fx - r - 1); x <= fx + r + 1; x++)
+                    {
+                        float d = new Vector2(x + 0.5f - fx, y + 0.5f - fy).magnitude;
+                        Paint(x, y, d < r * 0.3f ? new Color(0.9f, 0.7f, 0.15f) : petals, Mathf.Clamp01(r + 0.5f - d));
+                    }
+            }
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.SetPixels(pixels);
+            texture.Apply();
+            byte[] png = texture.EncodeToPNG();
+            Object.DestroyImmediate(texture);
+            return png;
+        }
+
+        // The dam's concrete: the photo texture laid over a whole 8 x 16 m face with weathering painted in, damp
+        // and mossy at the foot, rust-brown streaks running down from the crest, patchy stains and the joints
+        // between pours. The dam model's UVs are metres from its foot, so the texture's height spans the dam;
+        // it is clamped top and bottom, so below the foot stays mossy and above the crest stays clean.
+        static void CreateDamConcrete()
+        {
+            var shader = HdrpSetup.Lit;
+            string diffuse = PbrTextures + "/dam_concrete_diff.png", normal = PbrTextures + "/dam_concrete_nor.png";
+            if (shader == null || !File.Exists(PbrTextures + "/concrete_wall_diff.jpg")) return;
+            if (!File.Exists(diffuse) || !File.Exists(normal))
+            {
+                var (colour, bumps) = WeatheredConcrete(PbrTextures + "/concrete_wall_diff.jpg", PbrTextures + "/concrete_wall_nor.jpg");
+                File.WriteAllBytes(diffuse, colour);
+                File.WriteAllBytes(normal, bumps);
+                AssetDatabase.ImportAsset(diffuse);
+                AssetDatabase.ImportAsset(normal);
+            }
+            foreach (var (path, isNormal) in new[] { (diffuse, false), (normal, true) })
+            {
+                if (!(AssetImporter.GetAtPath(path) is TextureImporter importer)) continue;
+                importer.textureType = isNormal ? TextureImporterType.NormalMap : TextureImporterType.Default;
+                importer.wrapModeU = TextureWrapMode.Repeat;
+                importer.wrapModeV = TextureWrapMode.Clamp;
+                importer.anisoLevel = 8;
                 importer.SaveAndReimport();
             }
-            string path = Root + "/Materials/Water.mat";
-            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (material == null)
-            {
-                material = new Material(shader);
-                AssetDatabase.CreateAsset(material, path);
-            }
-            material.shader = shader;
-            material.SetTexture("_RippleMap", AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath));
-            // A calm, murky lowland river.
-            material.SetFloat("_RippleSize", 7f);
-            material.SetFloat("_RippleStrength", 0.35f);
-            material.SetFloat("_FlowSpeed", 0.4f);
-            material.SetColor("_ShallowColor", new Color(0.70f, 0.72f, 0.58f));
-            material.SetColor("_DeepColor", new Color(0.085f, 0.13f, 0.10f));
-            material.SetFloat("_Clarity", 1.1f);
-            material.SetFloat("_Smoothness", 0.9f);
-            material.SetFloat("_Refraction", 0.025f);
-            material.SetFloat("_ShoreFade", 0.3f);
-            EditorUtility.SetDirty(material);
+            string folder = Root + "/Materials/PBR";
+            if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(Root + "/Materials", "PBR");
+            var material = LoadOrCreateMaterial(folder + "/DamConcrete.mat", shader);
+            // A shade darker than the photo, so sunlit faces keep their texture.
+            HdrpSetup.Albedo(material, AssetDatabase.LoadAssetAtPath<Texture2D>(diffuse), new Color(0.85f, 0.85f, 0.85f), new Vector2(1f / 8f, 1f / 16f));
+            HdrpSetup.Normal(material, AssetDatabase.LoadAssetAtPath<Texture2D>(normal));
+            HdrpSetup.Surface(material, 0.3f, 0f); // dry, weathered concrete (the decals make it wet or mossy)
+            HdrpSetup.Finish(material);
         }
 
-        // Tileable, irregular ripples: several octaves of smooth noise (each octave a whole number of cells
-        // across, so the tile wraps), with the small ripples stretched a little across the flow. Turned into
-        // a normal map.
-        static byte[] RipplesPng()
+        static (byte[] colour, byte[] normal) WeatheredConcrete(string sourcePath, string normalPath)
         {
-            const int size = 512;
-            var rng = new System.Random(5);
-            var octaves = new List<(int cells, float amp, float[] lattice)>();
-            foreach (var (cells, amp) in new[] { (4, 1f), (8, 0.55f), (16, 0.3f), (32, 0.16f), (64, 0.08f) })
+            const int width = 1024, height = 2048; // 8 m across, 16 m up: the 4 m photo tile repeats 2 x 4 times
+            var source = new Texture2D(2, 2);
+            source.LoadImage(File.ReadAllBytes(sourcePath));
+            var sourceNormal = new Texture2D(2, 2);
+            sourceNormal.LoadImage(File.ReadAllBytes(normalPath));
+            var src = source.GetPixels();
+            var srcN = sourceNormal.GetPixels();
+            int sw = source.width, sh = source.height;
+            var rng = new System.Random(17);
+            // Streaks: where they start near the crest, how wide and how far down they run.
+            var streaks = new List<(float x, float width, float top, float length, float strength)>();
+            for (int i = 0; i < 46; i++)
+                streaks.Add(((float)rng.NextDouble(), 0.004f + 0.02f * (float)rng.NextDouble(), 0.8f + 0.15f * (float)rng.NextDouble(),
+                    0.15f + 0.55f * (float)rng.NextDouble(), 0.4f + 0.6f * (float)rng.NextDouble()));
+            var colour = new Color[width * height];
+            var normals = new Color[width * height];
+            var moss = new Color(0.17f, 0.22f, 0.09f);
+            var rust = new Color(0.45f, 0.38f, 0.3f);
+            for (int y = 0; y < height; y++)
             {
-                var lattice = new float[cells * cells];
+                float v = (y + 0.5f) / height;
+                for (int x = 0; x < width; x++)
+                {
+                    float u = (x + 0.5f) / width;
+                    int sx = (x * 2) % sw, sy = (y * 2) % sh;
+                    var c = src[sy * sw + sx];
+                    // Broad stains.
+                    float stain = Mathf.PerlinNoise(u * 6f + 3f, v * 10f + 7f) * 0.7f + Mathf.PerlinNoise(u * 25f, v * 40f) * 0.3f;
+                    c *= Mathf.Lerp(0.82f, 1.08f, stain);
+                    // Streaks down from the crest, fading as they run.
+                    float streak = 0f;
+                    foreach (var s in streaks)
+                    {
+                        float dx = Mathf.Abs(u - s.x);
+                        dx = Mathf.Min(dx, 1f - dx); // wraps round the tile
+                        if (dx > s.width || v > s.top || v < s.top - s.length) continue;
+                        float along = (s.top - v) / s.length;
+                        streak = Mathf.Max(streak, s.strength * (1f - dx / s.width) * (1f - along) * Mathf.Clamp01(along * 8f));
+                    }
+                    c = Color.Lerp(c, c * rust * 1.4f, streak * 0.6f);
+                    // Damp and moss towards the foot (the bottom 2-3 m), blotchy.
+                    float blot = Mathf.PerlinNoise(u * 30f + 11f, v * 60f + 2f);
+                    float wet = 1f - Mathf.SmoothStep(0f, 1f, (v - 0.03f - blot * 0.06f) / 0.13f);
+                    c *= Mathf.Lerp(1f, 0.55f, wet);
+                    c = Color.Lerp(c, moss * (0.7f + 0.6f * blot), wet * Mathf.SmoothStep(0f, 1f, (blot - 0.35f) * 3f) * 0.8f);
+                    // Joints between pours every 1.5 m.
+                    float joint = Mathf.Repeat(v * 16f, 1.5f);
+                    if (joint < 0.025f || joint > 1.49f) c *= 0.78f;
+                    c.a = 1f;
+                    colour[y * width + x] = c;
+                    normals[y * width + x] = srcN[sy * sw + sx];
+                }
+            }
+            Object.DestroyImmediate(source);
+            Object.DestroyImmediate(sourceNormal);
+            return (Encode(colour, width, height), Encode(normals, width, height));
+        }
+
+        static byte[] Encode(Color[] pixels, int width, int height)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGB24, false);
+            texture.SetPixels(pixels);
+            texture.Apply();
+            byte[] png = texture.EncodeToPNG();
+            Object.DestroyImmediate(texture);
+            return png;
+        }
+
+        static Material LoadOrCreateMaterial(string path, Shader shader) => HdrpSetup.LoadOrCreate(path, shader);
+
+        // The distant farmland's texture (Backdrop.Patchwork), made once here rather than at every start.
+        static void CreatePatchwork()
+        {
+            string path = Root + "/Textures/Patchwork.png";
+            if (File.Exists(path)) return;
+            var texture = Backdrop.Patchwork();
+            File.WriteAllBytes(path, texture.EncodeToPNG());
+            Object.DestroyImmediate(texture);
+            AssetDatabase.ImportAsset(path);
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer)
+            {
+                importer.maxTextureSize = 2048;
+                importer.anisoLevel = 8;
+                importer.SaveAndReimport();
+            }
+        }
+
+        // Writes a generated PNG once and imports it as a plain colour texture.
+        static Texture2D GeneratedTexture(string path, System.Func<byte[]> make, bool clamp)
+        {
+            if (!File.Exists(path))
+            {
+                File.WriteAllBytes(path, make());
+                AssetDatabase.ImportAsset(path);
+            }
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer)
+            {
+                importer.textureType = TextureImporterType.Default;
+                importer.alphaIsTransparency = clamp;
+                importer.wrapMode = clamp ? TextureWrapMode.Clamp : TextureWrapMode.Repeat;
+                importer.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // Tileable white water: noise streaked along the flow (four times finer across it than down it), mostly
+        // opaque white with thinner, darker see-through streaks between, like water falling in strands.
+        // How a falling sheet changes from its lip (top of the picture) to where it lands (bottom): glassy, dark and
+        // see-through, then streaky, then dense white churn. Where each change happens wanders across the picture
+        // (each strand of the spillway takes its own slice), and the boundaries are ragged.
+        static byte[] FallGradientPng()
+        {
+            const int size = 256;
+            var glassy = new Color(0.2f, 0.34f, 0.38f, 0.5f);
+            var streaky = new Color(0.6f, 0.72f, 0.76f, 0.82f);
+            var churn = new Color(0.9f, 0.94f, 0.96f, 0.95f);
+            var pixels = new Color[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                float down = 1f - (y + 0.5f) / size; // 0 at the lip, 1 where it lands
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + 0.5f) / size;
+                    float first = 0.3f + (Mathf.PerlinNoise(u * 7f, 3.1f) - 0.5f) * 0.3f, second = 0.72f + (Mathf.PerlinNoise(u * 9f, 8.7f) - 0.5f) * 0.3f;
+                    float ragged = (Mathf.PerlinNoise(u * 40f, down * 12f) - 0.5f) * 0.12f;
+                    var c = Color.Lerp(glassy, streaky, Mathf.SmoothStep(0f, 1f, (down + ragged - first) / 0.18f + 0.5f));
+                    c = Color.Lerp(c, churn, Mathf.SmoothStep(0f, 1f, (down + ragged - second) / 0.2f + 0.5f));
+                    pixels[y * size + x] = c;
+                }
+            }
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.SetPixels(pixels);
+            byte[] png = texture.EncodeToPNG();
+            Object.DestroyImmediate(texture);
+            return png;
+        }
+
+        // A detail map of streaks down a falling sheet: grey albedo in red (brighter strands, darker gaps), flat
+        // normal (0.5) in green and alpha, middling smoothness in blue.
+        static byte[] SheetStreaksPng()
+        {
+            var foam = new Texture2D(2, 2);
+            foam.LoadImage(FoamPng(4, Color.black, Color.white, 0.4f));
+            var source = foam.GetPixels();
+            var pixels = new Color[source.Length];
+            for (int i = 0; i < source.Length; i++)
+                pixels[i] = new Color(Mathf.Lerp(0.3f, 0.72f, source[i].r), 0.5f, Mathf.Lerp(0.4f, 0.6f, source[i].r), 0.5f);
+            foam.SetPixels(pixels);
+            byte[] png = foam.EncodeToPNG();
+            Object.DestroyImmediate(foam);
+            return png;
+        }
+
+        // Foam: fractal noise, stretched along the flow (stretch times finer across it, for streaks), shaded from
+        // low (thin, see-through water) to high (dense foam) above the threshold from.
+        static byte[] FoamPng(int stretch, Color low, Color high, float from)
+        {
+            const int size = 256;
+            var rng = new System.Random(9);
+            var octaves = new List<(int cells, float amp, float[] lattice)>();
+            foreach (var (cells, amp) in new[] { (4, 0.45f), (8, 1f), (16, 0.7f), (32, 0.45f), (64, 0.25f) })
+            {
+                var lattice = new float[cells * 4 * cells];
                 for (int i = 0; i < lattice.Length; i++) lattice[i] = (float)rng.NextDouble();
                 octaves.Add((cells, amp, lattice));
             }
-            var heights = new float[size * size];
+            var values = new float[size * size];
+            float min = float.MaxValue, max = float.MinValue;
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
@@ -281,30 +527,29 @@ namespace DroneSandbox.EditorTools
                     float h = 0f;
                     foreach (var o in octaves)
                     {
-                        float gx = x * (float)o.cells / size, gy = y * (float)o.cells / size;
+                        int across = o.cells * stretch;
+                        float gx = x * (float)across / size, gy = y * (float)o.cells / size;
                         int x0 = Mathf.FloorToInt(gx), y0 = Mathf.FloorToInt(gy);
                         float fx = gx - x0, fy = gy - y0;
                         fx = fx * fx * (3f - 2f * fx);
                         fy = fy * fy * (3f - 2f * fy);
-                        float At(int ix, int iy) => o.lattice[(iy % o.cells) * o.cells + ix % o.cells];
+                        float At(int ix, int iy) => o.lattice[(iy % o.cells) * across + ix % across];
                         float a = Mathf.Lerp(At(x0, y0), At(x0 + 1, y0), fx), b = Mathf.Lerp(At(x0, y0 + 1), At(x0 + 1, y0 + 1), fx);
                         h += o.amp * Mathf.Lerp(a, b, fy);
                     }
-                    heights[y * size + x] = h;
+                    values[y * size + x] = h;
+                    min = Mathf.Min(min, h);
+                    max = Mathf.Max(max, h);
                 }
             }
             var pixels = new Color[size * size];
-            for (int y = 0; y < size; y++)
+            for (int i = 0; i < pixels.Length; i++)
             {
-                for (int x = 0; x < size; x++)
-                {
-                    float dx = heights[y * size + (x + 1) % size] - heights[y * size + (x + size - 1) % size];
-                    float dy = heights[((y + 1) % size) * size + x] - heights[((y + size - 1) % size) * size + x];
-                    var n = new Vector3(-dx * 14f, -dy * 9f, 1f).normalized;
-                    pixels[y * size + x] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, 1f);
-                }
+                float g = (values[i] - min) / (max - min);
+                float strand = Mathf.SmoothStep(0f, 1f, (g - from) / 0.4f);
+                pixels[i] = Color.Lerp(low, high, strand);
             }
-            var texture = new Texture2D(size, size, TextureFormat.RGB24, false);
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
             texture.SetPixels(pixels);
             texture.Apply();
             byte[] png = texture.EncodeToPNG();
@@ -340,6 +585,10 @@ namespace DroneSandbox.EditorTools
             ("WoodLight", "wood", new Color(1.1f, 1.0f, 0.9f), 2f, 0.1f, 0f),
             ("RoofFelt", "asphalt", new Color(0.7f, 0.7f, 0.7f), 3f, 0.15f, 0f),
             ("Bark", "bark", new Color(0.8f, 0.8f, 0.8f), 1.5f, 0.05f, 0f),
+            // Bark of the trees from make_trees.py (UVs run round and along the branches, in metres).
+            ("BarkOak", "oak_bark", new Color(0.95f, 0.92f, 0.9f), 1.6f, 0.08f, 0f),
+            ("BarkBirch", "birch_bark", Color.white, 1.6f, 0.15f, 0f),
+            ("BarkPoplar", "willow_bark", new Color(0.9f, 0.9f, 0.88f), 1.6f, 0.08f, 0f),
             ("BarkPine", "pine_bark", Color.white, 1.5f, 0.05f, 0f),
             ("PlasterWhite", "plaster_white", new Color(1.35f, 1.33f, 1.28f), 3f, 0.08f, 0f),
             ("PlasterGrey", "plaster_grey", new Color(0.85f, 0.85f, 0.85f), 3f, 0.08f, 0f),
@@ -383,15 +632,28 @@ namespace DroneSandbox.EditorTools
                 if (file.EndsWith(".meta")) continue;
                 string path = file.Replace('\\', '/');
                 if (!(AssetImporter.GetAtPath(path) is TextureImporter importer)) continue;
-                var wanted = Path.GetFileNameWithoutExtension(path).EndsWith("_nor") ? TextureImporterType.NormalMap : TextureImporterType.Default;
-                if (importer.textureType == wanted && importer.anisoLevel == 8) continue; // already set up
+                string fileName = Path.GetFileNameWithoutExtension(path);
+                var wanted = fileName.EndsWith("_nor") ? TextureImporterType.NormalMap : TextureImporterType.Default;
+                // Tree atlases (make_trees.py) and scanned plants (import_scans.py, whose colour map carries the
+                // leaves' cut-out in its alpha): the alpha cuts out the leaves, and mipmaps keep the same coverage so
+                // a far crown or fern doesn't go see-through.
+                bool scan = fileName.StartsWith("scan_");
+                bool scanPlant = scan && fileName.EndsWith("_diff") && importer.DoesSourceTextureHaveAlpha();
+                bool foliage = scanPlant || ((fileName.StartsWith("leaves_") || fileName.StartsWith("impostor_")) && !fileName.EndsWith("_nor"));
+                // Scanned rocks come at 2K (they're big and the camera can get close); scanned plants are 1K anyway.
+                int maxSize = fileName.StartsWith("leaves_") || scan ? 2048 : 1024;
+                if (importer.textureType == wanted && importer.anisoLevel == 8 && importer.mipMapsPreserveCoverage == foliage
+                    && importer.maxTextureSize == maxSize) continue;
                 importer.textureType = wanted;
-                importer.maxTextureSize = 1024;
+                importer.maxTextureSize = maxSize;
                 importer.anisoLevel = 8;
+                importer.alphaIsTransparency = foliage;
+                importer.mipMapsPreserveCoverage = foliage;
+                importer.alphaTestReferenceValue = scanPlant ? ScanCutoff : 0.45f;
                 importer.SaveAndReimport();
             }
 
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = HdrpSetup.Lit;
             if (shader == null) return;
             string folder = Root + "/Materials/PBR";
             EnsureMaterialsFolder();
@@ -402,27 +664,44 @@ namespace DroneSandbox.EditorTools
                 var normal = LoadTexture(m.texture + "_nor");
                 if (albedo == null) continue;
                 string path = folder + "/" + m.material + ".mat";
-                var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-                if (material == null)
-                {
-                    material = new Material(shader);
-                    AssetDatabase.CreateAsset(material, path);
-                }
-                material.SetTexture("_BaseMap", albedo);
-                material.SetColor("_BaseColor", m.tint);
-                material.SetTextureScale("_BaseMap", Vector2.one / m.tile);
-                material.SetFloat("_Smoothness", m.smooth);
-                material.SetFloat("_Metallic", m.metal);
-                if (normal != null)
-                {
-                    material.SetTexture("_BumpMap", normal);
-                    material.SetFloat("_BumpScale", 1f);
-                    material.EnableKeyword("_NORMALMAP");
-                }
-                material.enableInstancing = true;
-                EditorUtility.SetDirty(material);
+                var material = HdrpSetup.LoadOrCreate(path, shader);
+                HdrpSetup.Albedo(material, albedo, m.tint, Vector2.one / m.tile);
+                HdrpSetup.Surface(material, m.smooth, m.metal);
+                if (normal != null) HdrpSetup.Normal(material, normal);
+                HdrpSetup.Finish(material);
             }
             CreateLeafCardMaterials(shader, folder);
+            CreateScanMaterials(shader, folder);
+        }
+
+        const float ScanCutoff = 0.5f; // Poly Haven's own alpha cutoff for its plant scans
+
+        // The photo-scanned rocks, cliffs, deadwood and plants (Tools/fetch_models.py, Tools/Blender/import_scans.py):
+        // one material per scan, named Scan_<id> like the material the scan's models carry, so Art.TryModel swaps it
+        // in. Made for every Textures/PBR/scan_<id>_diff, with scan_<id>_nor as the normal map. A scan's UVs cover its
+        // texture once (0-1), so no tiling. Plants carry their cut-out in the colour map's alpha: cut out and drawn
+        // from both sides. Smoothness is low and even rather than from the scans' roughness maps: stone and bark are
+        // matt, leaves have a little sheen.
+        static void CreateScanMaterials(Shader shader, string folder)
+        {
+            foreach (string file in Directory.GetFiles(PbrTextures, "scan_*_diff.*"))
+            {
+                if (file.EndsWith(".meta")) continue;
+                string path = file.Replace('\\', '/');
+                var albedo = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                if (albedo == null) continue;
+                string name = Path.GetFileNameWithoutExtension(path);
+                string id = name.Substring("scan_".Length, name.Length - "scan_".Length - "_diff".Length);
+                bool plant = AssetImporter.GetAtPath(path) is TextureImporter importer && importer.DoesSourceTextureHaveAlpha();
+                bool wood = id.StartsWith("tree_stump") || id.StartsWith("dead_tree");
+                var material = HdrpSetup.LoadOrCreate(folder + "/Scan_" + id + ".mat", shader);
+                HdrpSetup.Albedo(material, albedo, Color.white, Vector2.one);
+                HdrpSetup.Surface(material, plant ? 0.3f : wood ? 0.1f : 0.15f, 0f);
+                var normal = LoadTexture("scan_" + id + "_nor");
+                if (normal != null) HdrpSetup.Normal(material, normal);
+                if (plant) HdrpSetup.Cutout(material, ScanCutoff, doubleSided: true);
+                HdrpSetup.Finish(material);
+            }
         }
 
         // Leaf cards (see leaf_cards in Tools/Blender/common.py): Blender material name -> leaf-cluster texture, tint.
@@ -433,6 +712,18 @@ namespace DroneSandbox.EditorTools
             ("PoplarCards", "leafcard_broad", new Color(0.46f, 0.64f, 0.30f)),
             ("BushCards", "leafcard_broad", new Color(0.50f, 0.66f, 0.28f)),
             ("PineCards", "leafcard_needle", new Color(0.36f, 0.50f, 0.32f)),
+            // make_trees.py's twig atlases and the far billboards' pictures of the whole trees, a little darker than
+            // drawn so crowns in low sun stay green instead of turning cream.
+            ("LeavesOak", "leaves_oak", new Color(0.82f, 0.82f, 0.82f)),
+            ("LeavesBirch", "leaves_birch", new Color(0.82f, 0.82f, 0.82f)),
+            ("LeavesPoplar", "leaves_poplar", new Color(0.82f, 0.82f, 0.82f)),
+            ("LeavesSpruce", "leaves_spruce", new Color(0.82f, 0.82f, 0.82f)),
+            ("LeavesPine", "leaves_pine", new Color(0.82f, 0.82f, 0.82f)),
+            ("ImpostorOak", "impostor_oak", new Color(0.82f, 0.82f, 0.82f)),
+            ("ImpostorBirch", "impostor_birch", new Color(0.82f, 0.82f, 0.82f)),
+            ("ImpostorPoplar", "impostor_poplar", new Color(0.82f, 0.82f, 0.82f)),
+            ("ImpostorSpruce", "impostor_spruce", new Color(0.82f, 0.82f, 0.82f)),
+            ("ImpostorPine", "impostor_pine", new Color(0.82f, 0.82f, 0.82f)),
         };
 
         // Alpha-cut, double-sided materials for the leaf cards.
@@ -445,25 +736,15 @@ namespace DroneSandbox.EditorTools
                 var texture = LoadTexture(m.texture);
                 if (texture == null) continue;
                 string path = folder + "/" + m.material + ".mat";
-                var material = AssetDatabase.LoadAssetAtPath<Material>(path);
-                if (material == null)
-                {
-                    material = new Material(shader);
-                    AssetDatabase.CreateAsset(material, path);
-                }
-                material.SetTexture("_BaseMap", texture);
-                material.SetColor("_BaseColor", m.tint);
-                material.SetTextureScale("_BaseMap", Vector2.one);
-                material.SetFloat("_Smoothness", 0.12f);
-                material.SetFloat("_Metallic", 0f);
-                material.SetFloat("_AlphaClip", 1f);
-                material.SetFloat("_Cutoff", 0.45f);
-                material.EnableKeyword("_ALPHATEST_ON");
-                material.SetFloat("_Cull", 0f); // both sides
-                material.SetOverrideTag("RenderType", "TransparentCutout");
-                material.renderQueue = (int)RenderQueue.AlphaTest;
-                material.enableInstancing = true;
-                EditorUtility.SetDirty(material);
+                var material = HdrpSetup.LoadOrCreate(path, shader);
+                HdrpSetup.Albedo(material, texture, m.tint, Vector2.one);
+                HdrpSetup.Surface(material, 0.12f, 0f);
+                // The new trees' cards carry normals pointing out of the crown, so the back faces keep them.
+                bool crownNormals = m.material.StartsWith("Leaves") || m.material.StartsWith("Impostor");
+                HdrpSetup.Cutout(material, 0.45f, doubleSided: true, keepNormals: crownNormals);
+                var normal = LoadTexture(m.texture + "_nor");
+                if (normal != null) HdrpSetup.Normal(material, normal, 0.8f);
+                HdrpSetup.Finish(material);
             }
         }
 
@@ -618,13 +899,16 @@ namespace DroneSandbox.EditorTools
             Object.DestroyImmediate(texture);
         }
 
-        // Saves the game's sky, sun and colour grade into the main scene and adds the map preview, so the
-        // Scene view shows the map as it looks in play.
+        // Saves the game's sun and environment profile into the main scene, strips components left over from URP,
+        // and adds the map preview, so the Scene view shows the map as it looks in play.
         static void SetUpMainScene()
         {
             var entry = EditorBuildSettings.scenes.FirstOrDefault(s => s.enabled && File.Exists(s.path));
             if (entry == null) return;
             var scene = EditorSceneManager.OpenScene(entry.path, OpenSceneMode.Single);
+            foreach (var root in scene.GetRootGameObjects())
+                foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                    GameObjectUtility.RemoveMonoBehavioursWithMissingScript(t.gameObject);
             if (Object.FindAnyObjectByType<MapPreview>() == null) new GameObject("Map Preview").AddComponent<MapPreview>();
 
             Light sun = Object.FindObjectsByType<Light>().FirstOrDefault(l => l.type == LightType.Directional);
@@ -634,10 +918,17 @@ namespace DroneSandbox.EditorTools
                 sun.type = LightType.Directional;
             }
             Atmosphere.ApplyLighting(sun);
+            var camera = Object.FindAnyObjectByType<Camera>();
+            if (camera != null) Atmosphere.SetUpCamera(camera);
 
             var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(Root + "/PostProcessing.asset");
-            if (profile != null)
-                foreach (var volume in Object.FindObjectsByType<Volume>()) volume.sharedProfile = profile;
+            var volumes = Object.FindObjectsByType<Volume>();
+            if (volumes.Length == 0) volumes = new[] { new GameObject("Environment").AddComponent<Volume>() };
+            foreach (var volume in volumes)
+            {
+                volume.isGlobal = true;
+                volume.sharedProfile = profile;
+            }
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);

@@ -27,7 +27,17 @@ namespace DroneSandbox
         public List<Vector3> convoyRoute;  // where convoy units drive; a target reaching its end fails the mission
         public string escapeFailure = "A target got away.";
 
-        public int Stock(DroneType type) => type == DroneType.Scout ? scouts : type == DroneType.Strike ? strikes : kamikazes;
+        // The mission's own drones (the tech shop can add more; see SandboxGame.MissionStock).
+        public int Stock(DroneType type)
+        {
+            switch (type)
+            {
+                case DroneType.Scout: return scouts;
+                case DroneType.Strike: return strikes;
+                case DroneType.Kamikaze: return kamikazes;
+                default: return 0;
+            }
+        }
     }
 
     // The Asset Hunt missions, in play order. Each one adds one new idea: hitting targets, kill order,
@@ -95,7 +105,8 @@ namespace DroneSandbox
             {
                 name = "Convoy",
                 briefing = "Four Dravin fuel trucks are driving up the east road from Marrowfield to their command post, led by a tank. " +
-                           "Stop every truck before it arrives. It is night: keep a Scout up and press T for thermal view. " +
+                           "Stop every truck before it arrives. It is night: a Scout with the Wren-T thermal camera, or a Nightjar, " +
+                           "lets you press T for thermal view (both are in the Tech shop). " +
                            "An AA gun watches the road junction.",
                 scouts = 2, strikes = 2, kamikazes = 5, par = 5, startHour = 23f,
                 cameraFocus = new Vector3(20f, 0f, -35f), cameraYaw = 60f, cameraDistance = 100f,

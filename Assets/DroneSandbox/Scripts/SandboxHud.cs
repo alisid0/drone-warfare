@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, mission briefing and results,
+    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, tech shop, mission briefing and results,
     // health bars, selection brackets, target markers, search circles, AA threat rings, launch buttons and help.
     // Fine for a prototype; move to UI Toolkit once the look of the game is decided.
     public class SandboxHud : MonoBehaviour
@@ -17,8 +17,8 @@ namespace DroneSandbox
         static readonly Color PanelColor = new Color(0.04f, 0.07f, 0.09f, 0.8f);
         static readonly Color ModalColor = new Color(0.03f, 0.05f, 0.07f, 0.94f);
 
-        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze" };
-        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack" };
+        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze", "Nightjar" };
+        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack", "heavy bomber, rearms" };
         static readonly string[] HelpLines =
         {
             "<b>CONTROLS</b>   (H to hide)",
@@ -27,19 +27,22 @@ namespace DroneSandbox
             "Right-click  -  move, or attack an enemy",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
-            "1 / 2 / 3  -  launch Scout / Strike / Kamikaze",
+            "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
             "Space  -  select all     X  -  stop     Esc  -  deselect",
             "Red dots: AA gun reach. Radars boost nearby AA.",
-            "T  -  thermal view (needs a Scout)     N  -  skip 2 h (free play)",
+            "T  -  thermal view (Wren-T Scout or Nightjar)",
+            "N  -  skip 2 hours (free play)",
+            "P  -  photo mode: fly a camera drone, F12 saves",
             "Yellow: mission targets and search areas.",
         };
 
         public bool showHelp = true;
+        public bool ShopOpen;  // the tech shop, opened from the main menu
         public float Scale => Mathf.Max(1f, Screen.height / 900f);
 
         SandboxGame game;
         RtsController rts;
-        GUIStyle label, title, small, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
+        GUIStyle label, title, small, smallWrap, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
         float stylesBuiltForScale;
         static Texture2D starTexture;
 
@@ -62,10 +65,12 @@ namespace DroneSandbox
             return new Rect(Screen.width - 392f * s, 12f * s, 380f * s, height);
         }
 
+        int LaunchCount => game.BomberAvailable ? 4 : 3;
+
         Rect LaunchBar()
         {
             float s = Scale;
-            float width = (3f * LaunchButtonWidth + 2f * LaunchButtonGap) * s;
+            float width = (LaunchCount * LaunchButtonWidth + (LaunchCount - 1) * LaunchButtonGap) * s;
             return new Rect((Screen.width - width) / 2f, Screen.height - 64f * s, width, 50f * s);
         }
 
@@ -101,7 +106,14 @@ namespace DroneSandbox
 
             if (game.Mode == GameMode.Menu)
             {
-                DrawMenu();
+                if (ShopOpen) DrawShop();
+                else DrawMenu();
+                return;
+            }
+
+            if (PhotoMode.Active)
+            {
+                DrawPhotoMode();
                 return;
             }
 
@@ -133,6 +145,7 @@ namespace DroneSandbox
             title = new GUIStyle(label) { fontSize = Mathf.RoundToInt(18f * s), fontStyle = FontStyle.Bold };
             small = new GUIStyle(label) { fontSize = Mathf.RoundToInt(12f * s) };
             small.normal.textColor = new Color(0.65f, 0.75f, 0.8f);
+            smallWrap = new GUIStyle(small) { wordWrap = true };
             centered = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(14f * s), richText = true };
             leftButton = new GUIStyle(button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(Mathf.RoundToInt(16f * s), 8, 4, 4) };
@@ -298,7 +311,7 @@ namespace DroneSandbox
             Fill(new Rect(bar.x - pad, bar.y - pad, bar.width + 2f * pad, bar.height + 2f * pad), PanelColor);
 
             bool wasEnabled = GUI.enabled;
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < LaunchCount; i++)
             {
                 int left = game.StockLeft((DroneType)i);
                 GUI.enabled = wasEnabled && game.drones.Count < SandboxGame.MaxDrones && left != 0;
@@ -329,21 +342,19 @@ namespace DroneSandbox
             if (sel.Count == 1)
             {
                 var d = sel[0];
-                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP", label);
+                string bombs = d.IsBomber ? $"     Bombs {d.BombsLeft}/{Drone.BomberLoad}" : "";
+                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP{bombs}", label);
                 Line(d.Status, label);
-                Line(d.IsKamikaze ? "Right-click an enemy to dive on it." : "Fires at enemies in range when idle.", small);
+                Line(d.IsKamikaze ? "Right-click an enemy to dive on it."
+                    : d.IsBomber ? "Right-click an enemy to bomb it. Rearms at base."
+                    : "Fires at enemies in range when idle.", small);
             }
             else
             {
-                int scouts = 0, strikes = 0, kamikazes = 0;
-                foreach (var d in sel)
-                {
-                    if (d.type == DroneType.Scout) scouts++;
-                    else if (d.type == DroneType.Strike) strikes++;
-                    else kamikazes++;
-                }
+                var counts = new int[LaunchNames.Length];
+                foreach (var d in sel) counts[(int)d.type]++;
                 Line($"<b>{sel.Count} drones selected</b>", label);
-                Line($"Scout {scouts}     Strike {strikes}     Kamikaze {kamikazes}", label);
+                Line($"Scout {counts[0]}     Strike {counts[1]}     Kamikaze {counts[2]}" + (counts[3] > 0 ? $"     Nightjar {counts[3]}" : ""), label);
                 Line("Right-click an enemy to attack together.", small);
             }
             Line("Right-click ground: move", small);
@@ -364,6 +375,24 @@ namespace DroneSandbox
                     i == 0 ? label : small);
         }
 
+        // Photo mode keeps the screen clear: the controls for a few seconds after it opens, and saved-photo news.
+        void DrawPhotoMode()
+        {
+            var photo = PhotoMode.Instance;
+            if (photo.Capturing) return;
+            if (Time.unscaledTime < photo.HintUntil)
+            {
+                float s = Scale;
+                var r = new Rect((Screen.width - 900f * s) / 2f, Screen.height - 70f * s, 900f * s, 52f * s);
+                Fill(r, PanelColor);
+                GUI.Label(new Rect(r.x, r.y + 4f * s, r.width, 22f * s), "<b>PHOTO MODE</b>", Tinted(centered, TargetColor));
+                GUI.Label(new Rect(r.x, r.y + 26f * s, r.width, 20f * s),
+                    "WASD fly   R / F up, down   Q / E turn   right-drag look   wheel zoom   Shift fast   [ ] time of day   F12 save   P exit",
+                    new GUIStyle(small) { alignment = TextAnchor.MiddleCenter });
+            }
+            DrawMessage();
+        }
+
         // Short news at the top of the screen: a target spotted or destroyed, no drones of a type left.
         void DrawMessage()
         {
@@ -382,7 +411,7 @@ namespace DroneSandbox
             var missions = Missions.All;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
             float rowHeight = 50f, gap = 8f;
-            float height = 172f + (missions.Count + 1) * (rowHeight + gap) + 56f;
+            float height = 172f + (missions.Count + 2) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
 
@@ -409,9 +438,65 @@ namespace DroneSandbox
                 y += (rowHeight + gap) * s;
             }
             var sandbox = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
-            if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, enemies respawn</size>", leftButton))
+            if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, all tech, enemies respawn</size>", leftButton))
                 game.StartSandbox();
+            y += (rowHeight + gap) * s;
+            var shop = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+            if (GUI.Button(shop, "<b>Tech shop</b>   <size=" + Mathf.RoundToInt(12f * s) + ">new drones and upgrades</size>", leftButton))
+                ShopOpen = true;
+            GUI.Label(new Rect(shop.xMax - 130f * s, shop.y, 116f * s, shop.height), $"<b>{Tech.Points}</b> points",
+                Tinted(new GUIStyle(label) { alignment = TextAnchor.MiddleRight }, TargetColor));
             GUI.Label(new Rect(r.x, r.yMax - 40f * s, r.width, 24f * s), "Finish a mission to unlock the next one.", Tinted(centered, small.normal.textColor));
+        }
+
+        // Buy new drones and upgrades with points earned in missions. Purchases are kept between missions.
+        void DrawShop()
+        {
+            float s = Scale;
+            var items = Tech.Items;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
+            float rowHeight = 62f, gap = 6f;
+            Rect r = Centered(700f, 132f + items.Length * (rowHeight + gap) + 72f);
+            Fill(r, ModalColor);
+
+            GUI.Label(new Rect(r.x, r.y + 16f * s, r.width, 44f * s), "TECH SHOP", big);
+            GUI.Label(new Rect(r.x, r.y + 62f * s, r.width, 24f * s),
+                $"<b>{Tech.Points}</b> points     {Tech.OwnedCount} of {items.Length} bought", Tinted(centered, TargetColor));
+            GUI.Label(new Rect(r.x + 40f * s, r.y + 90f * s, r.width - 80f * s, 36f * s),
+                "Earn points by destroying Dravin units in missions, plus a bonus for each new star. " +
+                "Free play has all the tech.",
+                Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * s) }, small.normal.textColor));
+
+            float y = r.y + 132f * s;
+            foreach (var item in items)
+            {
+                var row = new Rect(r.x + 24f * s, y, r.width - 48f * s, rowHeight * s);
+                bool owned = Tech.Owns(item.id);
+                Fill(row, owned ? new Color(Friendly.r, Friendly.g, Friendly.b, 0.08f) : new Color(1f, 1f, 1f, 0.04f));
+                float textWidth = row.width - 190f * s;
+                GUI.Label(new Rect(row.x + 14f * s, row.y + 7f * s, textWidth, 22f * s), $"<b>{item.name}</b>", label);
+                GUI.Label(new Rect(row.x + 14f * s, row.y + 29f * s, textWidth, 32f * s), item.info, smallWrap);
+                var buy = new Rect(row.xMax - 160f * s, row.y + 12f * s, 146f * s, row.height - 24f * s);
+                if (owned)
+                {
+                    GUI.Label(buy, "<b>OWNED</b>", Tinted(centered, Friendly));
+                }
+                else
+                {
+                    GUI.enabled = Tech.CanBuy(item);
+                    if (GUI.Button(buy, $"<b>Buy</b>    {item.cost} pts", button)) Tech.Buy(item);
+                    GUI.enabled = true;
+                }
+                y += (rowHeight + gap) * s;
+            }
+
+            var back = new Rect(r.x + (r.width - 200f * s) / 2f, r.yMax - 60f * s, 200f * s, 42f * s);
+            bool escape = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape;
+            if (GUI.Button(back, "<b>Back</b>  (Esc)", button) || escape)
+            {
+                if (escape) Event.current.Use();
+                ShopOpen = false;
+            }
         }
 
         void DrawBriefing()
@@ -426,8 +511,10 @@ namespace DroneSandbox
                 $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}", Tinted(small, TargetColor));
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
+            int bombers = game.StockLeft(DroneType.Bomber);
             GUI.Label(new Rect(x, r.y + 188f * s, w, 22f * s),
-                $"Drones:   Scout x{m.scouts}     Strike x{m.strikes}     Kamikaze x{m.kamikazes}", label);
+                $"Drones:   Scout x{game.StockLeft(DroneType.Scout)}     Strike x{game.StockLeft(DroneType.Strike)}     " +
+                $"Kamikaze x{game.StockLeft(DroneType.Kamikaze)}" + (bombers > 0 ? $"     Nightjar x{bombers}" : ""), label);
             GUI.Label(new Rect(x, r.y + 212f * s, w, 22f * s),
                 $"Targets: {game.TargetsTotal}     Three stars: use {m.par} drones or fewer", label);
             var start = new Rect(r.x + (r.width - 220f * s) / 2f, r.yMax - 76f * s, 220f * s, 46f * s);
@@ -445,7 +532,7 @@ namespace DroneSandbox
             float s = Scale;
             bool won = game.Result == MissionResult.Won;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
-            Rect r = Centered(480f, 320f);
+            Rect r = Centered(520f, 350f);
             Fill(r, ModalColor);
             GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
@@ -453,6 +540,9 @@ namespace DroneSandbox
             DrawStars(new Rect(r.x + (r.width - 180f * s) / 2f, r.y + 100f * s, 180f * s, 52f * s), game.Stars);
             GUI.Label(new Rect(r.x, r.y + 166f * s, r.width, 22f * s),
                 $"Drones used: <b>{game.DronesUsed}</b>  (three stars: {game.Mission.par} or fewer)     Time: {Clock(game.MissionTime)}", centered);
+            string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
+            GUI.Label(new Rect(r.x, r.y + 194f * s, r.width, 22f * s),
+                $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
 
             float bw = 130f * s, gap = 12f * s;
             float x0 = r.x + (r.width - 3f * bw - 2f * gap) / 2f, y = r.yMax - 72f * s;

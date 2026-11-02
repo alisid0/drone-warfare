@@ -154,7 +154,7 @@ namespace DroneSandbox
                 transform.localScale = peakScale * s;
                 Color c = Color.Lerp(startColor, endColor, t);
                 material.color = c;
-                if (glow) material.SetColor("_EmissionColor", c);
+                if (glow) Art.Glow(material, c);
             }
             else
             {

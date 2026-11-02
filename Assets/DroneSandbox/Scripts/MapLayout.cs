@@ -52,11 +52,34 @@ namespace DroneSandbox
             (EnemyType.AAGun, new Vector3(-12f, 0f, 48f)),
         };
 
-        // The river, upstream first. It comes down from the western hills and passes between your base
+        // The reservoir in the western hills: a lake held back by a curved dam, with a stepped spillway that
+        // lets the river out. The river starts at the foot of the dam.
+        public static readonly Vector2 DamPoint = new Vector2(-140f, 15f);
+        public const float LakeLevel = 12f;          // the lake's surface, metres above y = 0
+        public const float DamHalfSpan = 30f;        // half the gap the dam closes
+        // The lake, in dam-local metres (x downstream, y across): a broad basin behind the dam and a longer arm
+        // bending away north up the valley, each a wobbly ellipse (centre, axis angle in degrees from
+        // downstream, half length, half width, wobble seed), blended into one shore. Plus two rocky islands.
+        static readonly (Vector2 center, float angle, float halfLength, float halfWidth, float seed)[] LakeLobes =
+        {
+            (new Vector2(-34f, 0f), 0f, 50f, 33f, 0.7f),
+            (new Vector2(-72f, 58f), 120f, 62f, 38f, 2.3f),
+        };
+        static readonly (Vector2 center, float radius)[] Islands =
+        {
+            (new Vector2(-58f, 8f), 8f),
+            (new Vector2(-96f, 74f), 5f),
+        };
+
+        // Downstream along the river at the dam, and across the dam.
+        public static Vector2 DamDown { get; private set; }
+        public static Vector2 DamAcross => new Vector2(-DamDown.y, DamDown.x);
+
+        // The river, upstream first. It leaves the dam in the western hills and passes between your base
         // and enemy land.
         static readonly Vector2[] River =
         {
-            new Vector2(-250f, 30f), new Vector2(-170f, 22f), new Vector2(-120f, 8f), new Vector2(-85f, -10f),
+            DamPoint, new Vector2(-120f, 8f), new Vector2(-85f, -10f),
             new Vector2(-58f, -33f), new Vector2(-42f, -58f), new Vector2(-32f, -95f), new Vector2(-26f, -150f),
             new Vector2(-20f, -250f),
         };
@@ -78,9 +101,9 @@ namespace DroneSandbox
             // East road to a village on the far side.
             new[] { new Vector2(18f, 0f), new Vector2(40f, -22f), new Vector2(62f, -50f), new Vector2(85f, -80f),
                     new Vector2(150f, -120f), new Vector2(250f, -150f) },
-            // Farm track from the bridge up the far bank to a farmstead.
+            // Farm track from the bridge up the far bank to a farmstead, then north past the lake.
             new[] { new Vector2(-49f, -25f), new Vector2(-62f, 5f), new Vector2(-78f, 32f), new Vector2(-84f, 46f),
-                    new Vector2(-110f, 75f), new Vector2(-170f, 120f), new Vector2(-250f, 150f) },
+                    new Vector2(-110f, 75f), new Vector2(-126f, 128f), new Vector2(-148f, 190f), new Vector2(-165f, 250f) },
             // Supply road out of the back of your base.
             new[] { new Vector2(-88.5f, -71f), new Vector2(-110f, -72f), new Vector2(-160f, -82f), new Vector2(-250f, -95f) },
         };
@@ -108,6 +131,7 @@ namespace DroneSandbox
             foreach (var d in FixedDefences) FlatSites.Add(new Ground.FlatSite(d.position, DefenceRadius, true));
 
             RiverLine = Smooth(River, 2f);
+            DamDown = (RiverLine[Mathf.Min(4, RiverLine.Count - 1)] - RiverLine[0]).normalized;
             RoadLines = new List<List<Vector2>>();
             foreach (var road in Roads) RoadLines.Add(Smooth(road, 2f));
             // The river field reaches far out so the hills can open into a valley around the river.
@@ -140,10 +164,65 @@ namespace DroneSandbox
             return false;
         }
 
-        // Open ground for trees and rocks: not on a road, in the river, on a field, in a village or a base.
+        // A point relative to the dam: x metres downstream (negative is up the lake), y metres across.
+        public static Vector2 DamLocal(float x, float z)
+        {
+            var d = new Vector2(x - DamPoint.x, z - DamPoint.y);
+            return new Vector2(Vector2.Dot(d, DamDown), Vector2.Dot(d, DamAcross));
+        }
+
+        // Signed distance to the lake shore in metres: negative on the water, positive on land (and on the islands).
+        // The lobes' wobbly shores give coves and headlands; the dam cuts the lake off.
+        public static float LakeDistance(float x, float z)
+        {
+            Vector2 local = DamLocal(x, z);
+            float s = float.MaxValue;
+            foreach (var lobe in LakeLobes)
+            {
+                float a = lobe.angle * Mathf.Deg2Rad;
+                var axis = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                Vector2 d = local - lobe.center;
+                float du = Vector2.Dot(d, axis) / lobe.halfLength, dv = (axis.x * d.y - axis.y * d.x) / lobe.halfWidth;
+                float angle = Mathf.Atan2(dv, du);
+                float wobble = 1f + 0.09f * Mathf.Sin(3f * angle + lobe.seed) + 0.06f * Mathf.Sin(5f * angle + 2.1f * lobe.seed)
+                             + 0.035f * Mathf.Sin(11f * angle + 4f + lobe.seed);
+                float lobeDistance = (Mathf.Sqrt(du * du + dv * dv) - wobble) * lobe.halfWidth;
+                s = s == float.MaxValue ? lobeDistance : SmoothMin(s, lobeDistance, 14f);
+            }
+            s = Mathf.Max(s, local.x + 0.5f);
+            foreach (var island in Islands) s = Mathf.Max(s, island.radius - Vector2.Distance(local, island.center));
+            return s;
+        }
+
+        static float SmoothMin(float a, float b, float k)
+        {
+            float h = Mathf.Clamp01(0.5f + 0.5f * (b - a) / k);
+            return Mathf.Lerp(b, a, h) - k * h * (1f - h);
+        }
+
+        public static int IslandCount => Islands.Length;
+        public static Vector2 IslandCenter(int i) => DamPoint + DamDown * Islands[i].center.x + DamAcross * Islands[i].center.y;
+        public static float IslandRadius(int i) => Islands[i].radius;
+
+        // The gorge below the dam, which stays clear so the spillway can be seen.
+        public static bool InGorge(Vector2 p, float margin)
+        {
+            Vector2 local = DamLocal(p.x, p.y);
+            return local.x > -2f && local.x < 48f + margin && Mathf.Abs(local.y) < 22f + margin;
+        }
+
+        // The dam and its abutments, with a margin.
+        public static bool NearDam(Vector2 p, float margin)
+        {
+            Vector2 local = DamLocal(p.x, p.y);
+            return local.x > -12f - margin && local.x < 14f + margin && Mathf.Abs(local.y) < 52f + margin;
+        }
+
+        // Open ground for trees and rocks: not on a road, in the river or lake, on a field, in a village or a base.
         public static bool IsWild(Vector2 p, float margin)
         {
             if (Mathf.Abs(p.x) > Edge || Mathf.Abs(p.y) > Edge) return false;
+            if (LakeDistance(p.x, p.y) < 1.5f + margin || NearDam(p, margin) || InGorge(p, margin)) return false;
             if (RoadField.Distance(p.x, p.y) < RoadHalfWidth + 1.5f + margin) return false;
             if (RiverField.Distance(p.x, p.y) < RiverHalfWidth + 2.5f + margin) return false;
             return !NearFlatSite(p, 3f + margin) && !NearVillage(p, margin) && !InField(p, 1f + margin);
@@ -251,6 +330,7 @@ namespace DroneSandbox
                     if (Mathf.Abs(p.x) > Edge - 15f || Mathf.Abs(p.y) > Edge - 15f) return false;
                     if (RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f) return false;
                     if (RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f) return false;
+                    if (LakeDistance(p.x, p.y) < 30f || NearDam(p, 15f)) return false;
                     if (NearFlatSite(p, 4f) || NearVillage(p, 0f)) return false;
                 }
             }

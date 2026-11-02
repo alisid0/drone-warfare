@@ -145,7 +145,7 @@ namespace DroneSandbox
                         Factions.Paint(transform, new Vector3(side * 0.87f, 1.2f, -0.55f), new Vector3(side, 0f, 0f), 0.7f, false);
                         break;
                     case EnemyType.Radar:
-                        Factions.Paint(transform, new Vector3(side * 0.92f, 0.6f, 0.35f), new Vector3(side, 0f, 0f), 0.55f, false);
+                        Factions.Paint(transform, new Vector3(side * 0.82f, 1.12f, -0.40f), new Vector3(side, 0f, 0f), 0.55f, false);
                         break;
                 }
             }
@@ -280,10 +280,15 @@ namespace DroneSandbox
 
         // ---- Behaviour ----
 
+        // True while the vehicle is driving (bombs miss moving targets more often).
+        public bool IsMoving { get; private set; }
+
         void Move(float dt)
         {
+            Vector3 before = transform.position;
             if (route != null) FollowRoute(dt);
             else if (!parked) Patrol(dt);
+            IsMoving = (transform.position - before).sqrMagnitude > 0.0001f;
         }
 
         void FollowRoute(float dt)
@@ -317,7 +322,7 @@ namespace DroneSandbox
             cooldown = Random.Range(6f, 10f);
             Vector3 muzzle = barrel != null ? barrel.TransformPoint(new Vector3(0f, 0f, 4.2f)) : AimPoint + transform.forward * 3f;
             Effects.Explosion(muzzle, 1.1f);
-            if (barrel != null) barrel.localPosition = barrelRest - Vector3.forward * 0.6f;
+            if (barrel != null) barrel.localPosition = barrelRest - barrel.localRotation * Vector3.forward * 0.6f; // kicks back along the bore
         }
 
         void Patrol(float dt)

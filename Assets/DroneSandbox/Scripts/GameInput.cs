@@ -8,7 +8,8 @@ namespace DroneSandbox
     public enum GameKey
     {
         Up, Down, Left, Right, RotateLeft, RotateRight, Shift,
-        SelectAll, Deselect, Stop, Help, Launch1, Launch2, Launch3, Thermal, SkipTime
+        SelectAll, Deselect, Stop, Help, Launch1, Launch2, Launch3, Launch4, Thermal, SkipTime,
+        Photo, Rise, Sink, TimeBack, TimeForward, Screenshot
     }
 
     // Reads mouse and keyboard through whichever input backend the project uses
@@ -22,6 +23,7 @@ namespace DroneSandbox
         public static bool LeftHeld => Mouse.current != null && Mouse.current.leftButton.isPressed;
         public static bool LeftUp => Mouse.current != null && Mouse.current.leftButton.wasReleasedThisFrame;
         public static bool RightDown => Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame;
+        public static bool RightHeld => Mouse.current != null && Mouse.current.rightButton.isPressed;
         static float RawScroll => Mouse.current != null ? Mouse.current.scroll.ReadValue().y : 0f;
 
         public static bool Held(GameKey key)
@@ -60,8 +62,15 @@ namespace DroneSandbox
                 case GameKey.Launch1: return new[] { Key.Digit1, Key.Numpad1 };
                 case GameKey.Launch2: return new[] { Key.Digit2, Key.Numpad2 };
                 case GameKey.Launch3: return new[] { Key.Digit3, Key.Numpad3 };
+                case GameKey.Launch4: return new[] { Key.Digit4, Key.Numpad4 };
                 case GameKey.Thermal: return new[] { Key.T };
                 case GameKey.SkipTime: return new[] { Key.N };
+                case GameKey.Photo: return new[] { Key.P };
+                case GameKey.Rise: return new[] { Key.R };
+                case GameKey.Sink: return new[] { Key.F };
+                case GameKey.TimeBack: return new[] { Key.LeftBracket, Key.Comma };
+                case GameKey.TimeForward: return new[] { Key.RightBracket, Key.Period };
+                case GameKey.Screenshot: return new[] { Key.F12, Key.K };
                 default: return new Key[0];
             }
         }
@@ -71,6 +80,7 @@ namespace DroneSandbox
         public static bool LeftHeld => Input.GetMouseButton(0);
         public static bool LeftUp => Input.GetMouseButtonUp(0);
         public static bool RightDown => Input.GetMouseButtonDown(1);
+        public static bool RightHeld => Input.GetMouseButton(1);
         static float RawScroll => Input.mouseScrollDelta.y;
 
         public static bool Held(GameKey key)
@@ -105,8 +115,15 @@ namespace DroneSandbox
                 case GameKey.Launch1: return new[] { KeyCode.Alpha1, KeyCode.Keypad1 };
                 case GameKey.Launch2: return new[] { KeyCode.Alpha2, KeyCode.Keypad2 };
                 case GameKey.Launch3: return new[] { KeyCode.Alpha3, KeyCode.Keypad3 };
+                case GameKey.Launch4: return new[] { KeyCode.Alpha4, KeyCode.Keypad4 };
                 case GameKey.Thermal: return new[] { KeyCode.T };
                 case GameKey.SkipTime: return new[] { KeyCode.N };
+                case GameKey.Photo: return new[] { KeyCode.P };
+                case GameKey.Rise: return new[] { KeyCode.R };
+                case GameKey.Sink: return new[] { KeyCode.F };
+                case GameKey.TimeBack: return new[] { KeyCode.LeftBracket, KeyCode.Comma };
+                case GameKey.TimeForward: return new[] { KeyCode.RightBracket, KeyCode.Period };
+                case GameKey.Screenshot: return new[] { KeyCode.F12, KeyCode.K };
                 default: return new KeyCode[0];
             }
         }

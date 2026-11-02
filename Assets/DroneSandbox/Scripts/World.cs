@@ -9,23 +9,27 @@ namespace DroneSandbox
         public static Transform Build(Transform parent, bool preview)
         {
             MapLayout.Prepare();
+            Undergrowth.Reset(); // the woods below note their trees for it
             var root = new GameObject("World").transform;
             root.SetParent(parent, false);
             var rng = new System.Random(7); // same map every run
 
             Ground.Build(root);
+            Backdrop.Build(root);
             Water.Build(root);
+            Reservoir.Build(root);
             Farmland.Build(root, rng);
+            Grass.Plant(Ground.Current);
             var scenery = new GameObject("Scenery").transform;
             scenery.SetParent(root, false);
             BuildBridge(scenery);
             BuildVillages(scenery, rng);
             BuildWoods(scenery, rng);
             BuildRocks(scenery, rng);
+            Undergrowth.Build(scenery);
             Bases.BuildPlayerBase(root);
             Bases.BuildEnemyHq(root);
             if (preview) Bases.PreviewUnits(root);
-            AddReflections(root);
             return root;
         }
 
@@ -157,11 +161,11 @@ namespace DroneSandbox
 
             // Woods inside the battlefield (broadleaf and pine) and darker conifer forest on the hills around it.
             int inner = 0, outer = 0;
-            for (int attempt = 0; attempt < 400 && (inner < 11 || outer < 16); attempt++)
+            for (int attempt = 0; attempt < 600 && (inner < 11 || outer < 28); attempt++)
             {
                 var c = new Vector2(Range(rng, -215f, 215f), Range(rng, -215f, 215f));
                 bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > 105f;
-                if (isOuter ? outer >= 16 : inner >= 11) continue;
+                if (isOuter ? outer >= 28 : inner >= 11) continue;
                 if (!MapLayout.IsWild(c, 3f)) continue;
                 if (isOuter) outer++; else inner++;
                 float radius = isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f);
@@ -176,6 +180,7 @@ namespace DroneSandbox
                         float wobble = 0.75f + 0.35f * Mathf.PerlinNoise(seed % 1000 + Mathf.Atan2(z, x) * 1.3f, 0.5f);
                         if (new Vector2(x, z).magnitude > radius * wobble || !MapLayout.IsWild(p, 0.5f)) continue;
                         Place(PickTree(rng, isOuter), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
+                        Undergrowth.NoteTree(p);
                     }
                 }
             }
@@ -194,6 +199,7 @@ namespace DroneSandbox
                     double roll = rng.NextDouble();
                     string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
                     Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, root);
+                    if (model != "Scenery_Bush") Undergrowth.NoteTree(p);
                 }
             }
         }
@@ -208,6 +214,8 @@ namespace DroneSandbox
 
         // ---- Rocks ----
 
+        // Boulders out on the open ground and against the riverbanks by the bridge: photo-scanned ones (see Scans)
+        // when they've been imported, else the procedural rocks.
         static void BuildRocks(Transform parent, System.Random rng)
         {
             var root = new GameObject("Rocks").transform;
@@ -218,12 +226,14 @@ namespace DroneSandbox
                 var p = new Vector2(Range(rng, -200f, 200f), Range(rng, -200f, 200f));
                 if (!MapLayout.IsWild(p, 1f)) continue;
                 float scale = Range(rng, 0.6f, 1.8f);
-                Place(rng.NextDouble() < 0.5 ? "Scenery_Rock" : "Scenery_Rock_B", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f),
-                    scale, 0.3f * scale, root);
+                double roll = rng.NextDouble();
+                Scans.Rock(Scans.Boulders, roll, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.55f + 0.3f * scale, root,
+                    roll < 0.5 ? "Scenery_Rock" : "Scenery_Rock_B", scale, 0.3f * scale);
                 placed++;
             }
             // Boulders piled against the riverbanks by the bridge.
             Vector2 b = MapLayout.BridgePoint;
+            var variety = new System.Random(13); // picks the scans without changing rng's sequence
             for (int k = 0; k < 8; k++)
             {
                 var p = b + new Vector2(Range(rng, -11f, 11f), Range(rng, -11f, 11f));
@@ -231,29 +241,9 @@ namespace DroneSandbox
                 if (d < MapLayout.RiverHalfWidth - 0.5f || d > MapLayout.RiverHalfWidth + 3f) continue;
                 if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 3.5f) continue;
                 float scale = Range(rng, 0.5f, 0.9f);
-                Place("Scenery_Rock_B", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), scale, 0.25f * scale, root);
+                Scans.Rock(Scans.Rocks, variety.NextDouble(), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.4f + 0.75f * scale, root,
+                    "Scenery_Rock_B", scale, 0.25f * scale);
             }
-        }
-
-        // ---- Lighting ----
-
-        // A reflection probe covering the whole map, rendered once, so the river and metal pick up the sky.
-        // (Needs realtime reflection probes on in the quality settings.)
-        static void AddReflections(Transform root)
-        {
-            var go = new GameObject("Reflections");
-            go.transform.SetParent(root, false);
-            go.transform.position = new Vector3(0f, 25f, 0f);
-            var probe = go.AddComponent<ReflectionProbe>();
-            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
-            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
-            probe.timeSlicingMode = UnityEngine.Rendering.ReflectionProbeTimeSlicingMode.NoTimeSlicing;
-            probe.size = new Vector3(Ground.Size + 40f, 150f, Ground.Size + 40f);
-            probe.resolution = 256;
-            probe.hdr = true;
-            probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.Skybox;
-            probe.importance = 0;
-            probe.RenderProbe();
         }
 
         static float Range(System.Random rng, float min, float max) => min + (float)rng.NextDouble() * (max - min);
