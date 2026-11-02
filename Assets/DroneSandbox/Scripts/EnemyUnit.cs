@@ -3,18 +3,21 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    public enum EnemyType { Tank, Truck, AAGun, Radar, Artillery, Command }
+    public enum EnemyType { Tank, Truck, AAGun, Radar, Artillery, Command, APC, Rocket, Tanker, Jammer, Depot }
 
-    // Enemy targets. Tanks and trucks patrol (or, in missions, park or drive a convoy route), AA guns shoot
-    // at drones, a radar extends the range of nearby AA guns, artillery shells your lines, and the command
-    // post is the HQ building itself.
+    // Enemy targets. Tanks, APCs, trucks and fuel tankers patrol (or, in missions, park or drive a convoy route),
+    // AA guns shoot at drones, a radar extends the range of nearby AA guns, artillery and rocket launchers shell
+    // your lines, a jammer cuts the link of any drone that flies into its circle (see Drone), an ammunition depot
+    // just sits there to be blown up, and the command post is the HQ building itself.
     public class EnemyUnit : Unit
     {
         public const float RadarCoverage = 35f; // AA guns this close to a radar get extra range
         public const float RadarRangeBonus = 6f;
+        public const float JamRadius = 24f;     // drones inside a jammer's circle lose their link
 
         public EnemyType type;
         public bool isTarget;          // a mission objective
+        public bool isDecoy;           // an inflatable fake (see Situations: Decoy Field)
         public bool Hidden { get; private set; }
         public Vector3 searchCenter;   // where the HUD draws the search circle while hidden
         float moveSpeed;
@@ -32,7 +35,7 @@ namespace DroneSandbox
         Vector3 barrelRest;
         GameObject structure;          // the building a command post stands for
 
-        public bool IsMobile => type == EnemyType.Tank || type == EnemyType.Truck;
+        public bool IsMobile => type == EnemyType.Tank || type == EnemyType.Truck || type == EnemyType.APC || type == EnemyType.Tanker;
 
         public float CurrentRange =>
             range + (SandboxGame.Instance.RadarCovers(transform.position) ? RadarRangeBonus : 0f);
@@ -101,12 +104,35 @@ namespace DroneSandbox
                     unitName = "Command post";
                     maxHp = 320f; radius = 6f; aimHeight = 3.5f;
                     break;
+                case EnemyType.APC:
+                    unitName = "APC";
+                    maxHp = 110f; moveSpeed = 4.5f; radius = 2.0f; aimHeight = 1.1f;
+                    break;
+                case EnemyType.Rocket:
+                    unitName = "Rocket launcher";
+                    maxHp = 70f; radius = 2.0f; aimHeight = 1.3f;
+                    cooldown = Random.Range(4f, 10f);
+                    break;
+                case EnemyType.Tanker:
+                    unitName = "Fuel tanker";
+                    maxHp = 50f; moveSpeed = 5f; radius = 2.0f; aimHeight = 1.3f;
+                    break;
+                case EnemyType.Jammer:
+                    unitName = "Jammer";
+                    maxHp = 70f; radius = 1.8f; aimHeight = 1.4f;
+                    break;
+                case EnemyType.Depot:
+                    unitName = "Ammo depot";
+                    maxHp = 150f; radius = 3.4f; aimHeight = 0.9f;
+                    break;
             }
             hp = maxHp;
             if (enemyType == EnemyType.Command) return; // the HQ building in the world is its model
 
-            // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes.
-            var model = Art.TryModel("Enemy_" + enemyType, transform);
+            // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes. The newer
+            // vehicles (Tools/Blender/make_sectors.py) are built at full size; the game's vehicles are drawn at about
+            // half, so they're scaled to match the tanks and trucks.
+            var model = Art.TryModel("Enemy_" + enemyType, transform, ModelScale(enemyType));
             if (model != null)
             {
                 foreach (var t in model.GetComponentsInChildren<Transform>())
@@ -118,9 +144,12 @@ namespace DroneSandbox
                 if (barrel != null) barrelRest = barrel.localPosition;
                 PaintInsignia(enemyType);
                 if (IsMobile)
-                    foreach (float side in new[] { -0.6f, 0.6f })
-                        DayNight.AddNightLight(transform, new Vector3(side, 0.95f, 1.9f), new Vector3(8f, 0f, 0f), LightType.Spot,
+                {
+                    Vector3 lamp = Headlights(enemyType);
+                    foreach (float side in new[] { -1f, 1f })
+                        DayNight.AddNightLight(transform, new Vector3(side * lamp.x, lamp.y, lamp.z), new Vector3(8f, 0f, 0f), LightType.Spot,
                             new Color(1f, 0.92f, 0.75f), 6f, 30f, 70f);
+                }
                 muzzleLocal = new Vector3(0f, 1.8f, 1.7f);
             }
             else
@@ -128,6 +157,21 @@ namespace DroneSandbox
                 BuildPrimitiveModel(enemyType);
             }
             if (IsMobile) waypoint = SandboxGame.Instance.RandomEnemyPoint();
+        }
+
+        static float ModelScale(EnemyType t) =>
+            t == EnemyType.APC || t == EnemyType.Rocket || t == EnemyType.Tanker || t == EnemyType.Jammer ? 0.5f
+            : t == EnemyType.Depot ? 0.6f : 1f;
+
+        // Where a vehicle's headlights are (one side; mirrored), in the unit's space.
+        static Vector3 Headlights(EnemyType t)
+        {
+            switch (t)
+            {
+                case EnemyType.APC: return new Vector3(0.47f, 0.77f, 1.7f);
+                case EnemyType.Tanker: return new Vector3(0.46f, 0.73f, 1.79f);
+                default: return new Vector3(0.6f, 0.95f, 1.9f);
+            }
         }
 
         // Dravin emblems on the model's flanks (positions fit the Blender models).
@@ -146,6 +190,19 @@ namespace DroneSandbox
                         break;
                     case EnemyType.Radar:
                         Factions.Paint(transform, new Vector3(side * 0.82f, 1.12f, -0.40f), new Vector3(side, 0f, 0f), 0.55f, false);
+                        break;
+                    // The newer vehicles, at their half scale.
+                    case EnemyType.APC:
+                        Factions.Paint(transform, new Vector3(side * 0.65f, 0.84f, 0.54f), new Vector3(side * 0.92f, 0.4f, 0f).normalized, 0.5f, false);
+                        break;
+                    case EnemyType.Rocket:
+                        Factions.Paint(transform, new Vector3(side * 0.6f, 0.76f, 0.81f), new Vector3(side, 0f, 0f), 0.4f, false);
+                        break;
+                    case EnemyType.Tanker:
+                        Factions.Paint(transform, new Vector3(side * 0.48f, 1.02f, -1.04f), new Vector3(side, 0f, 0f), 0.6f, false);
+                        break;
+                    case EnemyType.Jammer:
+                        Factions.Paint(transform, new Vector3(side * 0.62f, 1.18f, -0.9f), new Vector3(side, 0f, 0f), 0.55f, false);
                         break;
                 }
             }
@@ -197,6 +254,41 @@ namespace DroneSandbox
                         Art.Dark, new Vector3(70f, 0f, 0f));
                     break;
 
+                case EnemyType.APC:
+                case EnemyType.Tanker:
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 1.1f, 0f), new Vector3(2.6f, 1.4f, 6.5f),
+                        enemyType == EnemyType.Tanker ? new Color(0.25f, 0.26f, 0.22f) : Art.EnemyOlive);
+                    foreach (float x in new[] { -1.2f, 1.2f })
+                        foreach (float z in new[] { -2.2f, -0.7f, 0.8f, 2.3f })
+                            Art.Part(PrimitiveType.Cylinder, root, new Vector3(x, 0.45f, z), new Vector3(0.9f, 0.15f, 0.9f), Art.Dark, new Vector3(0f, 0f, 90f));
+                    if (enemyType == EnemyType.APC)
+                    {
+                        turret = Pivot(root, new Vector3(0f, 2.0f, 0.4f));
+                        Art.Part(PrimitiveType.Cube, turret, Vector3.zero, new Vector3(1.1f, 0.5f, 1.3f), Art.EnemyOliveDark);
+                    }
+                    break;
+
+                case EnemyType.Rocket:
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 1.2f, 2.3f), new Vector3(2.3f, 1.6f, 1.8f), Art.EnemyOlive);
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.8f, -0.6f), new Vector3(2.3f, 0.5f, 4.2f), Art.EnemyOliveDark);
+                    turret = Pivot(root, new Vector3(0f, 1.4f, -1f));
+                    Art.Part(PrimitiveType.Cube, turret, new Vector3(0f, 0.6f, 0f), new Vector3(2f, 1f, 3.2f), Art.EnemyOlive, new Vector3(-25f, 0f, 0f));
+                    break;
+
+                case EnemyType.Jammer:
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 1.3f, 0f), new Vector3(2.4f, 2f, 5.5f), Art.EnemyOlive);
+                    turret = Pivot(root, new Vector3(0f, 2.3f, -1.5f));
+                    Art.Part(PrimitiveType.Cylinder, turret, new Vector3(0f, 3f, 0f), new Vector3(0.18f, 3f, 0.18f), Art.Dark);
+                    Art.Part(PrimitiveType.Cube, turret, new Vector3(0f, 6.1f, 0f), new Vector3(1.6f, 0.4f, 0.1f), Art.Metal);
+                    break;
+
+                case EnemyType.Depot:
+                    for (int k = 0; k < 6; k++)
+                        Art.Part(PrimitiveType.Cube, root, new Vector3((k % 3 - 1) * 2.2f, 0.5f + (k / 3) * 0.9f, (k / 3 - 0.5f) * 1.5f),
+                            new Vector3(1.8f, 0.8f, 1.2f), new Color(0.36f, 0.32f, 0.2f));
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 2.6f, 0f), new Vector3(9f, 0.1f, 7f), Art.EnemyOliveDark);
+                    break;
+
                 case EnemyType.Radar:
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.3f, 0f), new Vector3(1.6f, 0.6f, 1.6f), Art.EnemyOlive);
                     Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 1.5f, 0f), new Vector3(0.2f, 1.2f, 0.2f), Art.Dark);
@@ -223,11 +315,19 @@ namespace DroneSandbox
             switch (type)
             {
                 case EnemyType.Tank:
+                case EnemyType.APC:
                     Move(dt);
                     TrackNearestDrone(30f, 40f, dt);
                     break;
                 case EnemyType.Truck:
+                case EnemyType.Tanker:
                     Move(dt);
+                    break;
+                case EnemyType.Rocket:
+                    Shell(dt);
+                    break;
+                case EnemyType.Jammer:
+                    SpinTurret(25f * dt);
                     break;
                 case EnemyType.AAGun:
                     Defend(dt);
@@ -275,6 +375,8 @@ namespace DroneSandbox
         protected override void Die()
         {
             if (structure != null) Effects.Burn(structure, transform.position + Vector3.up * 6f);
+            // Fuel and ammunition go up with a much bigger bang.
+            if (type == EnemyType.Tanker || type == EnemyType.Depot) Effects.Explosion(AimPoint + Vector3.up, radius * 2.5f);
             base.Die();
         }
 

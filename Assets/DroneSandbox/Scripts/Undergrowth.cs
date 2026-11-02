@@ -44,23 +44,39 @@ namespace DroneSandbox
             WoodlandFloor(Group(root, "Woodland Floor"), rng);
             WoodEdges(Group(root, "Wood Edges"), rng);
             Deadwood(Group(root, "Deadwood"), rng);
-            Reset();
+            placedCells.Clear(); // the trees stay noted: missions keep their targets out from under them (UnderTrees)
         }
 
         // ---- The waterside ----
 
-        // The lake shore: a band that widens and narrows between 2 and 6 m from the water. The lake lies upstream of
-        // the dam, so points are tried in a box round it in dam coordinates and kept when they land in the band.
+        // The lake shore: a band that widens and narrows between 2 and 6 m from the water. The reservoir lies
+        // upstream of the dam, so points are tried in a box round it in dam coordinates; round natural lakes and
+        // pools, in a ring round a random one. Points are kept when they land in the band.
         static void LakeShore(Transform root, System.Random rng)
         {
             int[] count = new int[3], cap = { 22, 14, 30 }; // pebbles, stones, plants
+            var ponds = MapLayout.Plan.ponds;
+            if (!MapLayout.HasDam && ponds.Count == 0) return;
             for (int attempt = 0; attempt < 30000 && !Full(count, cap); attempt++)
             {
-                var local = new Vector2(Range(rng, -140f, 2f), Range(rng, -50f, 125f));
-                Vector2 p = MapLayout.DamPoint + MapLayout.DamDown * local.x + MapLayout.DamAcross * local.y;
+                Vector2 p;
+                float level;
+                if (MapLayout.HasDam && (ponds.Count == 0 || rng.NextDouble() < 0.5))
+                {
+                    var local = new Vector2(Range(rng, -140f, 2f), Range(rng, -50f, 125f));
+                    p = MapLayout.DamPoint + MapLayout.DamDown * local.x + MapLayout.DamAcross * local.y;
+                    level = MapLayout.LakeLevel;
+                }
+                else
+                {
+                    var pond = ponds[rng.Next(ponds.Count)];
+                    float a = Range(rng, 0f, Mathf.PI * 2f);
+                    p = pond.center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * pond.radius * Range(rng, 0.85f, 1.45f);
+                    level = pond.level;
+                }
                 float edge = MapLayout.LakeDistance(p.x, p.y);
                 if (edge < 0.3f || edge > Band(p, 0f) || !OpenGround(p)) continue;
-                if (Ground.HeightAt(At(p)) < MapLayout.LakeLevel + 0.05f) continue; // still under the water
+                if (Ground.HeightAt(At(p)) < level + 0.05f) continue; // still under the water
                 Waterside(root, rng, p, edge, count, cap);
             }
         }
@@ -275,6 +291,13 @@ namespace DroneSandbox
         }
 
         static IEnumerable<Vector2> TreesNear(Vector2 p, float radius) => Near(treeCells, p, radius);
+
+        // Whether a tree stands within `room` of p: Situations keeps mission targets out from under the canopies.
+        public static bool UnderTrees(Vector2 p, float room)
+        {
+            foreach (var _ in TreesNear(p, room)) return true;
+            return false;
+        }
 
         static bool Crowded(Vector2 p, float room)
         {

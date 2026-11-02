@@ -204,7 +204,7 @@ namespace DroneSandbox
         static float Floor(Vector3 p)
         {
             float floor = Ground.HeightAt(p);
-            if (MapLayout.LakeDistance(p.x, p.z) < 0f) floor = Mathf.Max(floor, MapLayout.LakeLevel);
+            floor = Mathf.Max(floor, MapLayout.WaterLevelAt(p.x, p.z));
             float river = MapLayout.RiverField.Query(p.x, p.z, out float water, out _);
             if (river < MapLayout.RiverHalfWidth) floor = Mathf.Max(floor, water);
             return floor + Clearance;

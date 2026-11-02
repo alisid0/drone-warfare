@@ -217,6 +217,19 @@ namespace DroneSandbox
                 Rearm(dt);
                 return;
             }
+            if (Jammed())
+            {
+                // The link is gone: the drone drops its orders, hangs where it is and sinks, and comes down after
+                // a few seconds unless the jammer is destroyed first.
+                if (jammedFor == 0f) SandboxGame.Instance.ShowMessage(unitName + " jammed: link lost");
+                jammedFor += dt;
+                attackTarget = null;
+                moveTarget = null;
+                Fly(transform.position + Vector3.down * 1.5f, false, dt * 0.5f);
+                if (jammedFor > 6f) TakeDamage(maxHp * 0.5f * dt);
+                return;
+            }
+            jammedFor = 0f;
 
             // Idle gun and missile drones engage the nearest enemy in range on their own.
             if (attackTarget == null && !moveTarget.HasValue && !IsKamikaze)
@@ -276,6 +289,21 @@ namespace DroneSandbox
             }
 
             Fly(goal, diving, dt);
+        }
+
+        float jammedFor;
+
+        // Inside a working jammer's circle.
+        bool Jammed()
+        {
+            foreach (var e in SandboxGame.Instance.enemies)
+            {
+                if (e == null || e.type != EnemyType.Jammer || !e.IsAlive || e.Hidden) continue;
+                Vector3 offset = e.transform.position - transform.position;
+                offset.y = 0f;
+                if (offset.magnitude < EnemyUnit.JamRadius) return true;
+            }
+            return false;
         }
 
         void Fly(Vector3 goal, bool diving, float dt)

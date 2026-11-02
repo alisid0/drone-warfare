@@ -16,6 +16,7 @@ namespace DroneSandbox
         public static void Build(Transform parent)
         {
             MapLayout.Prepare();
+            if (!MapLayout.HasDam) return; // a sector without a reservoir
             var root = new GameObject("Reservoir").transform;
             root.SetParent(parent, false);
             var rng = new System.Random(23);

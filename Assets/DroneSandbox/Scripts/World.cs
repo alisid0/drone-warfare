@@ -2,8 +2,9 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Builds everything on the map that isn't a unit: terrain, river, fields, villages, woods, the bridge and
-    // both bases, all from MapLayout. Used by the game (SandboxGame) and by the editor preview (MapPreview).
+    // Builds everything on the map that isn't a unit: terrain, river, fields, villages, woods, bridges, the
+    // sector's special features and both bases, all from MapLayout. Used by the game (SandboxGame) and by the
+    // editor preview (MapPreview).
     public static class World
     {
         public static Transform Build(Transform parent, bool preview)
@@ -12,7 +13,7 @@ namespace DroneSandbox
             Undergrowth.Reset(); // the woods below note their trees for it
             var root = new GameObject("World").transform;
             root.SetParent(parent, false);
-            var rng = new System.Random(7); // same map every run
+            var rng = new System.Random(MapLayout.Plan.worldSeed); // same map every time for a sector
 
             Ground.Build(root);
             Backdrop.Build(root);
@@ -22,10 +23,11 @@ namespace DroneSandbox
             Grass.Plant(Ground.Current);
             var scenery = new GameObject("Scenery").transform;
             scenery.SetParent(root, false);
-            BuildBridge(scenery);
+            foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
             BuildWoods(scenery, rng);
             BuildRocks(scenery, rng);
+            Features.Build(scenery);
             Undergrowth.Build(scenery);
             Bases.BuildPlayerBase(root);
             Bases.BuildEnemyHq(root);
@@ -57,9 +59,8 @@ namespace DroneSandbox
 
         // ---- Bridge ----
 
-        static void BuildBridge(Transform parent)
+        static void BuildBridge(Transform parent, Vector2 p)
         {
-            Vector2 p = MapLayout.BridgePoint;
             MapLayout.RoadField.Query(p.x, p.y, out _, out int segment);
             Vector2 dir = MapLayout.RoadField.Direction(segment);
             // The deck sits level with the road where it meets the banks, and spans the dip between them.
@@ -89,12 +90,13 @@ namespace DroneSandbox
 
         static void BuildVillages(Transform parent, System.Random rng)
         {
-            for (int v = 0; v < MapLayout.Villages.Length; v++)
+            var plan = MapLayout.Plan;
+            for (int v = 0; v < plan.villages.Count; v++)
             {
                 var root = new GameObject("Village " + (v + 1)).transform;
                 root.SetParent(parent, false);
-                Vector2 center = MapLayout.Villages[v];
-                bool farmstead = v == MapLayout.Villages.Length - 1;
+                Vector2 center = plan.villages[v];
+                bool farmstead = plan.farmsteads[v];
                 MapLayout.RoadField.Query(center.x, center.y, out _, out int segment);
                 Vector2 along = MapLayout.RoadField.Direction(segment);
                 Vector2 across = new Vector2(-along.y, along.x);
@@ -107,7 +109,7 @@ namespace DroneSandbox
                         Vector2 p = center + along * s + across * side * (MapLayout.RoadHalfWidth + 8f);
                         if (!Buildable(p)) continue;
                         string model;
-                        if (v == 0 && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f) model = "Scenery_Church";
+                        if (v == 0 && !farmstead && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f) model = "Scenery_Church";
                         else if (farmstead) model = s < 0f ? "Scenery_Barn" : "Scenery_House_A";
                         else
                         {
@@ -159,13 +161,18 @@ namespace DroneSandbox
             var root = new GameObject("Woods").transform;
             root.SetParent(parent, false);
 
-            // Woods inside the battlefield (broadleaf and pine) and darker conifer forest on the hills around it.
+            // Woods inside the battlefield (broadleaf and pine) and darker conifer forest on the hills around it, as
+            // many as the sector's forest share asks for (0.3 in the Varrow Valley: 11 and 28 woods).
+            var plan = MapLayout.Plan;
+            int innerWant = Mathf.Min(24, Mathf.RoundToInt(11f * plan.forest / 0.3f));
+            int outerWant = Mathf.Min(44, Mathf.RoundToInt(28f * plan.forest / 0.3f));
             int inner = 0, outer = 0;
-            for (int attempt = 0; attempt < 600 && (inner < 11 || outer < 28); attempt++)
+            int attempts = plan.kind == SectorKind.VarrowValley ? 600 : 600 + 20 * (innerWant + outerWant);
+            for (int attempt = 0; attempt < attempts && (inner < innerWant || outer < outerWant); attempt++)
             {
                 var c = new Vector2(Range(rng, -215f, 215f), Range(rng, -215f, 215f));
                 bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > 105f;
-                if (isOuter ? outer >= 28 : inner >= 11) continue;
+                if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
                 if (!MapLayout.IsWild(c, 3f)) continue;
                 if (isOuter) outer++; else inner++;
                 float radius = isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f);
@@ -178,7 +185,7 @@ namespace DroneSandbox
                         Vector2 p = c + new Vector2(x, z) + new Vector2(Range(rng, -1.6f, 1.6f), Range(rng, -1.6f, 1.6f));
                         // Ragged edges: the radius wobbles with direction.
                         float wobble = 0.75f + 0.35f * Mathf.PerlinNoise(seed % 1000 + Mathf.Atan2(z, x) * 1.3f, 0.5f);
-                        if (new Vector2(x, z).magnitude > radius * wobble || !MapLayout.IsWild(p, 0.5f)) continue;
+                        if (new Vector2(x, z).magnitude > radius * wobble || !MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
                         Place(PickTree(rng, isOuter), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
                         Undergrowth.NoteTree(p);
                     }
@@ -204,8 +211,29 @@ namespace DroneSandbox
             }
         }
 
+        // Logging clearings (Features fills them with stumps and log stacks) stay open.
+        static bool InClearing(Vector2 p)
+        {
+            foreach (var c in MapLayout.Plan.clearings)
+                if (Vector2.Distance(p, c) < 24f) return true;
+            return false;
+        }
+
+        // A tree for a wood: the Varrow Valley's own mix, or, elsewhere, the sector's shares of conifers and birches
+        // (more conifers on the outer hills).
         static string PickTree(System.Random rng, bool outer)
         {
+            var plan = MapLayout.Plan;
+            if (plan.kind != SectorKind.VarrowValley)
+            {
+                float roll = (float)rng.NextDouble(), conifer = outer ? Mathf.Min(1f, plan.conifer + 0.35f) : plan.conifer;
+                if (roll < conifer * 0.25f) return "Scenery_Pine";
+                if (roll < conifer * 0.4f) return "Scenery_Pine_B";
+                if (roll < conifer) return "Scenery_Spruce";
+                if (roll < conifer + plan.birch * (1f - conifer)) return "Scenery_Birch";
+                float rest = (float)rng.NextDouble();
+                return rest < 0.55f ? "Scenery_Tree" : rest < 0.85f ? "Scenery_Tree_B" : "Scenery_Poplar";
+            }
             double r = rng.NextDouble();
             if (outer)
                 return r < 0.4 ? "Scenery_Spruce" : r < 0.6 ? "Scenery_Pine" : r < 0.75 ? "Scenery_Pine_B" : r < 0.9 ? "Scenery_Tree" : "Scenery_Tree_B";

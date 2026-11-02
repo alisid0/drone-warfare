@@ -50,7 +50,7 @@ namespace DroneSandbox
                     if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f) continue;
                     if (river.Distance(x, z) < MapLayout.RiverHalfWidth + 1f) continue;
                     if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;
-                    if (MapLayout.NearFlatSite(p, -1f) || MapLayout.InField(p, 0.3f)) continue;
+                    if (MapLayout.NearFlatSite(p, -1f) || MapLayout.InField(p, 0.3f) || MapLayout.OnWorks(p, -2f)) continue;
 
                     // Clumped: thick tussocks in some places, short sparse grass in others.
                     float n = Mathf.PerlinNoise(x * 0.08f + 7f, z * 0.08f + 3f) * 0.7f + Mathf.PerlinNoise(x * 0.31f, z * 0.31f + 50f) * 0.3f;

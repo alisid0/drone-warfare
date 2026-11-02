@@ -183,6 +183,7 @@ namespace DroneSandbox
             yield return BeautyShots();
             yield return EmptyAndRearm(game, rts);
             yield return PlayMissions(game, rts);
+            yield return SectorTour(game, rts);
 
             log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
             yield return new WaitForSecondsRealtime(0.5f);
@@ -228,6 +229,81 @@ namespace DroneSandbox
             photo.Exit();
             dayNight.SetTime(10f, 1f);
             log.WriteLine($"Photo mode: {shots.Length} shots, dam at {dam}, lake level {lake}, river at the dam {river:F1}");
+        }
+
+        // A tour of generated sectors: the theatre map, then a dozen kinds of sector, each built, photographed from
+        // above and from a drone's height, with one of its missions briefed and started through the theatre path,
+        // so a broken generator shows up as errors, odd numbers in the log or odd pictures.
+        IEnumerator SectorTour(SandboxGame game, RtsController rts)
+        {
+            game.OpenMenu();
+            var hud = game.GetComponent<SandboxHud>();
+            hud.TheatreOpen = true;
+            yield return new WaitForSecondsRealtime(0.5f);
+            yield return Shot("30_theatre");
+            hud.TheatreOpen = false;
+
+            var kinds = new[]
+            {
+                SectorKind.RiverValley, SectorKind.DeepForest, SectorKind.Marshland, SectorKind.TownOutskirts,
+                SectorKind.IndustrialZone, SectorKind.RailJunction, SectorKind.Airfield, SectorKind.QuarryHills,
+                SectorKind.LakeDistrict, SectorKind.Reservoir, SectorKind.BorderLine, SectorKind.Lakeshore,
+            };
+            var photo = PhotoMode.Instance;
+            for (int n = 0; n < kinds.Length; n++)
+            {
+                var kind = kinds[n];
+                int seed = 1000 + n * 37;
+                var situation = (Situation)((n * 7 + 3) % Situations.Names.Length);
+                while (!Situations.Fits(situation, SectorTypes.Get(kind))) situation = (Situation)(((int)situation + 1) % Situations.Names.Length);
+                var hotspot = new Hotspot { kind = kind, seed = seed, situation = situation, daylight = Daylight.Day, weather = n == 6 ? Weather.Rain : n == 10 ? Weather.Fog : n % 4 == 3 ? Weather.Overcast : Weather.Clear };
+                float started = Time.realtimeSinceStartup;
+                game.PlayHotspot(hotspot);
+                yield return null;
+                while (game.Loading) yield return null;
+                float took = Time.realtimeSinceStartup - started;
+                var plan = MapLayout.Plan;
+                log.WriteLine($"Sector {n}: {plan.name} ({SectorTypes.Get(kind).name}, seed {seed}) built in {took:F1}s: " +
+                              $"{plan.roads.Count} roads, {plan.villages.Count} villages, {plan.bridges.Count} bridges, {plan.ponds.Count} pools, " +
+                              $"{plan.railways.Count} railways, {plan.sites.Count} sites, {MapLayout.Fields.Count} fields; " +
+                              $"{Situations.Name(situation)}: {game.Mission.units.Count} units, {game.TargetsTotal} targets, " +
+                              $"convoy route {(game.Mission.convoyRoute != null ? game.Mission.convoyRoute.Count : 0)} points, " +
+                              $"{game.Mission.units.FindAll(u => Undergrowth.UnderTrees(new Vector2(u.position.x, u.position.z), 4f)).Count} under trees, " +
+                              $"{Stacked(game.Mission.units)} stacked");
+                game.CloseBriefing();
+                yield return null;
+                var stack = UnityEngine.Rendering.VolumeManager.instance.stack;
+                UnityEngine.Rendering.VolumeManager.instance.Update(stack, Camera.main.transform, ~0);
+                var fog = stack.GetComponent<UnityEngine.Rendering.HighDefinition.Fog>();
+                var clouds = stack.GetComponent<UnityEngine.Rendering.HighDefinition.VolumetricClouds>();
+                log.WriteLine($"  weather {hotspot.weather}: fog {fog.enabled.value} {fog.meanFreePath.value:F0} m up to {fog.maximumHeight.value:F0} m, " +
+                              $"clouds {clouds.enable.value} {clouds.cloudPreset}, sun x{Atmosphere.SunScale}");
+
+                // From high over your base, looking across the sector to the enemy.
+                Vector3 baseAt = game.basePosition, hq = game.enemyHqPosition;
+                Vector3 back = (baseAt - hq).normalized;
+                DayNight.Instance.SetTime(10.5f, 0f);
+                photo.PlaceLooking(baseAt + back * 60f + Vector3.up * 140f, (baseAt + hq) / 2f, 55f);
+                yield return new WaitForSeconds(1.5f);
+                yield return Shot($"31_sector_{n:00}_{kind}");
+                photo.Exit();
+                // The mission's targets from the game camera.
+                DayNight.Instance.SetTime(game.Mission.startHour, 0f);
+                rts.LookAt(game.Mission.cameraFocus, 70f, game.Mission.cameraYaw);
+                yield return new WaitForSeconds(2f);
+                yield return Shot($"32_mission_{n:00}_{situation}");
+            }
+            game.OpenMenu();
+        }
+
+        // How many of a mission's units stand within 3 m of another (placed on top of each other).
+        static int Stacked(List<MissionUnit> units)
+        {
+            int count = 0;
+            for (int i = 0; i < units.Count; i++)
+                for (int j = 0; j < units.Count; j++)
+                    if (i != j && Vector3.Distance(units[i].position, units[j].position) < 3f) { count++; break; }
+            return count;
         }
 
         // Hides the trees, plants and rocks right in front of the lens (around the camera or across the first stretch

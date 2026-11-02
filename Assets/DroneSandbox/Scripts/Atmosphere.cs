@@ -9,6 +9,20 @@ namespace DroneSandbox
     // haze and mist), shadows out to the hills, ambient occlusion, reflections, automatic exposure and a filmic
     // grade. The profile is saved by Drone Sandbox > Configure Project (Resources/PostProcessing) and rebuilt here
     // if it's missing. DayNight moves the sun.
+    // Keeps the rain's box level, just above and ahead of the camera.
+    public class AboveCamera : MonoBehaviour
+    {
+        public Transform cam;
+
+        void LateUpdate()
+        {
+            if (cam == null) return;
+            Vector3 ahead = cam.forward;
+            ahead.y = 0f;
+            transform.SetPositionAndRotation(cam.position + Vector3.up * 16f + ahead.normalized * 14f, Quaternion.identity);
+        }
+    }
+
     public static class Atmosphere
     {
         public const float NoonLux = 100000f; // the sun at midday, in lux
@@ -136,6 +150,89 @@ namespace DroneSandbox
             split.shadows.Override(new Color(0.42f, 0.55f, 0.6f));
             split.highlights.Override(new Color(0.75f, 0.62f, 0.48f));
             split.balance.Override(-15f);
+        }
+
+        static Volume weatherVolume;
+
+        // How much of the sun gets through the weather (DayNight multiplies the sunlight by it).
+        public static float SunScale { get; private set; } = 1f;
+
+        // Weather on top of the usual sky: more cloud for overcast, dark storm clouds and thicker haze for rain,
+        // a low thick fog for fog. Clear takes the overrides away.
+        public static void SetWeather(Weather weather)
+        {
+            if (weatherVolume == null)
+            {
+                var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                profile.Add<VolumetricClouds>(true).enable.Override(true);
+                profile.Add<Fog>(true).enabled.Override(true);
+                weatherVolume = new GameObject("Weather").AddComponent<Volume>();
+                weatherVolume.isGlobal = true;
+                weatherVolume.priority = 15f;
+                weatherVolume.sharedProfile = profile;
+            }
+            weatherVolume.weight = weather == Weather.Clear ? 0f : 1f;
+            SunScale = weather == Weather.Overcast ? 0.35f : weather == Weather.Rain ? 0.2f : weather == Weather.Fog ? 0.45f : 1f;
+            Rain(weather == Weather.Rain);
+            if (weather == Weather.Clear) return;
+            var p = weatherVolume.sharedProfile;
+            p.TryGet(out VolumetricClouds clouds);
+            p.TryGet(out Fog fog);
+            var preset = weather == Weather.Rain ? VolumetricClouds.CloudPresets.Stormy
+                : weather == Weather.Overcast ? VolumetricClouds.CloudPresets.Overcast : VolumetricClouds.CloudPresets.Cloudy;
+            clouds.cloudPreset = preset; // fills in the preset's values...
+            var field = typeof(VolumetricClouds).GetField("m_CloudPreset", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            (field?.GetValue(clouds) as VolumeParameter<VolumetricClouds.CloudPresets>)?.Override(preset); // ...and makes it count
+            clouds.shadows.Override(weather != Weather.Fog); // cloud shadows drifting over the ground
+            fog.meanFreePath.Override(weather == Weather.Fog ? 110f : weather == Weather.Rain ? 380f : 650f);
+            fog.maximumHeight.Override(weather == Weather.Fog ? 60f : 120f);
+        }
+
+        static ParticleSystem rain;
+
+        // Rain: thin streaks falling through a box that rides along above the camera (Resources/Materials/Rain).
+        static void Rain(bool on)
+        {
+            if (!on)
+            {
+                if (rain != null) rain.gameObject.SetActive(false);
+                return;
+            }
+            if (rain == null)
+            {
+                var cam = Camera.main;
+                var material = Resources.Load<Material>("Materials/Rain");
+                if (cam == null || material == null) return;
+                var go = new GameObject("Rain");
+                go.AddComponent<AboveCamera>().cam = cam.transform;
+                rain = go.AddComponent<ParticleSystem>();
+                rain.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                var main = rain.main;
+                main.startLifetime = 1.7f;
+                main.startSpeed = 0f;
+                main.startSize = 0.03f;
+                main.maxParticles = 22000;
+                main.simulationSpace = ParticleSystemSimulationSpace.World;
+                var emission = rain.emission;
+                emission.rateOverTime = 12000f;
+                var shape = rain.shape;
+                shape.shapeType = ParticleSystemShapeType.Box;
+                shape.scale = new Vector3(55f, 1f, 55f);
+                var velocity = rain.velocityOverLifetime;
+                velocity.enabled = true;
+                velocity.space = ParticleSystemSimulationSpace.World;
+                velocity.x = new ParticleSystem.MinMaxCurve(1.5f);
+                velocity.y = new ParticleSystem.MinMaxCurve(-22f);
+                velocity.z = new ParticleSystem.MinMaxCurve(0.5f);
+                var renderer = go.GetComponent<ParticleSystemRenderer>();
+                renderer.renderMode = ParticleSystemRenderMode.Stretch;
+                renderer.velocityScale = 0.045f;
+                renderer.lengthScale = 1f;
+                renderer.sharedMaterial = material;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+            rain.gameObject.SetActive(true);
+            rain.Play();
         }
 
         static T Get<T>(VolumeProfile profile) where T : VolumeComponent =>

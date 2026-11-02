@@ -29,8 +29,10 @@ namespace DroneSandbox
         public readonly List<EnemyUnit> enemies = new List<EnemyUnit>();
         public int enemiesDestroyed, dronesLost, dronesExpended;
 
-        public readonly Vector3 basePosition = MapLayout.BasePosition;
-        public readonly Vector3 enemyHqPosition = MapLayout.EnemyHqPosition;
+        public Vector3 basePosition => MapLayout.BasePosition;
+        public Vector3 enemyHqPosition => MapLayout.EnemyHqPosition;
+        public Hotspot Hotspot { get; private set; } // the theatre hotspot being played, if any
+        public bool Loading { get; private set; }
 
         public GameMode Mode { get; private set; } = GameMode.Menu;
         public Mission Mission { get; private set; }
@@ -54,6 +56,7 @@ namespace DroneSandbox
 
         readonly int[] stock = new int[4];
         RtsController rts;
+        Transform world;
 
         void Awake()
         {
@@ -62,7 +65,7 @@ namespace DroneSandbox
             Camera cam = SetupCamera();
             Light sun = FindOrCreateSun();
             Atmosphere.Setup(cam, sun);
-            World.Build(transform, preview: false);
+            world = World.Build(transform, preview: false);
             gameObject.AddComponent<DayNight>().Init(sun);
 
             rts = gameObject.AddComponent<RtsController>();
@@ -81,6 +84,8 @@ namespace DroneSandbox
             Mode = GameMode.Menu;
             Mission = null;
             MissionIndex = -1;
+            Hotspot = null;
+            Atmosphere.SetWeather(Weather.Clear);
             rts.Orbit(true);
             DayNight.Instance.SetTime(19.6f, 0.3f); // golden hour behind the menu
         }
@@ -100,12 +105,51 @@ namespace DroneSandbox
             rts.LookAt(basePosition + new Vector3(12f, 0f, 12f), 55f, 45f);
         }
 
+        // ---- Sectors ----
+
+        // Tears down the map and builds this sector in its place (the terrain, water, villages, everything).
+        public void LoadSector(SectorPlan plan)
+        {
+            var current = MapLayout.Plan;
+            if (current.kind == plan.kind && current.seed == plan.seed && world != null) return;
+            ClearUnits();
+            if (world != null) DestroyImmediate(world.gameObject);
+            MapLayout.Use(plan);
+            world = World.Build(transform, preview: false);
+        }
+
+        // Flies into a theatre hotspot: builds its sector (a moment's pause while the land is laid out), then
+        // briefs its mission.
+        public void PlayHotspot(Hotspot hotspot) => StartCoroutine(PlayHotspotSoon(hotspot));
+
+        IEnumerator PlayHotspotSoon(Hotspot hotspot)
+        {
+            Loading = true;
+            yield return null; // let the HUD show "loading" first
+            yield return null;
+            var plan = hotspot.Plan();
+            LoadSector(plan);
+            var mission = Situations.Generate(MapLayout.Plan, hotspot.situation, hotspot.seed, hotspot.daylight);
+            Loading = false;
+            Begin(mission, -1, hotspot);
+        }
+
         public void StartMission(int index)
+        {
+            // The Asset Hunt missions are set in the Varrow Valley.
+            if (MapLayout.Plan.kind != SectorKind.VarrowValley) LoadSector(SectorPlan.Varrow());
+            Begin(Missions.All[index], index, null);
+        }
+
+        void Begin(Mission mission, int index, Hotspot hotspot)
         {
             ClearUnits();
             Mode = GameMode.Mission;
             MissionIndex = index;
-            Mission = Missions.All[index];
+            Mission = mission;
+            Hotspot = hotspot;
+            if (Mission.key == null) Mission.key = $"mission{index}";
+            Atmosphere.SetWeather(hotspot != null ? hotspot.weather : Weather.Clear);
             for (int t = 0; t < stock.Length; t++) stock[t] = MissionStock(Mission, (DroneType)t);
             rts.Orbit(false);
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
@@ -134,6 +178,11 @@ namespace DroneSandbox
 
                 var enemy = SpawnEnemy(u.type, position, yaw);
                 enemy.isTarget = u.target;
+                if (u.decoy)
+                {
+                    enemy.isDecoy = true;
+                    enemy.maxHp = enemy.hp = 15f;
+                }
                 if (building != null) enemy.AttachStructure(building);
                 if (u.convoy > 0) enemy.Drive(Mission.convoyRoute, routeStart + 1, ConvoySpeed);
                 else if (enemy.IsMobile) enemy.Park();
@@ -156,9 +205,13 @@ namespace DroneSandbox
             Time.timeScale = 1f;
         }
 
-        public void RetryMission() => StartMission(MissionIndex);
+        public void RetryMission()
+        {
+            if (MissionIndex >= 0) StartMission(MissionIndex);
+            else Begin(Mission, -1, Hotspot);
+        }
 
-        public bool HasNextMission => Mode == GameMode.Mission && MissionIndex + 1 < Missions.All.Count;
+        public bool HasNextMission => Mode == GameMode.Mission && MissionIndex >= 0 && MissionIndex + 1 < Missions.All.Count;
 
         public void NextMission() => StartMission(MissionIndex + 1);
 
@@ -179,6 +232,8 @@ namespace DroneSandbox
         public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;
 
         public static int BestStars(int missionIndex) => PlayerPrefs.GetInt($"mission{missionIndex}.stars", 0);
+
+        static int BestStars(string key) => PlayerPrefs.GetInt(key + ".stars", 0);
 
         public static bool Unlocked(int missionIndex) => missionIndex == 0 || BestStars(missionIndex - 1) > 0;
 
@@ -273,17 +328,18 @@ namespace DroneSandbox
             Result = won ? MissionResult.Won : MissionResult.Failed;
             ResultReason = reason;
             Stars = !won ? 0 : DronesUsed <= Mission.par ? 3 : DronesUsed <= Mission.par + 2 ? 2 : 1;
-            StarBonus = Mathf.Max(0, Stars - BestStars(MissionIndex)) * Tech.PointsPerNewStar; // only stars you didn't have
+            StarBonus = Mathf.Max(0, Stars - BestStars(Mission.key)) * Tech.PointsPerNewStar; // only stars you didn't have
             if (StarBonus > 0)
             {
                 Tech.Earn(StarBonus);
                 PointsEarned += StarBonus;
             }
-            if (SaveProgress && Stars > BestStars(MissionIndex))
+            if (SaveProgress && Stars > BestStars(Mission.key))
             {
-                PlayerPrefs.SetInt($"mission{MissionIndex}.stars", Stars);
+                PlayerPrefs.SetInt(Mission.key + ".stars", Stars);
                 PlayerPrefs.Save();
             }
+            if (won && Hotspot != null) Theatre.Won(Hotspot);
             ResultsAt = Time.unscaledTime + ResultsDelay;
             StartCoroutine(FreezeForResults());
         }
@@ -348,6 +404,10 @@ namespace DroneSandbox
                     // Fixed defences come back at the same spot; vehicles anywhere in enemy territory.
                     Vector3 respawnAt = enemy.IsMobile ? RandomEnemyPoint() : enemy.transform.position;
                     StartCoroutine(RespawnLater(enemy.type, respawnAt));
+                }
+                else if (Mode == GameMode.Mission && enemy.isDecoy)
+                {
+                    ShowMessage("Decoy! An inflatable " + enemy.unitName.ToLowerInvariant() + " - no points", 3f);
                 }
                 else if (Mode == GameMode.Mission)
                 {

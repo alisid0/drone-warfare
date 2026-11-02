@@ -3,9 +3,10 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Rolling farmland terrain built in code from MapLayout: hills in the play area, wooded ridges around
-    // the edge opening into a river valley, a river channel, dirt roads, and flat sites (bases, fixed
-    // defences) levelled to y = 0. Also answers "how high is the ground here?".
+    // Rolling farmland terrain built in code from MapLayout: hills in the play area (as high as the sector's type
+    // makes them), ridges around the edge opening into a river valley, a river channel, the reservoir, lakes and
+    // pools, dirt roads, railway beds, a quarry pit or a trench line where the sector has them, and flat sites
+    // (bases, defences, buildings) levelled to y = 0. Also answers "how high is the ground here?".
     public static class Ground
     {
         public const float Size = 480f;   // terrain is Size x Size metres, centred on the map
@@ -104,7 +105,9 @@ namespace DroneSandbox
                     world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
                 }
             }
-            Reservoir(world, step); // before the roads, so a road past the lake follows its banks
+            if (MapLayout.HasDam) Reservoir(world, step); // before the roads, so a road past the lake follows its banks
+            Ponds(world, step);
+            Quarry(world, step);
 
             // Roads follow a smoothed copy of the ground, sunk in a little.
             for (int i = 0; i < roads.points.Count; i++) roads.values[i] = Sample(world, roads.points[i]);
@@ -122,6 +125,26 @@ namespace DroneSandbox
                     world[zi, xi] = Mathf.Lerp(world[zi, xi], level - dip, weight);
                 }
             }
+
+            // Railway beds: smoother still (trains can't climb much).
+            var rails = MapLayout.RailField;
+            if (rails.points.Count > 0)
+            {
+                for (int i = 0; i < rails.points.Count; i++) rails.values[i] = Sample(world, rails.points[i]);
+                SmoothValues(rails, 20);
+                for (int zi = 0; zi < HeightRes; zi++)
+                {
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float d = rails.Query(x, z, out float level, out _);
+                        if (d > MapLayout.RailHalfWidth + 8f) continue;
+                        float weight = (1f - Mathf.SmoothStep(0f, 1f, (d - MapLayout.RailHalfWidth - 0.5f) / 7.5f)) * FlatMask(x, z, out _);
+                        world[zi, xi] = Mathf.Lerp(world[zi, xi], level, weight);
+                    }
+                }
+            }
+            Trench(world, step);
 
             // The river: a water level that only ever falls downstream, kept below the banks on both sides,
             // then a channel carved under it.
@@ -165,7 +188,7 @@ namespace DroneSandbox
                 }
             }
 
-            BelowDam(world, step, river.values[0]);
+            if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
 
             var heights = new float[HeightRes, HeightRes];
             for (int zi = 0; zi < HeightRes; zi++)
@@ -216,6 +239,97 @@ namespace DroneSandbox
             }
         }
 
+        // Lakes and pools: each sits a little below the lowest ground round its shore, with a basin under the
+        // water and banks easing up from it into the natural ground. Their levels go back into the plan for Water.
+        static void Ponds(float[,] world, float step)
+        {
+            var ponds = MapLayout.Plan.ponds;
+            if (ponds.Count == 0) return;
+            for (int i = 0; i < ponds.Count; i++)
+            {
+                var pond = ponds[i];
+                float level = float.MaxValue;
+                for (int k = 0; k < 32; k++)
+                {
+                    float a = k * Mathf.PI * 2f / 32f;
+                    level = Mathf.Min(level, Sample(world, pond.center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * pond.radius * 1.2f));
+                }
+                pond.level = level - 0.35f;
+                ponds[i] = pond;
+            }
+            for (int zi = 0; zi < HeightRes; zi++)
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float s = MapLayout.PondDistance(x, z, out int i);
+                    if (i < 0 || s > 40f) continue;
+                    float level = ponds[i].level, h = world[zi, xi];
+                    float bumps = (Mathf.PerlinNoise(x * 0.09f + 17f, z * 0.09f + 41f) - 0.5f) * 1.5f;
+                    if (s < 0f)
+                        h = Mathf.Min(h, level - Mathf.Min(ponds[i].radius > 60f ? 7f : 3.5f, 0.3f - s * 0.22f) + bumps * 0.25f);
+                    else
+                    {
+                        float bank = level + 0.25f + s * 0.12f + bumps * Mathf.Clamp01(s / 10f);
+                        h = Mathf.Lerp(bank, h, Mathf.SmoothStep(0f, 1f, (s - 4f) / 32f));
+                    }
+                    world[zi, xi] = h;
+                }
+            }
+        }
+
+        // A stone quarry: a pit cut down in benches, its floor about 12 m below the ground round it.
+        static void Quarry(float[,] world, float step)
+        {
+            var plan = MapLayout.Plan;
+            if (!plan.Has(SectorFeature.Quarry)) return;
+            float r = plan.quarryRadius, rim = Sample(world, plan.quarry);
+            for (int zi = 0; zi < HeightRes; zi++)
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float d = Vector2.Distance(new Vector2(x, z), plan.quarry);
+                    if (d > r + 12f) continue;
+                    float depth = 1f - Mathf.SmoothStep(0f, 1f, (d / r - 0.45f) / 0.55f);
+                    float benches = Mathf.Floor(depth * 4f) / 4f;
+                    float pit = rim - 12f * Mathf.Lerp(depth, benches, 0.7f);
+                    float outside = Mathf.SmoothStep(0f, 1f, (d - r) / 12f);
+                    world[zi, xi] = Mathf.Lerp(Mathf.Min(world[zi, xi], pit), world[zi, xi], outside);
+                }
+            }
+        }
+
+        // A trench dug along the line behind the dragon's teeth, broken where roads cross it.
+        static void Trench(float[,] world, float step)
+        {
+            var line = MapLayout.Plan.trenchLine;
+            if (line == null) return;
+            for (int zi = 0; zi < HeightRes; zi++)
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float d = DistanceToLine(new Vector2(x, z), line);
+                    if (d > 1.6f || MapLayout.RoadField.Distance(x, z) < MapLayout.RoadHalfWidth + 3f) continue;
+                    float k = d / 1.6f;
+                    world[zi, xi] -= 1.7f * (1f - k * k * k * k);
+                }
+            }
+        }
+
+        static float DistanceToLine(Vector2 p, Vector2[] line)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < line.Length - 1; i++)
+            {
+                Vector2 a = line[i], ab = line[i + 1] - a;
+                float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+                best = Mathf.Min(best, Vector2.Distance(p, a + ab * t));
+            }
+            return best;
+        }
+
         // Below the dam: a rocky gorge whose sides climb from the river to the ends of the dam, opening out
         // downstream, and a wide plunge pool where the spillway lands.
         static void BelowDam(float[,] world, float step, float water)
@@ -244,16 +358,19 @@ namespace DroneSandbox
             }
         }
 
-        // Height above y = 0 before flattening, in metres.
+        // Height above y = 0 before flattening, in metres. The sector's type sets how high the hills and the
+        // ridges round the edge are; its seed moves the noise, so no two sectors share a landscape.
         static float Hills(float x, float z, float riverDistance)
         {
-            float h = (Mathf.PerlinNoise(x * 0.008f + 11.3f, z * 0.008f + 3.7f) - 0.42f) * 9f;  // broad hills
-            h += (Mathf.PerlinNoise(x * 0.024f + 41.1f, z * 0.024f + 7.9f) - 0.5f) * 3f;       // bumps
-            h += (Mathf.PerlinNoise(x * 0.09f + 5.5f, z * 0.09f + 91.2f) - 0.5f) * 0.6f;       // roughness
+            var plan = MapLayout.Plan;
+            float k = plan.hills / 9f, nx = x + plan.noiseOffset.x, nz = z + plan.noiseOffset.y;
+            float h = (Mathf.PerlinNoise(nx * 0.008f + 11.3f, nz * 0.008f + 3.7f) - 0.42f) * 9f * k;                        // broad hills
+            h += (Mathf.PerlinNoise(nx * 0.024f + 41.1f, nz * 0.024f + 7.9f) - 0.5f) * 3f * Mathf.Clamp(k, 0.4f, 1.6f);     // bumps
+            h += (Mathf.PerlinNoise(nx * 0.09f + 5.5f, nz * 0.09f + 91.2f) - 0.5f) * 0.6f;                                  // roughness
             // Ridges beyond the playable area so the battlefield sits in a valley, with a gap for the river.
             float edge = Mathf.InverseLerp(95f, 230f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
             float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f) / 55f);
-            h += edge * edge * 40f * (0.7f + 0.6f * Mathf.PerlinNoise(x * 0.015f, z * 0.015f)) * valley;
+            h += edge * edge * plan.ridges * (0.7f + 0.6f * Mathf.PerlinNoise(nx * 0.015f, nz * 0.015f)) * valley;
             return h;
         }
 
@@ -371,6 +488,20 @@ namespace DroneSandbox
                         float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - roadHw + 0.4f) / 1.2f);
                         if (dRoad < 0.5f) track *= 0.35f;
                         dirt = Mathf.Max(dirt, track);
+                    }
+                    // Gravel railway beds, and the quarry's dusty floor.
+                    if (MapLayout.RailField.points.Count > 0)
+                    {
+                        float dRail = MapLayout.RailField.Distance(x, z);
+                        if (dRail < MapLayout.RailHalfWidth + 1.5f)
+                            dirt = Mathf.Max(dirt, 1f - Mathf.SmoothStep(0f, 1f, (dRail - MapLayout.RailHalfWidth) / 1.5f));
+                    }
+                    var plan = MapLayout.Plan;
+                    if (plan.Has(SectorFeature.Quarry))
+                    {
+                        float dq = Vector2.Distance(new Vector2(x, z), plan.quarry);
+                        if (dq < plan.quarryRadius)
+                            dirt = Mathf.Max(dirt, 1f - Mathf.SmoothStep(0f, 1f, (dq - plan.quarryRadius * 0.4f) / (plan.quarryRadius * 0.6f)));
                     }
                     // Muddy river banks.
                     float dRiver = river.Distance(x, z);

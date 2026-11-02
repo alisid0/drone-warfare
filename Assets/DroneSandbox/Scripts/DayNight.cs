@@ -173,7 +173,7 @@ namespace DroneSandbox
                 {
                     sun.transform.rotation = Quaternion.Euler(Mathf.Max(sunElevation, 1f), sunYaw, 0f);
                     sun.color = Color.white;
-                    sun.intensity = Atmosphere.NoonLux * sunStrength;
+                    sun.intensity = Atmosphere.NoonLux * sunStrength * Atmosphere.SunScale; // dimmed by cloud, rain or fog
                 }
                 else
                 {
@@ -181,7 +181,7 @@ namespace DroneSandbox
                     sun.color = MoonLight;
                     sun.intensity = MoonLux * moonStrength;
                 }
-                sun.shadowStrength = Mathf.Lerp(0.6f, 0.95f, Daylight);
+                sun.shadowStrength = Mathf.Lerp(0.6f, 0.95f, Daylight) * Mathf.Lerp(0.45f, 1f, Atmosphere.SunScale);
             }
 
             nightVolume.weight = Thermal ? 0f : 1f - Daylight;

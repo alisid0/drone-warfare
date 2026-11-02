@@ -43,6 +43,7 @@ namespace DroneSandbox.EditorTools
             CreateDecalMaterial();
             CreatePbrMaterials();
             WeatheringSetup.CreateDamDecals();
+            CreateRainMaterial();
             AssetDatabase.SaveAssets();
             SetUpMainScene();
 
@@ -421,6 +422,34 @@ namespace DroneSandbox.EditorTools
         }
 
         static Material LoadOrCreateMaterial(string path, Shader shader) => HdrpSetup.LoadOrCreate(path, shader);
+
+        // Rain streaks (Atmosphere.Rain): an unlit, see-through material with a soft vertical streak.
+        static void CreateRainMaterial()
+        {
+            var shader = Shader.Find("HDRP/Unlit");
+            if (shader == null) return;
+            var streak = GeneratedTexture(Root + "/Textures/RainStreak.png", () =>
+            {
+                const int w = 8, h = 64;
+                var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                var pixels = new Color[w * h];
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                    {
+                        float across = 1f - Mathf.Abs((x + 0.5f) / w * 2f - 1f), along = Mathf.Sin((y + 0.5f) / h * Mathf.PI);
+                        pixels[y * w + x] = new Color(1f, 1f, 1f, across * across * along);
+                    }
+                t.SetPixels(pixels);
+                byte[] png = t.EncodeToPNG();
+                Object.DestroyImmediate(t);
+                return png;
+            }, clamp: true);
+            var material = LoadOrCreateMaterial(Root + "/Materials/Rain.mat", shader);
+            material.SetTexture("_UnlitColorMap", streak);
+            material.SetColor("_UnlitColor", new Color(0.78f, 0.82f, 0.88f, 0.45f));
+            HdrpSetup.Transparent(material);
+            HdrpSetup.Finish(material, instancing: false);
+        }
 
         // The distant farmland's texture (Backdrop.Patchwork), made once here rather than at every start.
         static void CreatePatchwork()

@@ -84,6 +84,11 @@ namespace DroneSandbox
                 case EnemyType.Artillery: return 35;
                 case EnemyType.Tank: return 40;
                 case EnemyType.Command: return 100;
+                case EnemyType.APC: return 30;
+                case EnemyType.Rocket: return 40;
+                case EnemyType.Tanker: return 20;
+                case EnemyType.Jammer: return 45;
+                case EnemyType.Depot: return 60;
                 default: return 0;
             }
         }

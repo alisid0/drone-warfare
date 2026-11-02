@@ -12,6 +12,7 @@ namespace DroneSandbox
         public bool target;  // counts towards winning
         public bool hidden;  // invisible until one of your drones comes close (see SandboxGame.SpotRange)
         public int convoy;   // > 0: drives the mission's convoy route, this many places back from the lead
+        public bool decoy;   // an inflatable fake: worth nothing, and a drone spent on it is wasted
     }
 
     // An Asset Hunt mission: a list of targets to destroy with a fixed stock of drones.
@@ -26,6 +27,7 @@ namespace DroneSandbox
         public List<MissionUnit> units = new List<MissionUnit>();
         public List<Vector3> convoyRoute;  // where convoy units drive; a target reaching its end fails the mission
         public string escapeFailure = "A target got away.";
+        public string key;                 // where its best stars are saved (the Asset Hunt missions use their number)
 
         // The mission's own drones (the tech shop can add more; see SandboxGame.MissionStock).
         public int Stock(DroneType type)

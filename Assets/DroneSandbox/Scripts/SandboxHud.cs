@@ -2,8 +2,9 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, tech shop, mission briefing and results,
-    // health bars, selection brackets, target markers, search circles, AA threat rings, launch buttons and help.
+    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, the theatre map, tech shop, mission
+    // briefing and results, health bars, selection brackets, target markers, search circles, AA threat rings,
+    // jamming circles, launch buttons and help.
     // Fine for a prototype; move to UI Toolkit once the look of the game is decided.
     public class SandboxHud : MonoBehaviour
     {
@@ -38,6 +39,9 @@ namespace DroneSandbox
 
         public bool showHelp = true;
         public bool ShopOpen;  // the tech shop, opened from the main menu
+        public bool TheatreOpen; // the theatre map, opened from the main menu
+        Hotspot chosen;          // the hotspot picked on the theatre map
+        static Texture2D dotTexture;
         public float Scale => Mathf.Max(1f, Screen.height / 900f);
 
         SandboxGame game;
@@ -104,9 +108,15 @@ namespace DroneSandbox
             if (game == null || rts == null || rts.Cam == null) return;
             BuildStyles();
 
+            if (game.Loading)
+            {
+                DrawLoading();
+                return;
+            }
             if (game.Mode == GameMode.Menu)
             {
                 if (ShopOpen) DrawShop();
+                else if (TheatreOpen) DrawTheatre();
                 else DrawMenu();
                 return;
             }
@@ -169,6 +179,7 @@ namespace DroneSandbox
             {
                 if (e.Hidden) SearchCircle(e.searchCenter);
                 else if (e.type == EnemyType.AAGun) ThreatRing(e, e == rts.HoveredEnemy);
+                else if (e.type == EnemyType.Jammer) JamCircle(e);
             }
 
             foreach (var e in game.enemies)
@@ -217,20 +228,41 @@ namespace DroneSandbox
             }
         }
 
-        // Names of the (fictional) places, shown when the camera is zoomed out.
+        // Names of the (fictional) places, shown when the camera is zoomed out: the sector's villages, the two
+        // bases, and its river where it passes nearest the middle (the Varrow Valley's by the lake).
         void DrawPlaceNames()
         {
-            for (int i = 0; i < MapLayout.Villages.Length && i < Factions.Villages.Length; i++)
+            var plan = MapLayout.Plan;
+            for (int i = 0; i < plan.villages.Count && i < plan.villageNames.Count; i++)
             {
-                Vector2 v = MapLayout.Villages[i];
-                PlaceName(new Vector3(v.x, 0f, v.y), 12f, Factions.Villages[i]);
+                Vector2 v = plan.villages[i];
+                PlaceName(new Vector3(v.x, 0f, v.y), 12f, plan.villageNames[i]);
             }
             PlaceName(game.basePosition, 16f, Factions.PlayerBase);
             PlaceName(game.enemyHqPosition, 18f, Factions.EnemyBase);
-            Vector2 river = MapLayout.RiverField.points[0];
-            foreach (var p in MapLayout.RiverField.points)
-                if ((p - new Vector2(-105f, 2f)).sqrMagnitude < (river - new Vector2(-105f, 2f)).sqrMagnitude) river = p;
-            PlaceName(new Vector3(river.x, 0f, river.y), 4f, Factions.River);
+            var points = MapLayout.RiverField.points;
+            if (points.Count == 0) return;
+            Vector2 near = plan.kind == SectorKind.VarrowValley ? new Vector2(-105f, 2f) : Vector2.zero;
+            Vector2 river = points[0];
+            foreach (var p in points)
+                if ((p - near).sqrMagnitude < (river - near).sqrMagnitude) river = p;
+            PlaceName(new Vector3(river.x, 0f, river.y), 4f, plan.kind == SectorKind.VarrowValley ? Factions.River : plan.riverName);
+        }
+
+        // A jammer's circle on the ground: drones that fly into it lose their link.
+        void JamCircle(EnemyUnit jammer)
+        {
+            const int dashes = 48;
+            float size = 3.5f * Scale;
+            var color = new Color(0.75f, 0.45f, 1f, 0.7f);
+            for (int i = 0; i < dashes; i++)
+            {
+                if (i % 3 == 2) continue;
+                float a = i * Mathf.PI * 2f / dashes;
+                Vector3 p = jammer.transform.position + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * EnemyUnit.JamRadius;
+                p.y = Ground.HeightAt(p) + 0.1f;
+                if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), color);
+            }
         }
 
         void PlaceName(Vector3 at, float height, string text)
@@ -411,7 +443,7 @@ namespace DroneSandbox
             var missions = Missions.All;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
             float rowHeight = 50f, gap = 8f;
-            float height = 172f + (missions.Count + 2) * (rowHeight + gap) + 56f;
+            float height = 172f + (missions.Count + 3) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
 
@@ -426,6 +458,13 @@ namespace DroneSandbox
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * s) }, small.normal.textColor));
 
             float y = r.y + 172f * s;
+            var theatre = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+            if (GUI.Button(theatre, "<b>Theatre of war</b>   <size=" + Mathf.RoundToInt(12f * s) + ">pick a hotspot on the front: 30 kinds of sector, 30 situations</size>", leftButton))
+            {
+                TheatreOpen = true;
+                chosen = null;
+            }
+            y += (rowHeight + gap) * s;
             for (int i = 0; i < missions.Count; i++)
             {
                 var row = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
@@ -507,8 +546,10 @@ namespace DroneSandbox
             Rect r = Centered(620f, 340f);
             Fill(r, ModalColor);
             float x = r.x + 28f * s, w = r.width - 56f * s;
-            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s),
-                $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}", Tinted(small, TargetColor));
+            string where = game.Hotspot != null
+                ? $"{MapLayout.Plan.name.ToUpperInvariant()}  \u00b7  {MapLayout.Plan.Type.name.ToUpperInvariant()}  \u00b7  {game.Hotspot.weather.ToString().ToUpperInvariant()}"
+                : $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}";
+            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s), where, Tinted(small, TargetColor));
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
             int bombers = game.StockLeft(DroneType.Bomber);
@@ -547,10 +588,133 @@ namespace DroneSandbox
             float bw = 130f * s, gap = 12f * s;
             float x0 = r.x + (r.width - 3f * bw - 2f * gap) / 2f, y = r.yMax - 72f * s;
             if (GUI.Button(new Rect(x0, y, bw, 44f * s), "<b>Retry</b>", button)) game.RetryMission();
-            GUI.enabled = won && game.HasNextMission;
-            if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Next mission</b>", button)) game.NextMission();
-            GUI.enabled = true;
+            if (game.Hotspot != null)
+            {
+                if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Theatre</b>", button))
+                {
+                    game.OpenMenu();
+                    TheatreOpen = true;
+                    chosen = null;
+                }
+            }
+            else
+            {
+                GUI.enabled = won && game.HasNextMission;
+                if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Next mission</b>", button)) game.NextMission();
+                GUI.enabled = true;
+            }
             if (GUI.Button(new Rect(x0 + 2f * (bw + gap), y, bw, 44f * s), "<b>Menu</b>", button)) game.OpenMenu();
+        }
+
+        void DrawLoading()
+        {
+            float s = Scale;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.55f));
+            Rect r = Centered(420f, 90f);
+            Fill(r, ModalColor);
+            GUI.Label(r, "<b>Flying in...</b>   laying out the sector", centered);
+        }
+
+        // The theatre of war: the front on a map, hotspots glowing where the enemy is active. Pick one to see what's
+        // there, then fly in.
+        void DrawTheatre()
+        {
+            float s = Scale;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.55f));
+            Rect r = Centered(1080f, 760f);
+            Fill(r, ModalColor);
+            GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
+            GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s),
+                $"The {Theatre.FrontKilometres:0} km Norvane-Dravin front     <b>{Theatre.Wins}</b> sectors won     <b>{Tech.Points}</b> points",
+                Tinted(centered, TargetColor));
+
+            var mapRect = new Rect(r.x + 24f * s, r.y + 86f * s, r.width - 48f * s, (r.width - 48f * s) * 560f / 1024f);
+            GUI.DrawTexture(mapRect, Theatre.Map());
+            GUI.Label(new Rect(mapRect.x + 10f * s, mapRect.yMax - 26f * s, 300f * s, 20f * s), "<b>NORVANE</b>  (you)", Tinted(small, Friendly));
+            GUI.Label(new Rect(mapRect.x + 10f * s, mapRect.y + 6f * s, 300f * s, 20f * s), "<b>DRAVIN COALITION</b>", Tinted(small, Hostile));
+
+            Hotspot hovered = null;
+            Vector2 mouse = Event.current.mousePosition;
+            foreach (var h in Theatre.Hotspots)
+            {
+                var c = new Vector2(mapRect.x + h.mapPosition.x * mapRect.width, mapRect.yMax - h.mapPosition.y * mapRect.height);
+                bool done = Theatre.Done(h);
+                float pulse = 1f + 0.12f * Mathf.Sin(Time.unscaledTime * 3f + h.seed);
+                float radius = (10f + 12f * h.heat) * s * (done ? 0.7f : pulse);
+                var glow = done ? new Color(0.35f, 1f, 0.6f, 0.75f) : Color.Lerp(new Color(1f, 0.8f, 0.2f, 0.85f), new Color(1f, 0.25f, 0.15f, 0.95f), h.heat);
+                Dot(c, radius * 1.8f, new Color(glow.r, glow.g, glow.b, 0.18f));
+                Dot(c, radius, glow);
+                if ((mouse - c).magnitude < radius + 4f * s) hovered = h;
+                if (h == chosen) Brackets(c, radius + 6f * s, Color.white);
+            }
+            if (hovered != null && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+            {
+                chosen = hovered;
+                Event.current.Use();
+            }
+
+            // The card for the picked (or hovered) hotspot.
+            var spot = chosen ?? hovered;
+            var card = new Rect(r.x + 24f * s, mapRect.yMax + 12f * s, r.width - 48f * s, r.yMax - mapRect.yMax - 24f * s);
+            Fill(card, new Color(1f, 1f, 1f, 0.04f));
+            if (spot != null)
+            {
+                var type = SectorTypes.Get(spot.kind);
+                float km = spot.mapPosition.x * Theatre.FrontKilometres;
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 10f * s, card.width - 300f * s, 30f * s),
+                    $"<b>{spot.sectorName}</b>  \u00b7  {type.name}", heading);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 44f * s, card.width - 300f * s, 22f * s),
+                    $"<b>{Situations.Name(spot.situation)}</b>     {spot.daylight}, {spot.weather.ToString().ToLowerInvariant()}     km {km:0} of the front     " +
+                    $"activity {Mathf.RoundToInt(spot.heat * 100f)}%" + (Theatre.Done(spot) ? "     <b>WON</b>" : ""), label);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 68f * s, card.width - 300f * s, 40f * s), type.blurb, smallWrap);
+                if (chosen != null)
+                {
+                    var fly = new Rect(card.xMax - 250f * s, card.y + 22f * s, 230f * s, 50f * s);
+                    bool enter = Event.current.type == EventType.KeyDown &&
+                                 (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
+                    if (GUI.Button(fly, "<b>Fly in</b>  (Enter)", button) || enter)
+                    {
+                        if (enter) Event.current.Use();
+                        TheatreOpen = false;
+                        game.PlayHotspot(chosen);
+                    }
+                }
+            }
+            else
+            {
+                GUI.Label(card, "Hotspots glow where the Dravin are active: the bigger and redder, the hotter. Pick one.", centered);
+            }
+
+            var back = new Rect(r.xMax - 150f * s, r.y + 16f * s, 130f * s, 36f * s);
+            bool escape = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape;
+            if (GUI.Button(back, "<b>Back</b>  (Esc)", button) || escape)
+            {
+                if (escape) Event.current.Use();
+                TheatreOpen = false;
+            }
+        }
+
+        // A soft round dot.
+        void Dot(Vector2 c, float radius, Color color)
+        {
+            if (dotTexture == null)
+            {
+                const int size = 64;
+                dotTexture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+                var pixels = new Color[size * size];
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
+                    {
+                        float d = new Vector2(x + 0.5f - size / 2f, y + 0.5f - size / 2f).magnitude / (size / 2f);
+                        pixels[y * size + x] = new Color(1f, 1f, 1f, Mathf.Clamp01((1f - d) * 6f));
+                    }
+                dotTexture.SetPixels(pixels);
+                dotTexture.Apply();
+            }
+            Color old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(c.x - radius, c.y - radius, radius * 2f, radius * 2f), dotTexture);
+            GUI.color = old;
         }
 
         // Three stars side by side in the rect, the first `filled` of them gold.

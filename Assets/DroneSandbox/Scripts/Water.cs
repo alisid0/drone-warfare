@@ -10,6 +10,8 @@ namespace DroneSandbox
     //   channel so the shoreline is wherever the banks rise out of it, plus the oval plunge pool below the dam.
     //   Foam is masked in around the spillway's landing and drifts away downstream.
     // - The lake behind the dam: a grid kept wherever the lake is, with small wind waves.
+    // - Natural lakes and marsh pools: one surface over all of them, each at its own level.
+    // A sector without a river, a dam or pools simply has none of that surface.
     public static class Water
     {
         const float FoamReach = 50f; // metres from the dam that the river carries foam
@@ -18,15 +20,25 @@ namespace DroneSandbox
         {
             var root = new GameObject("Water").transform;
             root.SetParent(parent, false);
-            Vector2 dam = MapLayout.DamPoint;
-            float riverLevel = MapLayout.RiverField.values[0];
+            if (MapLayout.HasRiver && MapLayout.RiverField.points.Count > 1) BuildRiver(root);
+            if (MapLayout.HasDam) BuildLake(root);
+            if (MapLayout.Plan.ponds.Count > 0) BuildPonds(root);
+        }
 
-            var river = Surface("River", root, WaterSurfaceType.River, new Vector3(dam.x, riverLevel, dam.y), RiverMesh(), PoolMesh());
+        static void BuildRiver(Transform root)
+        {
+            bool dam = MapLayout.HasDam;
+            Vector2 start = dam ? MapLayout.DamPoint : MapLayout.RiverField.points[0];
+            float riverLevel = MapLayout.RiverField.values[0];
+            var river = dam
+                ? Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh(), PoolMesh())
+                : Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh());
             river.refractionColor = new Color(0.12f, 0.36f, 0.3f);
             river.scatteringColor = new Color(0.04f, 0.17f, 0.13f);
             river.absorptionDistance = 2.5f;
-            river.largeWindSpeed = 35f; // choppy enough to churn up foam, where the mask lets it
+            river.largeWindSpeed = dam ? 35f : 14f; // choppy enough below the dam to churn up foam, where the mask lets it
             river.largeChaos = 0.9f;
+            if (!dam) return;
             river.foam = true;
             river.simulationFoamAmount = 1f;
             river.foamPersistenceMultiplier = 1f;
@@ -34,7 +46,11 @@ namespace DroneSandbox
             river.simulationFoamMask = FoamMask();
             river.simulationFoamMaskExtent = new Vector2(FoamReach * 2f, FoamReach * 2f);
             river.simulationFoamMaskOffset = Vector2.zero;
+        }
 
+        static void BuildLake(Transform root)
+        {
+            Vector2 dam = MapLayout.DamPoint;
             var lake = Surface("Lake", root, WaterSurfaceType.OceanSeaLake, new Vector3(dam.x, MapLayout.LakeLevel, dam.y), LakeMesh());
             lake.repetitionSize = 250f;
             lake.largeWindSpeed = 7f;   // km/h: a light breeze, small waves
@@ -52,6 +68,76 @@ namespace DroneSandbox
             lake.refractionColor = new Color(0.02f, 0.38f, 0.48f);
             lake.scatteringColor = new Color(0f, 0.22f, 0.24f);
             lake.absorptionDistance = 6f;
+        }
+
+        // Natural lakes and pools, as one calm surface: clear blue-green lakes, or peaty brown-green marsh water
+        // when they're all small.
+        static void BuildPonds(Transform root)
+        {
+            var ponds = MapLayout.Plan.ponds;
+            bool lakes = false;
+            foreach (var pond in ponds) if (pond.radius > 30f) lakes = true;
+            var first = ponds[0];
+            var surface = Surface(lakes ? "Lakes" : "Pools", root, WaterSurfaceType.OceanSeaLake,
+                new Vector3(first.center.x, first.level, first.center.y), PondMesh());
+            surface.repetitionSize = 200f;
+            surface.largeWindSpeed = lakes ? 7f : 3f;
+            surface.largeChaos = 0.6f;
+            surface.ripplesWindSpeed = lakes ? 7f : 4f;
+            surface.startSmoothness = 0.97f;
+            surface.endSmoothness = 0.93f;
+            surface.smoothnessFadeStart = 150f;
+            surface.smoothnessFadeDistance = 800f;
+            // Brighter in colour than the reservoir's: seen from above, a basin of clear water otherwise reads black.
+            surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.24f, 0.36f, 0.22f);
+            surface.scatteringColor = lakes ? new Color(0.05f, 0.3f, 0.32f) : new Color(0.12f, 0.2f, 0.1f);
+            surface.absorptionDistance = lakes ? 9f : 3f;
+        }
+
+        // A 2 m grid over every pool, at that pool's own level, kept wherever it's near the water.
+        static Mesh PondMesh()
+        {
+            const float cell = 2f;
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var triangles = new List<int>();
+            float limit = Ground.Size / 2f - 1f;
+            var ponds = MapLayout.Plan.ponds;
+            for (int k = 0; k < ponds.Count; k++)
+            {
+                var pond = ponds[k];
+                float reach = pond.radius * 1.35f + 4f;
+                int n = Mathf.CeilToInt(reach * 2f / cell);
+                var index = new Dictionary<int, int>();
+                int Vertex(int i, int j)
+                {
+                    int key = j * (n + 1) + i;
+                    if (index.TryGetValue(key, out int at)) return at;
+                    float x = pond.center.x - reach + i * cell, z = pond.center.y - reach + j * cell;
+                    index[key] = vertices.Count;
+                    vertices.Add(new Vector3(x, pond.level, z));
+                    uvs.Add(new Vector2(x, z));
+                    return vertices.Count - 1;
+                }
+                for (int j = 0; j < n; j++)
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        float x = pond.center.x - reach + i * cell, z = pond.center.y - reach + j * cell;
+                        if (Mathf.Abs(x) > limit || Mathf.Abs(z) > limit) continue;
+                        bool wet = false;
+                        for (int c = 0; c < 4 && !wet; c++)
+                        {
+                            float s = MapLayout.PondDistance(x + (c & 1) * cell, z + (c >> 1) * cell, out int which);
+                            wet = which == k && s < 1.5f;
+                        }
+                        if (!wet) continue;
+                        int a = Vertex(i, j), b = Vertex(i + 1, j), d = Vertex(i, j + 1), e = Vertex(i + 1, j + 1);
+                        triangles.AddRange(new[] { a, d, b, b, d, e });
+                    }
+                }
+            }
+            return Finish("Pools", vertices, uvs, triangles);
         }
 
         // A water surface over the given meshes. The meshes only give it its shape, so their own renderers stay
@@ -93,7 +179,7 @@ namespace DroneSandbox
                     float wx = middle.x - span / 2f + (x + 0.5f) * span / size, wz = middle.y - span / 2f + (y + 0.5f) * span / size;
                     float gust = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(wx * 0.012f + 5f, wz * 0.012f + 9f) * 0.7f
                                                          + Mathf.PerlinNoise(wx * 0.045f + 1f, wz * 0.045f + 3f) * 0.3f - 0.3f) / 0.4f);
-                    float lee = Mathf.SmoothStep(0f, 1f, -MapLayout.LakeDistance(wx, wz) / 25f);
+                    float lee = Mathf.SmoothStep(0f, 1f, -MapLayout.ReservoirDistance(wx, wz) / 25f);
                     float waves = Mathf.Lerp(0.5f, 1f, gust) * Mathf.Lerp(0.6f, 1f, lee);
                     float ripples = Mathf.Lerp(0.35f, 1f, gust) * Mathf.Lerp(0.4f, 1f, lee);
                     pixels[y * size + x] = new Color(waves, waves, ripples, 1f);
@@ -187,7 +273,7 @@ namespace DroneSandbox
                     float x = middle.x - reach + i * cell, z = middle.y - reach + j * cell;
                     bool wet = false;
                     for (int c = 0; c < 4 && !wet; c++)
-                        wet = MapLayout.LakeDistance(x + (c & 1) * cell, z + (c >> 1) * cell) < 1.5f;
+                        wet = MapLayout.ReservoirDistance(x + (c & 1) * cell, z + (c >> 1) * cell) < 1.5f;
                     if (!wet) continue;
                     int a = Vertex(i, j), b = Vertex(i + 1, j), d = Vertex(i, j + 1), e = Vertex(i + 1, j + 1);
                     triangles.AddRange(new[] { a, d, b, b, d, e }); // clockwise from above, so it faces up
