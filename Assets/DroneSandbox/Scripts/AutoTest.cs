@@ -60,6 +60,11 @@ namespace DroneSandbox
             yield return new WaitForSeconds(2.5f);
             Shot("02_drones_closeup");
 
+            // Close-up of the enemy HQ, to check the vehicle models, terrain and sky.
+            rts.LookAt(game.enemyHqPosition, 30f, 210f);
+            yield return new WaitForSeconds(1f);
+            Shot("02b_enemy_closeup");
+
             // Send everyone toward the forward AA post and follow them.
             Vector3 staging = new Vector3(-32f, 0f, -26f);
             rts.selected.Clear();

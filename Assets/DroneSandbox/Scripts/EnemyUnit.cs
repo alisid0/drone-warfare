@@ -13,9 +13,12 @@ namespace DroneSandbox
 
         public EnemyType type;
         float moveSpeed;
+        float heading; // degrees; vehicles tilt to follow the ground but steer by this
         Vector3 waypoint;
         float waitTimer;
-        Transform turret; // tank turret, AA mount or radar dish
+        Transform turret; // tank turret, AA mount or radar head
+        Quaternion turretRest = Quaternion.identity;
+        Vector3 muzzleLocal; // where AA rounds leave the barrels, relative to the turret pivot
         float range, damage, fireInterval, cooldown;
 
         public bool IsMobile => type == EnemyType.Tank || type == EnemyType.Truck;
@@ -23,21 +26,32 @@ namespace DroneSandbox
         public float CurrentRange =>
             range + (SandboxGame.Instance.RadarCovers(transform.position) ? RadarRangeBonus : 0f);
 
-        // How far out this AA gun can hit a drone flying at the given altitude.
-        public float ThreatRadiusAtAltitude(float flightAltitude)
+        // How far out, horizontally and in one direction, this AA gun can hit a drone cruising flightAltitude
+        // above the ground there. The gun's reach is a sphere around its aim point, so a drone over a hill is
+        // closer to it and one over a hollow is further away. Starts from the flat-ground answer and refines
+        // it with the ground height under the drone (a few steps settle it on these gentle hills).
+        public float ThreatRadiusToward(Vector3 direction, float flightAltitude, float currentRange)
         {
-            float r = CurrentRange;
+            float gunHeight = AimPoint.y;
             float h = flightAltitude - aimHeight;
-            return Mathf.Sqrt(Mathf.Max(0f, r * r - h * h));
+            float r = Mathf.Sqrt(Mathf.Max(0f, currentRange * currentRange - h * h));
+            for (int i = 0; i < 3; i++)
+            {
+                Vector3 under = transform.position + direction * r;
+                h = Ground.HeightAt(under) + flightAltitude - gunHeight;
+                r = Mathf.Sqrt(Mathf.Max(0f, currentRange * currentRange - h * h));
+            }
+            return r;
         }
 
         public static EnemyUnit Create(EnemyType type, Vector3 position)
         {
             var go = new GameObject(type.ToString());
-            go.transform.position = position;
-            go.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+            go.transform.position = Ground.OnGround(position);
             var unit = go.AddComponent<EnemyUnit>();
+            unit.heading = Random.Range(0f, 360f);
             unit.Setup(type);
+            unit.SettleOnGround(1f);
             return unit;
         }
 
@@ -45,13 +59,51 @@ namespace DroneSandbox
         {
             type = enemyType;
             team = Team.Enemy;
-            Transform root = transform;
 
             switch (enemyType)
             {
                 case EnemyType.Tank:
                     unitName = "Tank";
-                    maxHp = 160f; moveSpeed = 3f; radius = 1.8f; aimHeight = 0.8f;
+                    maxHp = 160f; moveSpeed = 3f; radius = 2.0f; aimHeight = 1.0f;
+                    break;
+                case EnemyType.Truck:
+                    unitName = "Truck";
+                    maxHp = 60f; moveSpeed = 5.5f; radius = 1.7f; aimHeight = 1.1f;
+                    break;
+                case EnemyType.AAGun:
+                    unitName = "AA Gun";
+                    maxHp = 90f; radius = 1.9f; aimHeight = 0.9f;
+                    range = 18f; damage = 6f; fireInterval = 0.5f;
+                    break;
+                case EnemyType.Radar:
+                    unitName = "Radar";
+                    maxHp = 70f; radius = 1.5f; aimHeight = 1.5f;
+                    break;
+            }
+            hp = maxHp;
+
+            // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes.
+            var model = Art.TryModel("Enemy_" + enemyType, transform);
+            if (model != null)
+            {
+                foreach (var t in model.GetComponentsInChildren<Transform>())
+                    if (t.name == "Turret") turret = t;
+                if (turret != null) turretRest = turret.localRotation;
+                muzzleLocal = new Vector3(0f, 1.8f, 1.7f);
+            }
+            else
+            {
+                BuildPrimitiveModel(enemyType);
+            }
+            if (IsMobile) waypoint = SandboxGame.Instance.RandomEnemyPoint();
+        }
+
+        void BuildPrimitiveModel(EnemyType enemyType)
+        {
+            Transform root = transform;
+            switch (enemyType)
+            {
+                case EnemyType.Tank:
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.5f, 0f), new Vector3(2.0f, 0.7f, 3.0f), Art.EnemyOlive);
                     foreach (float side in new[] { -1.05f, 1.05f })
                         Art.Part(PrimitiveType.Cube, root, new Vector3(side, 0.35f, 0f), new Vector3(0.45f, 0.65f, 3.1f), Art.Dark);
@@ -62,8 +114,6 @@ namespace DroneSandbox
                     break;
 
                 case EnemyType.Truck:
-                    unitName = "Truck";
-                    maxHp = 60f; moveSpeed = 5.5f; radius = 1.4f; aimHeight = 0.9f;
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.95f, 1.1f), new Vector3(1.6f, 1.2f, 1.2f), Art.EnemyOlive);
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.9f, -0.6f), new Vector3(1.7f, 1.0f, 2.2f),
                         new Color(0.55f, 0.50f, 0.35f));
@@ -74,9 +124,6 @@ namespace DroneSandbox
                     break;
 
                 case EnemyType.AAGun:
-                    unitName = "AA Gun";
-                    maxHp = 90f; radius = 1.5f; aimHeight = 0.9f;
-                    range = 18f; damage = 6f; fireInterval = 0.5f;
                     Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 0.15f, 0f), new Vector3(2.4f, 0.15f, 2.4f), Art.EnemyOliveDark);
                     turret = Pivot(root, new Vector3(0f, 0.7f, 0f));
                     Art.Part(PrimitiveType.Cube, turret, Vector3.zero, new Vector3(1.0f, 0.6f, 1.0f), Art.EnemyOlive);
@@ -86,11 +133,10 @@ namespace DroneSandbox
                         Art.Part(PrimitiveType.Cylinder, elevation, new Vector3(side, 0f, 0.9f), new Vector3(0.1f, 0.9f, 0.1f),
                             Art.Dark, new Vector3(90f, 0f, 0f));
                     Art.Part(PrimitiveType.Sphere, turret, new Vector3(0f, 0.4f, -0.3f), Vector3.one * 0.2f, Art.EnemyRed, default, true);
+                    muzzleLocal = new Vector3(0f, 0.6f, 1.2f);
                     break;
 
                 case EnemyType.Radar:
-                    unitName = "Radar";
-                    maxHp = 70f; radius = 1.4f; aimHeight = 1.5f;
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.3f, 0f), new Vector3(1.6f, 0.6f, 1.6f), Art.EnemyOlive);
                     Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 1.5f, 0f), new Vector3(0.2f, 1.2f, 0.2f), Art.Dark);
                     turret = Pivot(root, new Vector3(0f, 2.7f, 0f));
@@ -99,8 +145,6 @@ namespace DroneSandbox
                     Art.Part(PrimitiveType.Sphere, turret, new Vector3(0f, 1.15f, 0f), Vector3.one * 0.22f, Art.EnemyRed, default, true);
                     break;
             }
-            hp = maxHp;
-            if (IsMobile) waypoint = SandboxGame.Instance.RandomEnemyPoint();
         }
 
         static Transform Pivot(Transform parent, Vector3 localPosition)
@@ -128,7 +172,7 @@ namespace DroneSandbox
                     Defend(dt);
                     break;
                 case EnemyType.Radar:
-                    turret.Rotate(0f, 90f * dt, 0f, Space.Self);
+                    SpinTurret(90f * dt);
                     break;
             }
         }
@@ -142,27 +186,50 @@ namespace DroneSandbox
             }
             Vector3 toWaypoint = waypoint - transform.position;
             toWaypoint.y = 0f;
-            if (toWaypoint.magnitude < 1f)
+            if (toWaypoint.magnitude < 1.5f)
             {
                 waitTimer = Random.Range(1f, 4f);
                 waypoint = SandboxGame.Instance.RandomEnemyPoint();
                 return;
             }
-            Quaternion look = Quaternion.LookRotation(toWaypoint);
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, look, 50f * dt);
-            if (Quaternion.Angle(transform.rotation, look) < 25f)
-                transform.position += transform.forward * moveSpeed * dt;
+            float wanted = Quaternion.LookRotation(toWaypoint).eulerAngles.y;
+            heading = Mathf.MoveTowardsAngle(heading, wanted, 50f * dt);
+            if (Mathf.Abs(Mathf.DeltaAngle(heading, wanted)) < 25f)
+                transform.position += Quaternion.Euler(0f, heading, 0f) * Vector3.forward * moveSpeed * dt;
+            SettleOnGround(8f * dt);
+        }
+
+        // Sits the unit on the terrain, tilted to match the slope. blend 1 snaps straight there.
+        void SettleOnGround(float blend)
+        {
+            Vector3 p = Ground.OnGround(transform.position);
+            transform.position = p;
+            Quaternion tilt = Quaternion.FromToRotation(Vector3.up, Ground.NormalAt(p));
+            Quaternion target = tilt * Quaternion.Euler(0f, heading, 0f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, target, Mathf.Clamp01(blend));
+        }
+
+        // The turret's facing with its rest pose taken out, in world space.
+        Quaternion TurretFacing => turret.parent.rotation * turret.localRotation * Quaternion.Inverse(turretRest);
+
+        void SpinTurret(float degrees)
+        {
+            if (turret == null) return;
+            turret.localRotation = Quaternion.AngleAxis(degrees, Vector3.up) * turret.localRotation;
         }
 
         // Turns the turret toward the closest drone. Returns that drone, or null if none is in range.
         Unit TrackNearestDrone(float trackRange, float turnSpeed, float dt)
         {
             var target = Combat.NearestHostile(AimPoint, team, trackRange, false);
-            if (target == null) return null;
-            Vector3 flat = target.AimPoint - turret.position;
-            flat.y = 0f;
-            if (flat.sqrMagnitude > 0.01f)
-                turret.rotation = Quaternion.RotateTowards(turret.rotation, Quaternion.LookRotation(flat), turnSpeed * dt);
+            if (target == null || turret == null) return target;
+            Vector3 local = turret.parent.InverseTransformDirection(target.AimPoint - turret.position);
+            local.y = 0f;
+            if (local.sqrMagnitude > 0.01f)
+            {
+                Quaternion aim = Quaternion.LookRotation(local) * turretRest;
+                turret.localRotation = Quaternion.RotateTowards(turret.localRotation, aim, turnSpeed * dt);
+            }
             return target;
         }
 
@@ -172,13 +239,13 @@ namespace DroneSandbox
             var target = TrackNearestDrone(CurrentRange, 240f, dt);
             if (target == null)
             {
-                turret.Rotate(0f, 20f * dt, 0f, Space.Self); // idle scan
+                SpinTurret(20f * dt); // idle scan
                 return;
             }
             if (cooldown <= 0f)
             {
                 cooldown = fireInterval;
-                Vector3 muzzle = turret.position + turret.forward * 1.2f + Vector3.up * 0.6f;
+                Vector3 muzzle = turret != null ? turret.position + TurretFacing * muzzleLocal : AimPoint;
                 Projectile.Bullet(muzzle, target, team, damage, 0.6f, new Color(1f, 0.45f, 0.2f));
             }
         }

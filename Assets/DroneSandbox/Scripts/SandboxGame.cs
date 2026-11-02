@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Builds the sandbox world (terrain, player base, enemy forces) and tracks every unit in it.
+    // Builds the sandbox world (terrain, scenery, player base, enemy forces) and tracks every unit in it.
     // There is no win or lose yet: destroyed enemies respawn, and you can launch drones any time.
     public class SandboxGame : MonoBehaviour
     {
@@ -24,15 +24,33 @@ namespace DroneSandbox
         // Enemy vehicles spawn and patrol inside this square (x and z in world units).
         readonly Rect enemyArea = new Rect(-35f, -35f, 115f, 115f);
 
-        static readonly Color FogColor = new Color(0.55f, 0.62f, 0.66f);
+        // Fixed defences. The ground is levelled under each one.
+        (EnemyType type, Vector3 position)[] FixedDefences => new[]
+        {
+            (EnemyType.Radar, enemyHqPosition + new Vector3(6f, 0f, -8f)),
+            (EnemyType.AAGun, enemyHqPosition + new Vector3(-12f, 0f, 0f)),
+            (EnemyType.AAGun, enemyHqPosition + new Vector3(0f, 0f, -14f)),
+            (EnemyType.AAGun, enemyHqPosition + new Vector3(10f, 0f, 9f)),
+            (EnemyType.AAGun, new Vector3(-10f, 0f, -5f)), // forward post with no radar cover, an easier first target
+            (EnemyType.Radar, new Vector3(-20f, 0f, 55f)), // second radar covering the north-west flank
+            (EnemyType.AAGun, new Vector3(-12f, 0f, 48f)),
+        };
+
+        readonly List<Ground.FlatSite> flatSites = new List<Ground.FlatSite>();
 
         void Awake()
         {
             Instance = this;
             var rng = new System.Random(7); // same scenery every run
 
-            Camera cam = SetupCameraAndLight();
-            BuildTerrain(rng);
+            flatSites.Add(new Ground.FlatSite(basePosition, 14f, true));
+            flatSites.Add(new Ground.FlatSite(enemyHqPosition, 16f, true));
+            foreach (var d in FixedDefences) flatSites.Add(new Ground.FlatSite(d.position, 6f, true));
+            Ground.Build(flatSites);
+
+            Camera cam = SetupCamera();
+            Atmosphere.Setup(cam, FindOrCreateSun());
+            BuildScenery(rng);
             BuildPlayerBase();
             BuildEnemyForces();
 
@@ -96,7 +114,8 @@ namespace DroneSandbox
 
         public Vector3 RandomEnemyPoint()
         {
-            return new Vector3(Random.Range(enemyArea.xMin, enemyArea.xMax), 0f, Random.Range(enemyArea.yMin, enemyArea.yMax));
+            var p = new Vector3(Random.Range(enemyArea.xMin, enemyArea.xMax), 0f, Random.Range(enemyArea.yMin, enemyArea.yMax));
+            return Ground.OnGround(p);
         }
 
         public bool RadarCovers(Vector3 position)
@@ -113,7 +132,7 @@ namespace DroneSandbox
 
         // ---- World building ----
 
-        Camera SetupCameraAndLight()
+        Camera SetupCamera()
         {
             Camera cam = Camera.main;
             if (cam == null)
@@ -123,86 +142,99 @@ namespace DroneSandbox
                 cam = go.AddComponent<Camera>();
                 go.AddComponent<AudioListener>();
             }
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = FogColor;
-            cam.farClipPlane = 600f;
-
-            if (Object.FindAnyObjectByType<Light>() == null)
-            {
-                var sun = new GameObject("Sun").AddComponent<Light>();
-                sun.type = LightType.Directional;
-                sun.transform.rotation = Quaternion.Euler(50f, -40f, 0f);
-                sun.shadows = LightShadows.Soft;
-            }
-
-            RenderSettings.fog = true;
-            RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogColor = FogColor;
-            RenderSettings.fogStartDistance = 120f;
-            RenderSettings.fogEndDistance = 320f;
             return cam;
         }
 
-        void BuildTerrain(System.Random rng)
+        static Light FindOrCreateSun()
         {
-            var world = new GameObject("Terrain").transform;
+            foreach (var light in Object.FindObjectsByType<Light>())
+                if (light.type == LightType.Directional) return light;
+            var sun = new GameObject("Sun").AddComponent<Light>();
+            sun.type = LightType.Directional;
+            return sun;
+        }
 
-            var outer = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            outer.name = "Outer Ground";
-            Destroy(outer.GetComponent<Collider>());
-            outer.transform.SetParent(world, false);
-            outer.transform.position = new Vector3(0f, -0.03f, 0f);
-            outer.transform.localScale = new Vector3(60f, 1f, 60f);
-            outer.GetComponent<Renderer>().sharedMaterial = Art.Shared(new Color(0.17f, 0.20f, 0.15f));
+        void BuildScenery(System.Random rng)
+        {
+            var world = new GameObject("Scenery").transform;
 
-            float tiles = MapHalfSize * 2f / 10f; // one grid square per 10 m (a Plane is 10 m wide)
-            var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            ground.name = "Ground";
-            Destroy(ground.GetComponent<Collider>());
-            ground.transform.SetParent(world, false);
-            ground.transform.localScale = new Vector3(tiles, 1f, tiles);
-            ground.GetComponent<Renderer>().sharedMaterial = Art.GroundMaterial(tiles);
-
-            // Forests
-            for (int f = 0; f < 9; f++)
+            // Forests: clusters inside the battlefield, and denser woods on the hills around it.
+            for (int f = 0; f < 22; f++)
             {
-                Vector3 center = ScenerySpot(rng);
-                int trees = rng.Next(8, 18);
+                bool outer = f >= 10;
+                Vector3 center = outer ? OuterSpot(rng) : ScenerySpot(rng);
+                int trees = outer ? rng.Next(16, 30) : rng.Next(8, 18);
+                float spread = outer ? 16f : 9f;
+                bool pines = rng.NextDouble() < 0.6;
                 for (int t = 0; t < trees; t++)
                 {
-                    Vector3 pos = center + new Vector3(Range(rng, -9f, 9f), 0f, Range(rng, -9f, 9f));
-                    if (!InsideMap(pos) || NearBase(pos, 18f)) continue;
-                    float h = Range(rng, 0.8f, 1.4f);
-                    var tree = new GameObject("Tree").transform;
-                    tree.SetParent(world, false);
-                    tree.position = pos;
-                    Art.Part(PrimitiveType.Cylinder, tree, new Vector3(0f, 0.8f * h, 0f), new Vector3(0.3f, 0.8f * h, 0.3f),
-                        new Color(0.30f, 0.22f, 0.14f));
-                    Art.Part(PrimitiveType.Sphere, tree, new Vector3(0f, 2.3f * h, 0f), Vector3.one * 2.4f * h,
-                        new Color(0.16f, 0.30f, 0.14f));
+                    Vector3 pos = center + new Vector3(Range(rng, -spread, spread), 0f, Range(rng, -spread, spread));
+                    if (NearSite(pos, 6f) || Mathf.Abs(pos.x) > 200f || Mathf.Abs(pos.z) > 200f) continue;
+                    bool pine = pines ? rng.NextDouble() < 0.85 : rng.NextDouble() < 0.2;
+                    float scale = Range(rng, 0.8f, 1.35f);
+                    Place(pine ? "Scenery_Pine" : "Scenery_Tree", pos, Range(rng, 0f, 360f), scale, 0.2f, world,
+                        root => PrimitiveTree(root, scale));
                 }
             }
 
             // Villages
+            string[] buildings = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_A", "Scenery_Barn" };
             for (int v = 0; v < 4; v++)
             {
                 Vector3 center = ScenerySpot(rng);
+                float streetYaw = rng.Next(0, 4) * 90f + Range(rng, -15f, 15f);
                 int houses = rng.Next(4, 8);
                 for (int i = 0; i < houses; i++)
                 {
-                    Vector3 pos = center + new Vector3(Range(rng, -10f, 10f), 0f, Range(rng, -10f, 10f));
-                    if (!InsideMap(pos) || NearBase(pos, 18f)) continue;
-                    float w = Range(rng, 3f, 6f), d = Range(rng, 3f, 6f), h = Range(rng, 2f, 4.5f);
-                    var house = new GameObject("Building").transform;
-                    house.SetParent(world, false);
-                    house.position = pos;
-                    house.rotation = Quaternion.Euler(0f, rng.Next(0, 4) * 90f + Range(rng, -8f, 8f), 0f);
-                    Color wall = Color.Lerp(new Color(0.62f, 0.58f, 0.50f), new Color(0.50f, 0.50f, 0.52f), (float)rng.NextDouble());
-                    Art.Part(PrimitiveType.Cube, house, new Vector3(0f, h / 2f, 0f), new Vector3(w, h, d), wall);
-                    Art.Part(PrimitiveType.Cube, house, new Vector3(0f, h + 0.15f, 0f), new Vector3(w + 0.3f, 0.3f, d + 0.3f),
-                        new Color(0.35f, 0.25f, 0.22f));
+                    Vector3 pos = center + new Vector3(Range(rng, -11f, 11f), 0f, Range(rng, -11f, 11f));
+                    if (!InsideMap(pos) || NearSite(pos, 8f)) continue;
+                    string model = buildings[rng.Next(buildings.Length)];
+                    float yaw = streetYaw + rng.Next(0, 4) * 90f + Range(rng, -6f, 6f);
+                    Place(model, pos, yaw, 1f, 0.5f, world, root => PrimitiveHouse(root, rng));
                 }
             }
+
+            // Boulders
+            for (int r = 0; r < 45; r++)
+            {
+                Vector3 pos = rng.NextDouble() < 0.5 ? ScenerySpot(rng) : OuterSpot(rng);
+                if (NearSite(pos, 4f)) continue;
+                float scale = Range(rng, 0.6f, 2.2f);
+                Place("Scenery_Rock", pos, Range(rng, 0f, 360f), scale, 0.25f * scale, world,
+                    root => Art.Part(PrimitiveType.Sphere, root, new Vector3(0f, 0.3f * scale, 0f),
+                        new Vector3(1.6f, 0.9f, 1.3f) * scale, new Color(0.45f, 0.44f, 0.42f)));
+            }
+        }
+
+        // Places Resources/Models/<model> on the ground (sunk a little so it doesn't float on slopes),
+        // or builds a primitive stand-in when the model is missing.
+        static void Place(string model, Vector3 pos, float yaw, float scale, float sink, Transform parent,
+            System.Action<Transform> fallback)
+        {
+            var root = new GameObject(model).transform;
+            root.SetParent(parent, false);
+            float ground = Mathf.Min(Ground.HeightAt(pos), Ground.HeightAt(pos + new Vector3(2f, 0f, 2f)),
+                Ground.HeightAt(pos - new Vector3(2f, 0f, 2f)));
+            root.position = new Vector3(pos.x, ground - sink, pos.z);
+            root.rotation = Quaternion.Euler(0f, yaw, 0f);
+            if (Art.TryModel(model, root, scale) == null) fallback(root);
+        }
+
+        static void PrimitiveTree(Transform root, float h)
+        {
+            Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 0.8f * h, 0f), new Vector3(0.3f, 0.8f * h, 0.3f),
+                new Color(0.30f, 0.22f, 0.14f));
+            Art.Part(PrimitiveType.Sphere, root, new Vector3(0f, 2.3f * h, 0f), Vector3.one * 2.4f * h,
+                new Color(0.16f, 0.30f, 0.14f));
+        }
+
+        static void PrimitiveHouse(Transform root, System.Random rng)
+        {
+            float w = Range(rng, 3f, 6f), d = Range(rng, 3f, 6f), h = Range(rng, 2f, 4.5f);
+            Color wall = Color.Lerp(new Color(0.62f, 0.58f, 0.50f), new Color(0.50f, 0.50f, 0.52f), (float)rng.NextDouble());
+            Art.Part(PrimitiveType.Cube, root, new Vector3(0f, h / 2f, 0f), new Vector3(w, h, d), wall);
+            Art.Part(PrimitiveType.Cube, root, new Vector3(0f, h + 0.15f, 0f), new Vector3(w + 0.3f, 0.3f, d + 0.3f),
+                new Color(0.35f, 0.25f, 0.22f));
         }
 
         void BuildPlayerBase()
@@ -219,24 +251,13 @@ namespace DroneSandbox
 
         void BuildEnemyForces()
         {
-            // Enemy HQ (scenery) defended by a radar and AA guns.
+            // Enemy HQ (scenery) defended by radars and AA guns.
             var hq = new GameObject("Enemy HQ").transform;
             hq.position = enemyHqPosition;
             Art.Part(PrimitiveType.Cube, hq, new Vector3(0f, 1.5f, 0f), new Vector3(9f, 3f, 7f), new Color(0.36f, 0.36f, 0.32f));
             Art.Part(PrimitiveType.Cube, hq, new Vector3(0f, 0.6f, 0f), new Vector3(14f, 1.2f, 0.6f), new Color(0.55f, 0.50f, 0.38f)); // sandbags
 
-            SpawnEnemy(EnemyType.Radar, enemyHqPosition + new Vector3(6f, 0f, -8f));
-            SpawnEnemy(EnemyType.AAGun, enemyHqPosition + new Vector3(-12f, 0f, 0f));
-            SpawnEnemy(EnemyType.AAGun, enemyHqPosition + new Vector3(0f, 0f, -14f));
-            SpawnEnemy(EnemyType.AAGun, enemyHqPosition + new Vector3(10f, 0f, 9f));
-
-            // Forward post: a lone AA gun with no radar cover, an easier first target.
-            SpawnEnemy(EnemyType.AAGun, new Vector3(-10f, 0f, -5f));
-
-            // A second radar covering the north-west flank.
-            SpawnEnemy(EnemyType.Radar, new Vector3(-20f, 0f, 55f));
-            SpawnEnemy(EnemyType.AAGun, new Vector3(-12f, 0f, 48f));
-
+            foreach (var d in FixedDefences) SpawnEnemy(d.type, d.position);
             for (int i = 0; i < 5; i++) SpawnEnemy(EnemyType.Tank, RandomEnemyPoint());
             for (int i = 0; i < 4; i++) SpawnEnemy(EnemyType.Truck, RandomEnemyPoint());
         }
@@ -246,10 +267,19 @@ namespace DroneSandbox
             return new Vector3(Range(rng, -80f, 80f), 0f, Range(rng, -80f, 80f));
         }
 
-        bool NearBase(Vector3 p, float distance)
+        // A spot on the hills outside the battlefield.
+        static Vector3 OuterSpot(System.Random rng)
         {
-            return Vector3.Distance(new Vector3(p.x, 0f, p.z), basePosition) < distance
-                || Vector3.Distance(new Vector3(p.x, 0f, p.z), enemyHqPosition) < distance;
+            float angle = Range(rng, 0f, Mathf.PI * 2f), distance = Range(rng, 100f, 185f);
+            return new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+        }
+
+        bool NearSite(Vector3 p, float margin)
+        {
+            foreach (var s in flatSites)
+                if (Vector2.Distance(new Vector2(p.x, p.z), new Vector2(s.center.x, s.center.z)) < s.radius + margin)
+                    return true;
+            return false;
         }
 
         static bool InsideMap(Vector3 p) => Mathf.Abs(p.x) < MapHalfSize - 2f && Mathf.Abs(p.z) < MapHalfSize - 2f;

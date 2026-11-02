@@ -56,10 +56,12 @@ namespace DroneSandbox
             Spawn(PrimitiveType.Sphere, at, Vector3.one * 0.5f, 0.15f, new Color(1f, 0.95f, 0.6f), new Color(1f, 0.5f, 0.2f), true);
         }
 
-        // Flat ring on the ground where an order was given.
+        // Flat disc on the ground where an order was given, tilted to match the slope.
         public static void Marker(Vector3 at, Color color)
         {
-            Spawn(PrimitiveType.Cylinder, new Vector3(at.x, 0.05f, at.z), new Vector3(2.5f, 0.02f, 2.5f), 0.5f, color, color, true);
+            Vector3 ground = Ground.OnGround(at) + Vector3.up * 0.08f;
+            var fx = Spawn(PrimitiveType.Cylinder, ground, new Vector3(2.5f, 0.02f, 2.5f), 0.5f, color, color, true);
+            fx.transform.rotation = Quaternion.FromToRotation(Vector3.up, Ground.NormalAt(ground));
         }
 
         // Burnt-out hull that smokes for a while, then sinks into the ground.

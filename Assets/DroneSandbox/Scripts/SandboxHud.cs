@@ -140,17 +140,20 @@ namespace DroneSandbox
             }
         }
 
-        // Dotted circle on the ground showing how far this AA gun reaches at drone altitude.
+        // Dotted line on the ground showing how far this AA gun reaches a drone cruising at DroneFlightAltitude
+        // over that ground. It bulges out over hollows and pulls in over hills.
         void ThreatRing(EnemyUnit aa, bool bright)
         {
             const int dots = 64;
-            float r = aa.ThreatRadiusAtAltitude(DroneFlightAltitude);
+            float range = aa.CurrentRange;
             float size = 3f * Scale;
             Color color = new Color(Hostile.r, Hostile.g, Hostile.b, bright ? 0.95f : 0.4f);
             for (int i = 0; i < dots; i++)
             {
                 float a = i * Mathf.PI * 2f / dots;
-                Vector3 p = aa.transform.position + new Vector3(Mathf.Cos(a) * r, 0.1f, Mathf.Sin(a) * r);
+                var direction = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                Vector3 p = aa.transform.position + direction * aa.ThreatRadiusToward(direction, DroneFlightAltitude, range);
+                p.y = Ground.HeightAt(p) + 0.1f;
                 if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), color);
             }
         }

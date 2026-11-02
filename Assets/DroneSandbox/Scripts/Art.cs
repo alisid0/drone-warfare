@@ -3,8 +3,8 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Placeholder visuals built from Unity primitives, so the sandbox needs no art assets.
-    // Replace these with real models once the art style is picked.
+    // Colours, materials and model loading. Real models come from Resources/Models; the primitive
+    // helpers here build stand-ins for anything that has no model yet.
     public static class Art
     {
         public static readonly Color PlayerBlue = new Color(0.30f, 0.75f, 1.00f);
@@ -89,34 +89,6 @@ namespace DroneSandbox
             go.transform.localScale = Vector3.one * scale;
             foreach (var c in go.GetComponentsInChildren<Collider>()) Object.Destroy(c);
             return go;
-        }
-
-        // Dark olive ground with a faint 10 m grid, like a tactical map.
-        public static Material GroundMaterial(float tiles)
-        {
-            const int size = 128;
-            var fill = new Color(0.22f, 0.26f, 0.19f);
-            var line = new Color(0.31f, 0.36f, 0.27f);
-            var pixels = new Color[size * size];
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    bool onLine = x < 2 || y < 2;
-                    float grain = 0.96f + Random.value * 0.06f;
-                    pixels[y * size + x] = onLine ? line : fill * grain;
-                }
-            }
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            tex.SetPixels(pixels);
-            tex.Apply();
-            tex.wrapMode = TextureWrapMode.Repeat;
-            tex.anisoLevel = 4;
-
-            var m = NewMaterial(Color.white);
-            m.mainTexture = tex;
-            m.mainTextureScale = new Vector2(tiles, tiles);
-            return m;
         }
     }
 }

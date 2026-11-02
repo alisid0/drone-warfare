@@ -178,7 +178,7 @@ namespace DroneSandbox
             }
 
             float bob = Mathf.Sin((Time.time + bobOffset) * 2f) * 0.25f;
-            var goal = new Vector3(transform.position.x, altitude + bob, transform.position.z); // default: hold position
+            var goal = new Vector3(transform.position.x, CruiseHeight(transform.position) + bob, transform.position.z); // default: hold position
             bool diving = false;
 
             if (attackTarget != null)
@@ -205,7 +205,7 @@ namespace DroneSandbox
                     }
                     else
                     {
-                        if (distance > weaponRange * 0.9f) goal = new Vector3(targetPos.x, altitude + bob, targetPos.z);
+                        if (distance > weaponRange * 0.9f) goal = new Vector3(targetPos.x, CruiseHeight(targetPos) + bob, targetPos.z);
                         if (distance <= weaponRange && fireCooldown <= 0f)
                         {
                             Fire();
@@ -217,7 +217,7 @@ namespace DroneSandbox
             else if (moveTarget.HasValue)
             {
                 Vector3 m = moveTarget.Value;
-                goal = new Vector3(m.x, altitude + bob, m.z);
+                goal = new Vector3(m.x, CruiseHeight(m) + bob, m.z);
                 Vector3 flat = goal - transform.position;
                 flat.y = 0f;
                 if (flat.magnitude < 0.6f) moveTarget = null;
@@ -233,6 +233,14 @@ namespace DroneSandbox
             if (!diving) desired += Separation() * 4f;
             velocity = Vector3.MoveTowards(velocity, desired, speed * 2.5f * dt);
             transform.position += velocity * dt;
+
+            // Never fly into a hillside (a kamikaze dive is meant to hit the ground).
+            float floor = Ground.HeightAt(transform.position) + 1.2f;
+            if (!diving && transform.position.y < floor)
+            {
+                transform.position = new Vector3(transform.position.x, floor, transform.position.z);
+                velocity.y = Mathf.Max(velocity.y, 0f);
+            }
 
             // Face the direction of travel, or the target while hovering.
             var flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
@@ -250,6 +258,11 @@ namespace DroneSandbox
             body.localRotation = Quaternion.Euler(local.z / speed * 20f, 0f, -local.x / speed * 20f);
             foreach (var rotor in rotors) rotor.Rotate(body.up, 1800f * dt, Space.World);
         }
+
+        // Cruise altitude is above the ground, taking the higher of here and the destination so the drone
+        // climbs before crossing a hill rather than after.
+        float CruiseHeight(Vector3 destination) =>
+            Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)) + altitude;
 
         // Pushes drones apart so a group doesn't stack in one spot.
         Vector3 Separation()

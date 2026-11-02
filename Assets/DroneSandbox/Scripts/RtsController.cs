@@ -32,7 +32,7 @@ namespace DroneSandbox
         // Points the camera at a spot on the map (used by the auto-test; handy for future cutscenes too).
         public void LookAt(Vector3 point, float zoomDistance, float yawDegrees)
         {
-            focus = new Vector3(point.x, 0f, point.z);
+            focus = Ground.OnGround(point);
             distance = zoomDistance;
             yaw = yawDegrees;
             ApplyCamera();
@@ -60,6 +60,7 @@ namespace DroneSandbox
             float limit = SandboxGame.MapHalfSize;
             focus.x = Mathf.Clamp(focus.x, -limit, limit);
             focus.z = Mathf.Clamp(focus.z, -limit, limit);
+            focus.y = Mathf.Lerp(focus.y, Ground.HeightAt(focus), 1f - Mathf.Exp(-5f * dt)); // glide over hills
 
             if (GameInput.Held(GameKey.RotateLeft)) yaw += 90f * dt;
             if (GameInput.Held(GameKey.RotateRight)) yaw -= 90f * dt;
@@ -210,15 +211,7 @@ namespace DroneSandbox
 
         public bool GroundPoint(Vector2 screen, out Vector3 point)
         {
-            Ray ray = Cam.ScreenPointToRay(new Vector3(screen.x, screen.y, 0f));
-            var ground = new Plane(Vector3.up, Vector3.zero);
-            if (ground.Raycast(ray, out float enter))
-            {
-                point = ray.GetPoint(enter);
-                return true;
-            }
-            point = Vector3.zero;
-            return false;
+            return Ground.Raycast(Cam.ScreenPointToRay(new Vector3(screen.x, screen.y, 0f)), out point);
         }
 
         static Rect ScreenRect(Vector2 a, Vector2 b)

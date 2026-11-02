@@ -6,9 +6,11 @@ select them, send them across the map, and hit enemy tanks, trucks, AA guns and 
 This first version is a **bare sandbox**: there's no win or lose yet. Destroyed enemies respawn after
 30 seconds, and you can launch more drones whenever you want (up to 30).
 
-The world is built from code when you press Play, so there are no scenes or prefabs to set up.
+The world is built from code when you press Play, so there are no scenes or prefabs to set up:
+rolling terrain with a valley for the battlefield, villages, woods, a hazy sky and filmic colour grading.
 Drones, vehicles and scenery are low-poly models made by the Blender scripts in `Tools/Blender`
-(see below); if a model is missing, the game falls back to simple shapes.
+(see below); if a model is missing, the game falls back to simple shapes. Ground textures and the
+sky come from [Poly Haven](https://polyhaven.com) (CC0, see Credits).
 
 ## Getting it running
 
@@ -72,7 +74,7 @@ Gun and missile drones fire on enemies in range by themselves when they're idle.
 | --- | --- | --- |
 | Tank | none | Patrols, tracks drones with its turret, lots of HP |
 | Truck | none | Patrols, fragile |
-| AA gun | shoots drones | Red dotted ring shows how far it reaches |
+| AA gun | shoots drones | Red dotted ring shows how far it reaches a drone cruising 8 m up (it bends with the hills) |
 | Radar | none | AA guns within 35 m of a working radar get +6 range. Kill it first. |
 
 ## How the code is organised
@@ -82,7 +84,9 @@ All scripts are in `Assets/DroneSandbox/Scripts`:
 | File | What it does |
 | --- | --- |
 | `Bootstrap.cs` | Starts the sandbox when you press Play |
-| `SandboxGame.cs` | Builds the map, base and enemy forces; tracks units, score and respawns |
+| `SandboxGame.cs` | Builds the map, scenery, base and enemy forces; tracks units, score and respawns |
+| `Ground.cs` | Terrain: hills, levelled sites for bases and defences, texture splatting, height queries |
+| `Atmosphere.cs` | Sky, sun, haze and post-processing |
 | `RtsController.cs` | Camera, selection and move/attack orders |
 | `SandboxHud.cs` | On-screen HUD: health bars, selection, threat rings, launch buttons, help |
 | `Drone.cs` | Drone types, flight and weapons |
@@ -95,8 +99,12 @@ All scripts are in `Assets/DroneSandbox/Scripts`:
 | `GameInput.cs` | Keyboard and mouse for either input system |
 | `AutoTest.cs` | The `-autotest` smoke test |
 
-`Assets/DroneSandbox/Editor/BuildTools.cs` adds the build menu. Models live in
+`Assets/DroneSandbox/Editor` adds the **Drone Sandbox** menu: *Build for Windows*, and
+*Configure Project*, which sets player and shadow settings and creates the material assets the game
+loads at runtime (re-run it after adding new terrain textures or a new sky). Models live in
 `Assets/DroneSandbox/Resources/Models` and are loaded by name (`Drone_Scout`, `Enemy_Tank`, ...).
+Terrain textures are `Resources/Textures/Terrain/<grass|meadow|dirt|rock>_diff` and `_nor`, and the sky is
+`Resources/Sky/sky.hdr`; drop in replacements with the same names and run *Configure Project*.
 
 Unit stats (HP, speed, range, damage) are set in `Drone.Setup` and `EnemyUnit.Setup`, so balance
 tweaks are one-line changes.
@@ -123,5 +131,14 @@ optional third argument, a comma-separated list of names, to rebuild only some m
 3. **Enemy fights back harder.** Jammers that cut drone control, enemy drones, attacks on your base.
 4. **Missions with win/lose.** Destroy the HQ, defend the base, limited drone budget.
 5. **Take control (FPV).** Jump into one drone and fly it yourself from its camera.
-6. **Art style pass.** Pick a look and replace the placeholder shapes.
+6. **Better vehicles and effects.** Swap in Asset Store vehicle packs, particle explosions and smoke, sound.
 7. **Control groups and waypoints.** Ctrl+1-9 groups, shift-click to queue a patrol route.
+
+## Credits
+
+Terrain textures and sky from [Poly Haven](https://polyhaven.com), released under CC0:
+[Aerial Grass Rock](https://polyhaven.com/a/aerial_grass_rock),
+[Forrest Ground 01](https://polyhaven.com/a/forrest_ground_01),
+[Forest Ground 04](https://polyhaven.com/a/forest_ground_04),
+[Aerial Rocks 02](https://polyhaven.com/a/aerial_rocks_02) and
+[Kloofendal 48d Partly Cloudy (Pure Sky)](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky).

@@ -1,11 +1,12 @@
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace DroneSandbox.EditorTools
 {
-    // One-time project configuration: player settings, URP shadow quality, and the material assets the
-    // game loads from Resources (terrain material, HDRI sky). Safe to run again.
+    // One-time project configuration: player settings, URP shadow quality, fog stripping, and the assets the
+    // game loads from Resources (materials, post-processing profile, HDRI sky). Safe to run again.
     // Command line:  Unity.exe -batchmode -quit -projectPath . -executeMethod DroneSandbox.EditorTools.ProjectSetup.Configure
     public static class ProjectSetup
     {
@@ -25,8 +26,10 @@ namespace DroneSandbox.EditorTools
             PlayerSettings.runInBackground = true;
 
             TuneRenderPipelines();
+            KeepLinearFog();
             CreateBaseMaterials();
             CreateTerrainMaterial();
+            CreatePostProcessingProfile();
             ImportTerrainTextures();
             CreateSkyMaterial();
 
@@ -86,8 +89,50 @@ namespace DroneSandbox.EditorTools
             if (shader == null) return;
             EnsureMaterialsFolder();
             string path = Root + "/Materials/TerrainLit.mat";
-            if (AssetDatabase.LoadAssetAtPath<Material>(path) == null)
-                AssetDatabase.CreateAsset(new Material(shader), path);
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                material = new Material(shader);
+                AssetDatabase.CreateAsset(material, path);
+            }
+            // In the editor the terrain inspector sets this from the layers; a terrain built in a player never
+            // does. Setting it on the asset turns on the layers' normal maps and keeps that shader variant.
+            material.EnableKeyword("_NORMALMAP");
+            // The terrain draws without instancing (see Ground.Build), so leave the instanced-only options off.
+            material.SetFloat("_EnableInstancedPerPixelNormal", 0f);
+            material.DisableKeyword("_TERRAIN_INSTANCED_PERPIXEL_NORMAL");
+            material.enableInstancing = false;
+            EditorUtility.SetDirty(material);
+        }
+
+        // Saves the post-processing grade as an asset. URP strips post-processing shader variants that no saved
+        // profile uses, so a profile made only at runtime could lose effects in player builds. Existing assets are
+        // left alone, so tweaks made in the Inspector survive; delete the asset to get the defaults back.
+        static void CreatePostProcessingProfile()
+        {
+            string path = Root + "/PostProcessing.asset";
+            if (AssetDatabase.LoadAssetAtPath<VolumeProfile>(path) != null) return;
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            AssetDatabase.CreateAsset(profile, path);
+            Atmosphere.ConfigureProfile(profile);
+            foreach (var component in profile.components)
+            {
+                component.hideFlags = HideFlags.HideInInspector | HideFlags.HideInHierarchy;
+                AssetDatabase.AddObjectToAsset(component, profile);
+            }
+            EditorUtility.SetDirty(profile);
+        }
+
+        // The game turns on linear fog at runtime, but the scene has none, so "Automatic" fog stripping would
+        // drop the fog shader variants from builds. Keep linear fog explicitly.
+        static void KeepLinearFog()
+        {
+            var settings = new SerializedObject(GraphicsSettings.GetGraphicsSettings());
+            SetInt(settings, "m_FogStripping", 1); // custom
+            SetBool(settings, "m_FogKeepLinear", true);
+            SetBool(settings, "m_FogKeepExp", false);
+            SetBool(settings, "m_FogKeepExp2", false);
+            settings.ApplyModifiedPropertiesWithoutUndo();
         }
 
         // Marks downloaded *_nor textures as normal maps.
