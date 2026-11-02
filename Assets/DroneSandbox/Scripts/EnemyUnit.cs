@@ -116,6 +116,11 @@ namespace DroneSandbox
                 }
                 if (turret != null) turretRest = turret.localRotation;
                 if (barrel != null) barrelRest = barrel.localPosition;
+                PaintInsignia(enemyType);
+                if (IsMobile)
+                    foreach (float side in new[] { -0.6f, 0.6f })
+                        DayNight.AddNightLight(transform, new Vector3(side, 0.95f, 1.9f), new Vector3(8f, 0f, 0f), LightType.Spot,
+                            new Color(1f, 0.92f, 0.75f), 6f, 30f, 70f);
                 muzzleLocal = new Vector3(0f, 1.8f, 1.7f);
             }
             else
@@ -123,6 +128,29 @@ namespace DroneSandbox
                 BuildPrimitiveModel(enemyType);
             }
             if (IsMobile) waypoint = SandboxGame.Instance.RandomEnemyPoint();
+        }
+
+        // Dravin emblems on the model's flanks (positions fit the Blender models).
+        void PaintInsignia(EnemyType enemyType)
+        {
+            foreach (float side in new[] { -1f, 1f })
+            {
+                switch (enemyType)
+                {
+                    case EnemyType.Tank:
+                        if (turret != null)
+                            Factions.Paint(turret, new Vector3(side * 0.7f, 0.24f, -0.3f), new Vector3(side, 0.26f, 0f).normalized, 0.4f, false);
+                        break;
+                    case EnemyType.Truck:
+                        Factions.Paint(transform, new Vector3(side * 0.87f, 1.2f, -0.55f), new Vector3(side, 0f, 0f), 0.7f, false);
+                        break;
+                    case EnemyType.Radar:
+                        Factions.Paint(transform, new Vector3(side * 0.92f, 0.6f, 0.35f), new Vector3(side, 0f, 0f), 0.55f, false);
+                        break;
+                }
+            }
+            if (enemyType == EnemyType.Artillery)
+                Factions.Paint(transform, new Vector3(0.6f, 1.12f, 0.67f), new Vector3(0f, 0.17f, 1f).normalized, 0.38f, false);
         }
 
         void BuildPrimitiveModel(EnemyType enemyType)

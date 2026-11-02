@@ -37,6 +37,7 @@ namespace DroneSandbox.EditorTools
             ImportTerrainTextures();
             CreateSkyMaterial();
             CreateWaterMaterial();
+            CreateDecalMaterial();
             CreatePbrMaterials();
             AssetDatabase.SaveAssets();
             SetUpMainScene();
@@ -192,6 +193,29 @@ namespace DroneSandbox.EditorTools
             material.SetFloat("_Mapping", 1f);   // latitude-longitude layout
             material.SetFloat("_ImageType", 0f); // 360 degrees
             material.SetFloat("_Exposure", 1.0f);
+            EditorUtility.SetDirty(material);
+        }
+
+        // Template for painted emblems and flags (Factions): URP Lit with alpha cut-out, so the emblem's shape
+        // is cut from its square. The game copies it and sets the texture.
+        static void CreateDecalMaterial()
+        {
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) return;
+            EnsureMaterialsFolder();
+            string path = Root + "/Materials/Decal.mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                material = new Material(shader);
+                AssetDatabase.CreateAsset(material, path);
+            }
+            material.SetFloat("_AlphaClip", 1f);
+            material.SetFloat("_Cutoff", 0.5f);
+            material.EnableKeyword("_ALPHATEST_ON");
+            material.SetFloat("_Smoothness", 0.25f);
+            material.SetOverrideTag("RenderType", "TransparentCutout");
+            material.renderQueue = (int)RenderQueue.AlphaTest;
             EditorUtility.SetDirty(material);
         }
 

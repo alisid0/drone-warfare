@@ -30,6 +30,7 @@ namespace DroneSandbox
             "1 / 2 / 3  -  launch Scout / Strike / Kamikaze",
             "Space  -  select all     X  -  stop     Esc  -  deselect",
             "Red dots: AA gun reach. Radars boost nearby AA.",
+            "T  -  thermal view (needs a Scout)     N  -  skip 2 h (free play)",
             "Yellow: mission targets and search areas.",
         };
 
@@ -38,7 +39,7 @@ namespace DroneSandbox
 
         SandboxGame game;
         RtsController rts;
-        GUIStyle label, title, small, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel;
+        GUIStyle label, title, small, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
         float stylesBuiltForScale;
         static Texture2D starTexture;
 
@@ -140,11 +141,16 @@ namespace DroneSandbox
             wrap = new GUIStyle(label) { wordWrap = true };
             targetLabel = Tinted(centered, TargetColor);
             lockedLabel = new GUIStyle(small) { alignment = TextAnchor.MiddleRight };
+            placeLabel = new GUIStyle(centered) { fontSize = Mathf.RoundToInt(13f * s), fontStyle = FontStyle.Bold };
+            placeLabel.normal.textColor = new Color(1f, 1f, 1f, 0.92f);
+            placeShadow = new GUIStyle(placeLabel);
+            placeShadow.normal.textColor = new Color(0f, 0f, 0f, 0.75f);
         }
 
         void DrawWorldOverlays()
         {
             float s = Scale;
+            if (rts.Distance >= 55f) DrawPlaceNames();
 
             foreach (var e in game.enemies)
             {
@@ -198,6 +204,31 @@ namespace DroneSandbox
             }
         }
 
+        // Names of the (fictional) places, shown when the camera is zoomed out.
+        void DrawPlaceNames()
+        {
+            for (int i = 0; i < MapLayout.Villages.Length && i < Factions.Villages.Length; i++)
+            {
+                Vector2 v = MapLayout.Villages[i];
+                PlaceName(new Vector3(v.x, 0f, v.y), 12f, Factions.Villages[i]);
+            }
+            PlaceName(game.basePosition, 16f, Factions.PlayerBase);
+            PlaceName(game.enemyHqPosition, 18f, Factions.EnemyBase);
+            Vector2 river = MapLayout.RiverField.points[0];
+            foreach (var p in MapLayout.RiverField.points)
+                if ((p - new Vector2(-105f, 2f)).sqrMagnitude < (river - new Vector2(-105f, 2f)).sqrMagnitude) river = p;
+            PlaceName(new Vector3(river.x, 0f, river.y), 4f, Factions.River);
+        }
+
+        void PlaceName(Vector3 at, float height, string text)
+        {
+            if (!ToGui(Ground.OnGround(at) + Vector3.up * height, out Vector2 g)) return;
+            float s = Scale;
+            var r = new Rect(g.x - 110f * s, g.y - 10f * s, 220f * s, 20f * s);
+            GUI.Label(new Rect(r.x + 1.5f * s, r.y + 1.5f * s, r.width, r.height), text, placeShadow);
+            GUI.Label(r, text, placeLabel);
+        }
+
         // Dashed yellow circle on the ground where a hidden target is somewhere inside.
         void SearchCircle(Vector3 center)
         {
@@ -243,11 +274,18 @@ namespace DroneSandbox
             }
             else
             {
-                GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "DRONE SANDBOX", title);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "FREE PLAY", title);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
                     $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Enemy units: {game.enemies.Count}", label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
                     $"Drones: <b>{game.drones.Count}</b>/{SandboxGame.MaxDrones}     Lost: {game.dronesLost}     Expended: {game.dronesExpended}", label);
+            }
+            var dayNight = DayNight.Instance;
+            if (dayNight != null)
+            {
+                string clock = $"{dayNight.Clock}  {dayNight.PartOfDay}" + (dayNight.Thermal ? "   <b>THERMAL</b>" : "");
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 9f * s, r.width - 20f * s, 22f * s), clock,
+                    new GUIStyle(small) { alignment = TextAnchor.UpperRight, richText = true });
             }
             if (GUI.Button(MenuButton(), "Menu", button)) game.OpenMenu();
         }
@@ -344,17 +382,21 @@ namespace DroneSandbox
             var missions = Missions.All;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
             float rowHeight = 50f, gap = 8f;
-            float height = 150f + (missions.Count + 1) * (rowHeight + gap) + 56f;
+            float height = 172f + (missions.Count + 1) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
 
             GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));
-            GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 44f * s),
+            GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 22f * s),
                 "Destroy enemy targets with a limited stock of drones. Fewer drones, more stars.",
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(13f * s) }, small.normal.textColor));
+            GUI.Label(new Rect(r.x + 30f * s, r.y + 120f * s, r.width - 60f * s, 40f * s),
+                $"{Capitalised(Factions.Region)}: you fly for the {Factions.Player} against the {Factions.Enemy}. " +
+                "All sides and places are fictional.",
+                Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * s) }, small.normal.textColor));
 
-            float y = r.y + 150f * s;
+            float y = r.y + 172f * s;
             for (int i = 0; i < missions.Count; i++)
             {
                 var row = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
@@ -380,7 +422,8 @@ namespace DroneSandbox
             Rect r = Centered(620f, 340f);
             Fill(r, ModalColor);
             float x = r.x + 28f * s, w = r.width - 56f * s;
-            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s), $"MISSION {game.MissionIndex + 1}", Tinted(small, TargetColor));
+            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s),
+                $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}", Tinted(small, TargetColor));
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
             GUI.Label(new Rect(x, r.y + 188f * s, w, 22f * s),
@@ -477,6 +520,8 @@ namespace DroneSandbox
         // ---- Primitives ----
 
         static string Clock(float seconds) => $"{(int)seconds / 60}:{(int)seconds % 60:00}";
+
+        static string Capitalised(string text) => string.IsNullOrEmpty(text) ? text : char.ToUpperInvariant(text[0]) + text.Substring(1);
 
         static GUIStyle Tinted(GUIStyle style, Color color)
         {

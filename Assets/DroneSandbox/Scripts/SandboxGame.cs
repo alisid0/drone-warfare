@@ -57,8 +57,10 @@ namespace DroneSandbox
             Instance = this;
 
             Camera cam = SetupCamera();
-            Atmosphere.Setup(cam, FindOrCreateSun());
+            Light sun = FindOrCreateSun();
+            Atmosphere.Setup(cam, sun);
             World.Build(transform, preview: false);
+            gameObject.AddComponent<DayNight>().Init(sun);
 
             rts = gameObject.AddComponent<RtsController>();
             var hud = gameObject.AddComponent<SandboxHud>();
@@ -76,6 +78,7 @@ namespace DroneSandbox
             Mission = null;
             MissionIndex = -1;
             rts.Orbit(true);
+            DayNight.Instance.SetTime(19.6f, 0.3f); // golden hour behind the menu
         }
 
         public void StartSandbox()
@@ -83,6 +86,7 @@ namespace DroneSandbox
             ClearUnits();
             Mode = GameMode.Sandbox;
             rts.Orbit(false);
+            DayNight.Instance.SetTime(10f, 1f); // a full day every 24 minutes; N skips ahead
             foreach (var d in MapLayout.FixedDefences) SpawnEnemy(d.type, d.position);
             for (int i = 0; i < 5; i++) SpawnEnemy(EnemyType.Tank, RandomEnemyPoint());
             for (int i = 0; i < 4; i++) SpawnEnemy(EnemyType.Truck, RandomEnemyPoint());
@@ -100,6 +104,7 @@ namespace DroneSandbox
             Mission = Missions.All[index];
             for (int t = 0; t < 3; t++) stock[t] = Mission.Stock((DroneType)t);
             rts.Orbit(false);
+            DayNight.Instance.SetTime(Mission.startHour, 0.25f);
 
             var rng = new System.Random(index * 101 + 7); // search circles land in the same place every try
             foreach (var u in Mission.units)
@@ -171,6 +176,7 @@ namespace DroneSandbox
             foreach (var p in Object.FindObjectsByType<Projectile>()) Destroy(p.gameObject);
             foreach (var fx in Object.FindObjectsByType<Effects>()) Destroy(fx.gameObject);
             Effects.Unburn();
+            DayNight.Instance?.SetThermal(false);
             rts.selected.Clear();
             enemiesDestroyed = dronesLost = dronesExpended = 0;
             Result = MissionResult.None;
@@ -183,8 +189,27 @@ namespace DroneSandbox
 
         // ---- Mission flow ----
 
+        // Thermal view comes from a Scout's camera, so it needs one in the air.
+        public void ToggleThermal()
+        {
+            var dayNight = DayNight.Instance;
+            if (dayNight == null || UiBlocking) return;
+            if (!dayNight.Thermal && !drones.Exists(d => d.type == DroneType.Scout))
+            {
+                ShowMessage("Thermal view needs a Scout in the air");
+                return;
+            }
+            dayNight.SetThermal(!dayNight.Thermal);
+        }
+
         void Update()
         {
+            var dayNight = DayNight.Instance;
+            if (dayNight != null && dayNight.Thermal && !drones.Exists(d => d.type == DroneType.Scout))
+            {
+                dayNight.SetThermal(false);
+                ShowMessage("Thermal lost: no Scout in the air");
+            }
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
             MissionTime += Time.deltaTime;
             SpotHidden();

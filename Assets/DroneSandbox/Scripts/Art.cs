@@ -111,7 +111,13 @@ namespace DroneSandbox
                 bool changed = false;
                 for (int i = 0; i < materials.Length; i++)
                 {
-                    if (materials[i] != null && photoMaterials.TryGetValue(materials[i].name, out var photo))
+                    if (materials[i] == null) continue;
+                    if (materials[i].name == "WindowGlass" || materials[i].name == "Window")
+                    {
+                        materials[i] = DayNight.WindowMaterial; // lit up after dark
+                        changed = true;
+                    }
+                    else if (photoMaterials.TryGetValue(materials[i].name, out var photo))
                     {
                         materials[i] = photo;
                         changed = true;

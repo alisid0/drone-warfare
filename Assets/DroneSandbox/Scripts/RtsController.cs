@@ -13,6 +13,7 @@ namespace DroneSandbox
         public Vector2 DragStart { get; private set; }
         public EnemyUnit HoveredEnemy { get; private set; }
         public Camera Cam { get; private set; }
+        public float Distance => distance;
 
         SandboxGame game;
         SandboxHud hud;
@@ -117,6 +118,9 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Launch1)) game.SpawnDrone(DroneType.Scout);
             if (GameInput.Pressed(GameKey.Launch2)) game.SpawnDrone(DroneType.Strike);
             if (GameInput.Pressed(GameKey.Launch3)) game.SpawnDrone(DroneType.Kamikaze);
+            if (GameInput.Pressed(GameKey.Thermal)) game.ToggleThermal();
+            if (GameInput.Pressed(GameKey.SkipTime) && game.Mode == GameMode.Sandbox && DayNight.Instance != null)
+                DayNight.Instance.SetTime(DayNight.Instance.hour + 2f, DayNight.Instance.hoursPerMinute);
         }
 
         // ---- Mouse ----

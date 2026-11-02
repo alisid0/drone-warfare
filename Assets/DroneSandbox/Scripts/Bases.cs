@@ -42,8 +42,15 @@ namespace DroneSandbox
                 ("Prop_WoodCrates", 13f, 9f, 20f, 1f),
                 ("Prop_SandbagWall", 6.5f, -9.5f, 90f, 1f),
             };
-            foreach (var p in pieces) Put(root, c, f, r, p.model, p.x, p.z, p.yaw, p.scale);
+            foreach (var p in pieces)
+            {
+                var placed = Put(root, c, f, r, p.model, p.x, p.z, p.yaw, p.scale);
+                if (p.model == "Prop_Floodlight") Floodlight(placed.transform);
+                // Norvane emblem along the top of the hangar's arched roof, where the camera sees it best.
+                if (p.model == "Base_Hangar") Factions.Paint(placed.transform, new Vector3(0f, 4.49f, 0f), Vector3.up, 2.4f, true);
+            }
             Hedgehogs(root, c, 16.5f);
+            Flags(root, c, f, r, 13.5f, true);
         }
 
         public static void BuildEnemyHq(Transform parent)
@@ -77,8 +84,16 @@ namespace DroneSandbox
             {
                 Vector3 at = c + r * p.x + f * p.z;
                 if (Blocked(occupied, MapLayout.Flat(at), 2f)) continue;
-                Put(root, c, f, r, p.model, p.x, p.z, p.yaw, p.scale);
+                var placed = Put(root, c, f, r, p.model, p.x, p.z, p.yaw, p.scale);
                 occupied.Add((MapLayout.Flat(at), 3f));
+                if (p.model == "Prop_Floodlight") Floodlight(placed.transform);
+                if (p.model == "HQ_Building")
+                {
+                    // A Dravin flag at a front corner of the flat roof and the emblem painted on the roof beside it.
+                    Flag.Create(root, placed.transform.TransformPoint(new Vector3(5.2f, 6.25f, 3.3f)), placed.transform.eulerAngles.y + 90f,
+                        false, onGround: false);
+                    Factions.Paint(placed.transform, new Vector3(-3f, 6.27f, 2.4f), Vector3.up, 2.4f, false);
+                }
             }
 
             // Zig-zag trenches round the back and sides, inside the wall.
@@ -94,6 +109,22 @@ namespace DroneSandbox
                 Put(root, c, f, r, "Prop_Trench", local.x, local.y, 90f - tangent + zig, 1f);
             }
             Hedgehogs(root, c, 16f);
+            Flags(root, c, f, r, 13f, false);
+        }
+
+        // The lamp head of a floodlight shines down and forward after dark.
+        static void Floodlight(Transform pole)
+        {
+            DayNight.AddNightLight(pole, new Vector3(0f, 8f, 0.3f), new Vector3(55f, 0f, 0f), LightType.Spot,
+                new Color(0.9f, 0.95f, 1f), 8f, 40f, 110f);
+        }
+
+        // A pair of flags just inside the main gate.
+        static void Flags(Transform root, Vector3 c, Vector3 f, Vector3 r, float inset, bool player)
+        {
+            float yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg + 90f;
+            foreach (float side in new[] { -4.2f, 4.2f })
+                Flag.Create(root, c + r * side + f * inset, yaw, player);
         }
 
         // Static stand-ins for the units the game spawns, so the editor preview shows a populated map.
@@ -225,11 +256,11 @@ namespace DroneSandbox
             renderer.sharedMaterial = gravel;
         }
 
-        static void Put(Transform root, Vector3 c, Vector3 f, Vector3 r, string model, float x, float z, float yaw, float scale)
+        static GameObject Put(Transform root, Vector3 c, Vector3 f, Vector3 r, string model, float x, float z, float yaw, float scale)
         {
             Vector3 at = c + r * x + f * z;
             float frameYaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
-            World.Place(model, at, frameYaw + yaw, scale, 0f, root);
+            return World.Place(model, at, frameYaw + yaw, scale, 0f, root);
         }
 
         static bool Blocked(List<(Vector2 p, float r)> occupied, Vector2 p, float radius)

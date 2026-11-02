@@ -89,6 +89,25 @@ namespace DroneSandbox
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02e_farmland");
 
+            // The fictional sides: a flag at a base gate, and the emblem on an enemy tank.
+            var flags = UnityEngine.Object.FindObjectsByType<Flag>();
+            if (flags.Length > 0)
+            {
+                rts.LookAt(flags[0].transform.position, 22f, 30f);
+                yield return new WaitForSeconds(0.5f);
+                yield return Shot("02g_flag");
+            }
+            EnemyUnit emblemTank = Nearest(EnemyType.Tank, game.enemyHqPosition);
+            if (emblemTank != null)
+            {
+                rts.LookAt(emblemTank.transform.position, 12f, emblemTank.transform.eulerAngles.y + 90f);
+                yield return new WaitForSeconds(0.3f);
+                yield return Shot("02h_tank_emblem");
+            }
+            rts.LookAt(game.basePosition, 30f, 300f);
+            yield return new WaitForSeconds(0.3f);
+            yield return Shot("02i_base_emblem");
+
             // Send everyone toward the forward AA post and follow them.
             Vector3 staging = new Vector3(-32f, 0f, -26f);
             rts.selected.Clear();
@@ -128,6 +147,26 @@ namespace DroneSandbox
             log.WriteLine($"Sandbox done at {Time.time:F1}s. Destroyed: {game.enemiesDestroyed}, lost: {game.dronesLost}, " +
                           $"expended: {game.dronesExpended}, drones left: {game.drones.Count}, " +
                           $"fps: {1f / Mathf.Max(Time.smoothDeltaTime, 0.0001f):F0}");
+
+            // Dusk, night and thermal view over the base and the valley.
+            var dayNight = DayNight.Instance;
+            dayNight.SetTime(20.2f, 0f);
+            rts.LookAt(game.basePosition + new Vector3(25f, 0f, 25f), 75f, 45f);
+            yield return new WaitForSeconds(1f);
+            yield return Shot("08a_dusk");
+            dayNight.SetTime(23.5f, 0f);
+            yield return new WaitForSeconds(1f);
+            yield return Shot("08b_night");
+            rts.LookAt(game.enemyHqPosition, 45f, 210f);
+            yield return new WaitForSeconds(0.5f);
+            yield return Shot("08c_night_hq");
+            if (game.SpawnDrone(DroneType.Scout) != null) game.ToggleThermal();
+            rts.LookAt(new Vector3(10f, 0f, 10f), 90f, 45f);
+            yield return new WaitForSeconds(1f);
+            log.WriteLine($"Thermal on: {dayNight.Thermal} at {dayNight.Clock}");
+            yield return Shot("08d_thermal");
+            dayNight.SetThermal(false);
+            dayNight.SetTime(10f, 1f);
 
             yield return PlayMissions(game, rts);
 
