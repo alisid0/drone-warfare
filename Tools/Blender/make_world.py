@@ -1,4 +1,4 @@
-"""Builds the enemy vehicles and the scenery (houses, trees, rocks) and exports each as an FBX for Unity.
+"""Builds the enemy vehicles and exports each as an FBX for Unity. (Scenery: make_scenery.py, bases: make_base.py.)
 
 Run from the project root (Blender 4.x or 5.x):
     blender --background --python Tools/Blender/make_world.py -- Assets/DroneSandbox/Resources/Models [preview_dir]
@@ -9,12 +9,11 @@ Rotating parts are empties named "Turret" (tank turret, AA mount, radar head).
 """
 import math
 import os
-import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import (block, box, cone, cylinder, export, hexa, lumpy, material, pivot,  # noqa: E402
-                    render_preview, reset_scene, root, set_parent, sphere)
+from common import (block, box, box_uv_all, cylinder, export, hexa, material, net, pivot,  # noqa: E402
+                    render_preview, reset_scene, root, sphere, strut)
 
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT_DIR = os.path.abspath(args[0] if args else ".")
@@ -35,17 +34,8 @@ def make_materials():
     M["metal_light"] = material("MetalLight", (0.45, 0.47, 0.48), metallic=0.6, roughness=0.4)
     M["lamp"] = material("Lamp", (1.0, 0.9, 0.6), emission=(1.0, 0.9, 0.6))
     M["beacon"] = material("Beacon", (1.0, 0.1, 0.05), emission=(1.0, 0.1, 0.05))
-    M["plaster"] = material("Plaster", (0.62, 0.58, 0.50), roughness=0.95)
-    M["plaster_gray"] = material("PlasterGray", (0.48, 0.48, 0.47), roughness=0.95)
-    M["roof_tile"] = material("RoofTile", (0.38, 0.15, 0.10), roughness=0.85)
-    M["roof_metal"] = material("RoofMetal", (0.30, 0.32, 0.33), metallic=0.5, roughness=0.6)
-    M["wood"] = material("Wood", (0.25, 0.16, 0.09), roughness=0.9)
-    M["window"] = material("Window", (0.05, 0.06, 0.07), metallic=0.2, roughness=0.15)
-    M["bark"] = material("Bark", (0.20, 0.14, 0.09), roughness=1.0)
-    M["pine"] = material("PineNeedles", (0.07, 0.15, 0.07), roughness=0.9)
-    M["leaves"] = material("Leaves", (0.13, 0.22, 0.08), roughness=0.9)
-    M["leaves_light"] = material("LeavesLight", (0.20, 0.28, 0.10), roughness=0.9)
-    M["rock"] = material("Rock", (0.32, 0.31, 0.29), roughness=0.95)
+    M["camo_a"] = material("CamoNetA", (0.07, 0.09, 0.035), roughness=1.0)
+    M["camo_b"] = material("CamoNetB", (0.20, 0.17, 0.08), roughness=1.0)
 
 
 # ---------- enemy vehicles ----------
@@ -163,73 +153,35 @@ def build_radar():
     return r
 
 
-# ---------- scenery ----------
-
-def gable_roof(name, w, d, z, rise, mat, parent, overhang=0.25):
-    """A pitched roof whose ridge runs along Y."""
-    w2, d2 = w / 2 + overhang, d / 2 + overhang
-    corners = [(-w2, -d2, z), (w2, -d2, z), (w2, d2, z), (-w2, d2, z),
-               (-0.01, -d2, z + rise), (0.01, -d2, z + rise), (0.01, d2, z + rise), (-0.01, d2, z + rise)]
-    return hexa(name, corners, mat, parent, bevel=0)
-
-
-def windows_on(parent, w, d, floors, mat):
-    for f in range(floors):
-        z = 1.0 + f * 2.4
-        for side in (-1, 1):
-            for k in range(max(1, int(d // 2))):
-                y = -d / 2 + (k + 0.5) * d / max(1, int(d // 2))
-                box(f"WinSide_{side}_{f}_{k}", (0.06, 0.6, 0.8), (side * (w / 2 + 0.02), y, z + 0.4), mat, parent, bevel=0)
-            for k in range(max(1, int(w // 2.2))):
-                x = -w / 2 + (k + 0.5) * w / max(1, int(w // 2.2))
-                box(f"WinEnd_{side}_{f}_{k}", (0.6, 0.06, 0.8), (x, side * (d / 2 + 0.02), z + 0.4), mat, parent, bevel=0)
-
-
-def build_house(name, w, d, floors, wall_mat, roof_mat, chimney=True):
-    r = root(name)
-    h = floors * 2.4 + 0.3
-    box("Walls", (w, d, h), (0, 0, h / 2), wall_mat, r, bevel=0.03)
-    gable_roof("Roof", w, d, h, w * 0.38, roof_mat, r)
-    windows_on(r, w, d, floors, M["window"])
-    box("Door", (0.9, 0.08, 1.9), (w * 0.2, -d / 2 - 0.02, 0.95), M["wood"], r, bevel=0)
-    if chimney:
-        box("Chimney", (0.5, 0.5, 1.4), (-w * 0.25, d * 0.2, h + w * 0.2), M["plaster_gray"], r, bevel=0.02)
-    return r
-
-
-def build_barn():
-    r = root("Scenery_Barn")
-    box("Walls", (5.5, 9.0, 3.6), (0, 0, 1.8), M["wood"], r, bevel=0.03)
-    gable_roof("Roof", 5.5, 9.0, 3.6, 1.8, M["roof_metal"], r, overhang=0.3)
-    box("BarnDoor", (2.6, 0.08, 2.8), (0, -4.52, 1.4), M["olive_dark"], r, bevel=0)
-    return r
-
-
-def build_pine():
-    r = root("Scenery_Pine")
-    cylinder("Trunk", 0.16, 2.0, (0, 0, 1.0), M["bark"], r, verts=10)
-    for k in range(4):
-        rad = 1.6 - k * 0.32
-        cone(f"Needles_{k}", rad, 0.05, 1.9, (0, 0, 1.6 + k * 0.95), M["pine"], r, verts=10)
-    return r
-
-
-def build_broadleaf():
-    r = root("Scenery_Tree")
-    cylinder("Trunk", 0.2, 2.4, (0, 0, 1.2), M["bark"], r, verts=10)
-    rng = random.Random(4)
-    for k in range(6):
-        a = rng.uniform(0, 2 * math.pi)
-        d = rng.uniform(0.3, 0.9)
-        loc = (math.cos(a) * d, math.sin(a) * d, rng.uniform(2.6, 3.6))
-        mat = M["leaves"] if k % 2 else M["leaves_light"]
-        lumpy(f"Leaves_{k}", rng.uniform(0.9, 1.3), loc, mat, r, strength=0.35)
-    return r
-
-
-def build_rock():
-    r = root("Scenery_Rock")
-    lumpy("Rock", 1.0, (0, 0, 0.35), M["rock"], r, scale=(1.3, 1.0, 0.6), strength=0.45)
+def build_artillery():
+    """Towed howitzer dug in under a camouflage net: split trails, two wheels, a gun shield and a long barrel.
+    The barrel hangs on an empty named "Barrel", which the game kicks back when the gun fires."""
+    r = root("Enemy_Artillery")
+    box("Carriage", (0.9, 1.3, 0.45), (0, 0.25, 0.78), M["olive"], r, bevel=0.04)
+    box("Axle", (2.1, 0.18, 0.18), (0, 0.0, 0.5), M["olive_dark"], r, bevel=0.02)
+    for side in (-1, 1):
+        cylinder(f"Wheel_{side}", 0.5, 0.3, (side * 1.05, 0.0, 0.5), M["rubber"], r, rot=(0, R90, 0))
+        cylinder(f"Hub_{side}", 0.22, 0.32, (side * 1.05, 0.0, 0.5), M["olive_dark"], r, rot=(0, R90, 0), verts=12)
+        # Split trail running back and out to a spade dug into the ground.
+        strut(f"Trail_{side}", (side * 0.3, 0.5, 0.6), (side * 1.35, 3.7, 0.12), 0.11, M["olive"], r, verts=8)
+        box(f"Spade_{side}", (0.55, 0.1, 0.45), (side * 1.38, 3.78, 0.12), M["olive_dark"], r, rot=(0, 0, -side * 0.32))
+    box("Shield", (2.2, 0.08, 1.05), (0, -0.6, 1.15), M["olive"], r, rot=(math.radians(-10), 0, 0), bevel=0.02)
+    b = pivot("Barrel", (0, 0.1, 1.25), r)
+    box("Cradle", (0.42, 1.6, 0.36), (0, 0.1, 1.25), M["olive_dark"], b, bevel=0.03)
+    for side in (-1, 1):
+        cylinder(f"Recuperator_{side}", 0.08, 1.4, (side * 0.16, -0.3, 1.47), M["olive_dark"], b, rot=(R90, 0, 0), verts=10)
+    cylinder("Tube", 0.09, 4.4, (0, -2.0, 1.25), M["olive"], b, rot=(R90, 0, 0), verts=14)
+    cylinder("MuzzleBrake", 0.15, 0.4, (0, -4.25, 1.25), M["olive_dark"], b, rot=(R90, 0, 0), verts=12)
+    b.rotation_euler = (math.radians(-14), 0, 0)  # elevated, muzzle up
+    # Camouflage net on four poles over the whole gun.
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            strut(f"NetPole_{sx}_{sy}", (sx * 2.4, sy * 2.6 - 0.2, 0), (sx * 2.4, sy * 2.6 - 0.2, 2.3), 0.04, M["olive_dark"], r, verts=6)
+    net("Net", (6.2, 6.8), 2.4, [M["camo_a"], M["camo_b"]], r, sag=0.9, seed=29)
+    for obj in [o for o in r.children if o.name.startswith("Net_")]:
+        obj.location = (0, -0.2, 0)
+    box("Ammo", (0.8, 0.5, 0.4), (1.6, 1.4, 0.2), M["olive_dark"], r, bevel=0.03)
+    box("Ammo2", (0.8, 0.5, 0.4), (1.6, 2.0, 0.2), M["olive_dark"], r, bevel=0.03)
     return r
 
 
@@ -240,12 +192,7 @@ def main():
         ("Enemy_Truck", build_truck, 6.5, 0.8),
         ("Enemy_AAGun", build_aa_gun, 6.0, 0.6),
         ("Enemy_Radar", build_radar, 7.5, 1.8),
-        ("Scenery_House_A", lambda: build_house("Scenery_House_A", 5.0, 6.0, 1, M["plaster"], M["roof_tile"]), 13.0, 2.0),
-        ("Scenery_House_B", lambda: build_house("Scenery_House_B", 6.0, 8.0, 2, M["plaster_gray"], M["roof_metal"]), 16.0, 3.0),
-        ("Scenery_Barn", build_barn, 15.0, 2.5),
-        ("Scenery_Pine", build_pine, 11.0, 2.8),
-        ("Scenery_Tree", build_broadleaf, 10.0, 2.4),
-        ("Scenery_Rock", build_rock, 5.0, 0.3),
+        ("Enemy_Artillery", build_artillery, 10.0, 1.0),
     ]
     only = set(args[2].split(",")) if len(args) > 2 else None
     for name, build, cam_distance, target_z in builds:
@@ -255,6 +202,7 @@ def main():
         M.clear()
         make_materials()
         r = build()
+        box_uv_all(r)  # real-scale UVs for Unity's photo textures; parts stay separate so turrets can turn
         export(r, os.path.join(OUT_DIR, name + ".fbx"))
         print(f"EXPORTED {name}")
         if PREVIEW_DIR:

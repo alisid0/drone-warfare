@@ -1,17 +1,22 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DroneSandbox
 {
-    public enum EnemyType { Tank, Truck, AAGun, Radar }
+    public enum EnemyType { Tank, Truck, AAGun, Radar, Artillery, Command }
 
-    // Enemy targets. Tanks and trucks patrol, AA guns shoot at drones,
-    // and a radar extends the range of nearby AA guns.
+    // Enemy targets. Tanks and trucks patrol (or, in missions, park or drive a convoy route), AA guns shoot
+    // at drones, a radar extends the range of nearby AA guns, artillery shells your lines, and the command
+    // post is the HQ building itself.
     public class EnemyUnit : Unit
     {
         public const float RadarCoverage = 35f; // AA guns this close to a radar get extra range
         public const float RadarRangeBonus = 6f;
 
         public EnemyType type;
+        public bool isTarget;          // a mission objective
+        public bool Hidden { get; private set; }
+        public Vector3 searchCenter;   // where the HUD draws the search circle while hidden
         float moveSpeed;
         float heading; // degrees; vehicles tilt to follow the ground but steer by this
         Vector3 waypoint;
@@ -20,6 +25,12 @@ namespace DroneSandbox
         Quaternion turretRest = Quaternion.identity;
         Vector3 muzzleLocal; // where AA rounds leave the barrels, relative to the turret pivot
         float range, damage, fireInterval, cooldown;
+        bool parked;
+        List<Vector3> route;           // convoy route, driven point by point
+        int routeIndex;
+        Transform barrel;              // artillery barrel, kicked back when it fires
+        Vector3 barrelRest;
+        GameObject structure;          // the building a command post stands for
 
         public bool IsMobile => type == EnemyType.Tank || type == EnemyType.Truck;
 
@@ -44,12 +55,14 @@ namespace DroneSandbox
             return r;
         }
 
-        public static EnemyUnit Create(EnemyType type, Vector3 position)
+        public static EnemyUnit Create(EnemyType type, Vector3 position) => Create(type, position, Random.Range(0f, 360f));
+
+        public static EnemyUnit Create(EnemyType type, Vector3 position, float heading)
         {
             var go = new GameObject(type.ToString());
             go.transform.position = Ground.OnGround(position);
             var unit = go.AddComponent<EnemyUnit>();
-            unit.heading = Random.Range(0f, 360f);
+            unit.heading = heading;
             unit.Setup(type);
             unit.SettleOnGround(1f);
             return unit;
@@ -79,16 +92,30 @@ namespace DroneSandbox
                     unitName = "Radar";
                     maxHp = 70f; radius = 1.5f; aimHeight = 1.5f;
                     break;
+                case EnemyType.Artillery:
+                    unitName = "Artillery";
+                    maxHp = 80f; radius = 1.9f; aimHeight = 0.8f;
+                    cooldown = Random.Range(2f, 6f);
+                    break;
+                case EnemyType.Command:
+                    unitName = "Command post";
+                    maxHp = 320f; radius = 6f; aimHeight = 3.5f;
+                    break;
             }
             hp = maxHp;
+            if (enemyType == EnemyType.Command) return; // the HQ building in the world is its model
 
             // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes.
             var model = Art.TryModel("Enemy_" + enemyType, transform);
             if (model != null)
             {
                 foreach (var t in model.GetComponentsInChildren<Transform>())
+                {
                     if (t.name == "Turret") turret = t;
+                    if (t.name == "Barrel") barrel = t;
+                }
                 if (turret != null) turretRest = turret.localRotation;
+                if (barrel != null) barrelRest = barrel.localPosition;
                 muzzleLocal = new Vector3(0f, 1.8f, 1.7f);
             }
             else
@@ -136,6 +163,12 @@ namespace DroneSandbox
                     muzzleLocal = new Vector3(0f, 0.6f, 1.2f);
                     break;
 
+                case EnemyType.Artillery:
+                    Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.6f, 0f), new Vector3(1.6f, 0.5f, 1.2f), Art.EnemyOlive);
+                    Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 1.1f, 1.6f), new Vector3(0.14f, 1.8f, 0.14f),
+                        Art.Dark, new Vector3(70f, 0f, 0f));
+                    break;
+
                 case EnemyType.Radar:
                     Art.Part(PrimitiveType.Cube, root, new Vector3(0f, 0.3f, 0f), new Vector3(1.6f, 0.6f, 1.6f), Art.EnemyOlive);
                     Art.Part(PrimitiveType.Cylinder, root, new Vector3(0f, 1.5f, 0f), new Vector3(0.2f, 1.2f, 0.2f), Art.Dark);
@@ -162,11 +195,11 @@ namespace DroneSandbox
             switch (type)
             {
                 case EnemyType.Tank:
-                    Patrol(dt);
+                    Move(dt);
                     TrackNearestDrone(30f, 40f, dt);
                     break;
                 case EnemyType.Truck:
-                    Patrol(dt);
+                    Move(dt);
                     break;
                 case EnemyType.AAGun:
                     Defend(dt);
@@ -174,7 +207,89 @@ namespace DroneSandbox
                 case EnemyType.Radar:
                     SpinTurret(90f * dt);
                     break;
+                case EnemyType.Artillery:
+                    Shell(dt);
+                    break;
             }
+        }
+
+        // ---- Mission set-up ----
+
+        public void Park() => parked = true;
+
+        // Drives the route from point startIndex on, at speed m/s; the game hears when it gets to the end.
+        public void Drive(List<Vector3> path, int startIndex, float speed)
+        {
+            route = path;
+            routeIndex = startIndex;
+            moveSpeed = speed;
+        }
+
+        public void AttachStructure(GameObject building) => structure = building;
+
+        // Invisible (and untargetable) until one of your drones comes close; see SandboxGame.SpotHidden.
+        public void Hide(Vector3 searchArea)
+        {
+            Hidden = true;
+            searchCenter = searchArea;
+            foreach (var r in GetComponentsInChildren<Renderer>()) r.enabled = false;
+        }
+
+        public void Reveal()
+        {
+            if (!Hidden) return;
+            Hidden = false;
+            foreach (var r in GetComponentsInChildren<Renderer>()) r.enabled = true;
+            Effects.Marker(transform.position, new Color(1f, 0.85f, 0.2f));
+            SandboxGame.Instance.OnSpotted(this);
+        }
+
+        protected override void Die()
+        {
+            if (structure != null) Effects.Burn(structure, transform.position + Vector3.up * 6f);
+            base.Die();
+        }
+
+        // ---- Behaviour ----
+
+        void Move(float dt)
+        {
+            if (route != null) FollowRoute(dt);
+            else if (!parked) Patrol(dt);
+        }
+
+        void FollowRoute(float dt)
+        {
+            if (routeIndex >= route.Count)
+            {
+                route = null;
+                SandboxGame.Instance.OnEnemyEscaped(this);
+                return;
+            }
+            Vector3 toPoint = route[routeIndex] - transform.position;
+            toPoint.y = 0f;
+            if (toPoint.magnitude < 2f)
+            {
+                routeIndex++;
+                return;
+            }
+            float wanted = Quaternion.LookRotation(toPoint).eulerAngles.y;
+            heading = Mathf.MoveTowardsAngle(heading, wanted, 120f * dt);
+            transform.position += Quaternion.Euler(0f, heading, 0f) * Vector3.forward * moveSpeed * dt;
+            SettleOnGround(8f * dt);
+        }
+
+        // Fires a round now and then: a flash and smoke at the muzzle and the barrel kicking back. The flash
+        // shows even while the gun is hidden, a clue to where it is.
+        void Shell(float dt)
+        {
+            cooldown -= dt;
+            if (barrel != null) barrel.localPosition = Vector3.Lerp(barrel.localPosition, barrelRest, 4f * dt);
+            if (cooldown > 0f) return;
+            cooldown = Random.Range(6f, 10f);
+            Vector3 muzzle = barrel != null ? barrel.TransformPoint(new Vector3(0f, 0f, 4.2f)) : AimPoint + transform.forward * 3f;
+            Effects.Explosion(muzzle, 1.1f);
+            if (barrel != null) barrel.localPosition = barrelRest - Vector3.forward * 0.6f;
         }
 
         void Patrol(float dt)
@@ -245,6 +360,7 @@ namespace DroneSandbox
             if (cooldown <= 0f)
             {
                 cooldown = fireInterval;
+                Reveal(); // firing gives a hidden gun away
                 Vector3 muzzle = turret != null ? turret.position + TurretFacing * muzzleLocal : AimPoint;
                 Projectile.Bullet(muzzle, target, team, damage, 0.6f, new Color(1f, 0.45f, 0.2f));
             }

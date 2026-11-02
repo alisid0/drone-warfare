@@ -11,51 +11,16 @@ namespace DroneSandbox
 
         public static void Setup(Camera cam, Light sun)
         {
-            // Sky: Resources/Sky/SkyMaterial (an HDRI panorama, made by the editor setup) if there is one,
-            // otherwise Unity's procedural sky.
-            var sky = Resources.Load<Material>("Sky/SkyMaterial");
-            if (sky == null)
-            {
-                var shader = Shader.Find("Skybox/Procedural");
-                if (shader != null)
-                {
-                    sky = new Material(shader);
-                    sky.SetFloat("_SunSize", 0.03f);
-                    sky.SetFloat("_AtmosphereThickness", 0.9f);
-                    sky.SetFloat("_Exposure", 1.15f);
-                    sky.SetColor("_GroundColor", new Color(0.36f, 0.38f, 0.35f));
-                }
-            }
-            if (sky != null)
-            {
-                RenderSettings.skybox = sky;
-                cam.clearFlags = CameraClearFlags.Skybox;
-            }
-            else
-            {
-                cam.clearFlags = CameraClearFlags.SolidColor;
-                cam.backgroundColor = HazeColor;
-            }
-
-            sun.transform.rotation = Quaternion.Euler(38f, -35f, 0f);
-            sun.color = new Color(1f, 0.95f, 0.86f);
-            sun.shadows = LightShadows.Soft;
-            sun.shadowStrength = 0.85f;
-            RenderSettings.sun = sun;
-            RenderSettings.ambientMode = AmbientMode.Skybox;
-            RenderSettings.ambientIntensity = 1f;
-            DynamicGI.UpdateEnvironment();
-
-            RenderSettings.fog = true;
-            RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogColor = HazeColor;
-            RenderSettings.fogStartDistance = 140f;
-            RenderSettings.fogEndDistance = 520f;
+            ApplyLighting(sun);
+            cam.clearFlags = RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+            cam.backgroundColor = HazeColor;
 
             cam.farClipPlane = 900f;
+            cam.allowHDR = true;
             var cameraData = cam.GetUniversalAdditionalCameraData();
             cameraData.renderPostProcessing = true;
             cameraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+            cameraData.antialiasingQuality = AntialiasingQuality.High;
             cameraData.renderShadows = true;
 
             // Our grade replaces any volume the scene came with (the URP template adds its own).
@@ -76,15 +41,55 @@ namespace DroneSandbox
             volume.sharedProfile = profile;
         }
 
-        // The filmic grade: ACES tonemapping, a little extra contrast, slightly muted colour, soft bloom, vignette.
+        // Sky, sun, ambient light and haze. Also saved into the scene by Drone Sandbox > Configure Project, so the
+        // editor's Scene view looks like the game.
+        public static void ApplyLighting(Light sun)
+        {
+            // Sky: Resources/Sky/SkyMaterial (an HDRI panorama, made by the editor setup) if there is one,
+            // otherwise Unity's procedural sky.
+            var sky = Resources.Load<Material>("Sky/SkyMaterial");
+            if (sky == null)
+            {
+                var shader = Shader.Find("Skybox/Procedural");
+                if (shader != null)
+                {
+                    sky = new Material(shader);
+                    sky.SetFloat("_SunSize", 0.03f);
+                    sky.SetFloat("_AtmosphereThickness", 0.9f);
+                    sky.SetFloat("_Exposure", 1.15f);
+                    sky.SetColor("_GroundColor", new Color(0.36f, 0.38f, 0.35f));
+                }
+            }
+            if (sky != null) RenderSettings.skybox = sky;
+
+            // Warm afternoon sun, fairly low, for long soft shadows.
+            sun.transform.rotation = Quaternion.Euler(36f, -35f, 0f);
+            sun.color = new Color(1f, 0.93f, 0.80f);
+            sun.intensity = 1.6f;
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.9f;
+            RenderSettings.sun = sun;
+            RenderSettings.ambientMode = AmbientMode.Skybox;
+            RenderSettings.ambientIntensity = 1.2f; // a bright summer sky lifts the shadows
+            RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
+            DynamicGI.UpdateEnvironment();
+
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogColor = HazeColor;
+            RenderSettings.fogStartDistance = 150f;
+            RenderSettings.fogEndDistance = 560f;
+        }
+
+        // The filmic grade: ACES tonemapping, a little extra contrast, natural summer colour, soft bloom, vignette.
         public static void ConfigureProfile(VolumeProfile profile)
         {
             var tonemapping = profile.Add<Tonemapping>(true);
             tonemapping.mode.Override(TonemappingMode.ACES);
             var color = profile.Add<ColorAdjustments>(true);
-            color.postExposure.Override(0.25f);
-            color.contrast.Override(14f);
-            color.saturation.Override(-14f);
+            color.postExposure.Override(0.3f);
+            color.contrast.Override(12f);
+            color.saturation.Override(4f);
             var bloom = profile.Add<Bloom>(true);
             bloom.intensity.Override(0.5f);
             bloom.threshold.Override(1.0f);
@@ -93,7 +98,7 @@ namespace DroneSandbox
             vignette.intensity.Override(0.22f);
             vignette.smoothness.Override(0.45f);
             var whiteBalance = profile.Add<WhiteBalance>(true);
-            whiteBalance.temperature.Override(6f);
+            whiteBalance.temperature.Override(4f);
         }
     }
 }

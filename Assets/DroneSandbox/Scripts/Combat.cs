@@ -21,6 +21,7 @@ namespace DroneSandbox
             foreach (var unit in HostilesOf(team))
             {
                 if (unit == null || !unit.IsAlive) continue;
+                if (unit is EnemyUnit enemy && enemy.Hidden) continue; // can't aim at what you haven't found
                 Vector3 offset = unit.AimPoint - from;
                 if (horizontalOnly) offset.y = 0f;
                 float distance = offset.magnitude;
