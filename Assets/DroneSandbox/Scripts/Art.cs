@@ -47,7 +47,7 @@ namespace DroneSandbox
             if (m != null) return m;
             var probe = GameObject.CreatePrimitive(PrimitiveType.Cube);
             m = probe.GetComponent<Renderer>().sharedMaterial;
-            Object.Destroy(probe);
+            Discard(probe);
             if (m != null) return m;
             var shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
@@ -69,7 +69,7 @@ namespace DroneSandbox
             Color color, Vector3 localEuler = default, bool glow = false)
         {
             var go = GameObject.CreatePrimitive(shape);
-            Object.Destroy(go.GetComponent<Collider>());
+            Discard(go.GetComponent<Collider>());
             go.transform.SetParent(parent, false);
             go.transform.localPosition = localPosition;
             go.transform.localRotation = Quaternion.Euler(localEuler);
@@ -87,8 +87,46 @@ namespace DroneSandbox
             var go = Object.Instantiate(prefab, parent, false);
             go.name = name;
             go.transform.localScale = Vector3.one * scale;
-            foreach (var c in go.GetComponentsInChildren<Collider>()) Object.Destroy(c);
+            foreach (var c in go.GetComponentsInChildren<Collider>()) Discard(c);
+            UsePhotoMaterials(go);
             return go;
+        }
+
+        static Dictionary<string, Material> photoMaterials;
+
+        // Swaps a model's flat-coloured materials for the photo-textured ones of the same name in
+        // Resources/Materials/PBR (made by Drone Sandbox > Configure Project). Models get real-scale UVs from
+        // the Blender scripts, so the textures sit at the right size.
+        static void UsePhotoMaterials(GameObject go)
+        {
+            if (photoMaterials == null)
+            {
+                photoMaterials = new Dictionary<string, Material>();
+                foreach (var m in Resources.LoadAll<Material>("Materials/PBR")) photoMaterials[m.name] = m;
+            }
+            if (photoMaterials.Count == 0) return;
+            foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    if (materials[i] != null && photoMaterials.TryGetValue(materials[i].name, out var photo))
+                    {
+                        materials[i] = photo;
+                        changed = true;
+                    }
+                }
+                if (changed) renderer.sharedMaterials = materials;
+            }
+        }
+
+        // Destroys something both in Play mode and in the editor's map preview (which can't wait for Destroy).
+        public static void Discard(Object o)
+        {
+            if (o == null) return;
+            if (Application.isPlaying) Object.Destroy(o);
+            else Object.DestroyImmediate(o);
         }
     }
 }

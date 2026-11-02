@@ -2,9 +2,9 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): health bars, selection
-    // brackets, AA threat rings, launch buttons and help. Fine for a prototype; move to
-    // UI Toolkit once the look of the game is decided.
+    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, mission briefing and results,
+    // health bars, selection brackets, target markers, search circles, AA threat rings, launch buttons and help.
+    // Fine for a prototype; move to UI Toolkit once the look of the game is decided.
     public class SandboxHud : MonoBehaviour
     {
         const float LaunchButtonWidth = 160f;
@@ -13,7 +13,9 @@ namespace DroneSandbox
 
         static readonly Color Friendly = new Color(0.35f, 1f, 0.6f);
         static readonly Color Hostile = new Color(1f, 0.32f, 0.25f);
+        static readonly Color TargetColor = new Color(1f, 0.82f, 0.2f);
         static readonly Color PanelColor = new Color(0.04f, 0.07f, 0.09f, 0.8f);
+        static readonly Color ModalColor = new Color(0.03f, 0.05f, 0.07f, 0.94f);
 
         static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze" };
         static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack" };
@@ -28,6 +30,7 @@ namespace DroneSandbox
             "1 / 2 / 3  -  launch Scout / Strike / Kamikaze",
             "Space  -  select all     X  -  stop     Esc  -  deselect",
             "Red dots: AA gun reach. Radars boost nearby AA.",
+            "Yellow: mission targets and search areas.",
         };
 
         public bool showHelp = true;
@@ -35,8 +38,9 @@ namespace DroneSandbox
 
         SandboxGame game;
         RtsController rts;
-        GUIStyle label, title, small, centered, button;
+        GUIStyle label, title, small, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel;
         float stylesBuiltForScale;
+        static Texture2D starTexture;
 
         public void Init(SandboxGame sandbox, RtsController controller)
         {
@@ -47,6 +51,8 @@ namespace DroneSandbox
         // ---- Layout (GUI space: origin at top-left) ----
 
         Rect StatsPanel() => new Rect(12f * Scale, 12f * Scale, 360f * Scale, 84f * Scale);
+
+        Rect MenuButton() => new Rect(StatsPanel().xMax + 8f * Scale, 12f * Scale, 72f * Scale, 30f * Scale);
 
         Rect HelpPanel()
         {
@@ -64,15 +70,23 @@ namespace DroneSandbox
 
         Rect SelectionPanel() => new Rect(12f * Scale, Screen.height - 124f * Scale, 330f * Scale, 112f * Scale);
 
+        Rect Centered(float width, float height)
+        {
+            float s = Scale;
+            return new Rect((Screen.width - width * s) / 2f, (Screen.height - height * s) / 2f, width * s, height * s);
+        }
+
         // Mouse position is in screen space (origin bottom-left), as the input backends report it.
         public bool IsPointerOverHud(Vector2 screenPosition)
         {
+            if (game != null && game.UiBlocking) return true;
             var p = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
             float pad = 6f * Scale;
             Rect bar = LaunchBar();
             bar = new Rect(bar.x - pad, bar.y - pad, bar.width + 2f * pad, bar.height + 2f * pad);
             return bar.Contains(p)
                 || StatsPanel().Contains(p)
+                || MenuButton().Contains(p)
                 || (showHelp && HelpPanel().Contains(p))
                 || (rts != null && rts.selected.Count > 0 && SelectionPanel().Contains(p));
         }
@@ -84,15 +98,27 @@ namespace DroneSandbox
             if (game == null || rts == null || rts.Cam == null) return;
             BuildStyles();
 
+            if (game.Mode == GameMode.Menu)
+            {
+                DrawMenu();
+                return;
+            }
+
             if (Event.current.type == EventType.Repaint)
             {
                 DrawWorldOverlays();
                 DrawDragBox();
             }
+            GUI.enabled = !game.UiBlocking;
             DrawStats();
             DrawLaunchBar();
             DrawSelection();
             DrawHelp();
+            GUI.enabled = true;
+            DrawMessage();
+
+            if (game.BriefingOpen) DrawBriefing();
+            else if (game.Result != MissionResult.None && Time.unscaledTime >= game.ResultsAt) DrawResults();
         }
 
         void BuildStyles()
@@ -108,6 +134,12 @@ namespace DroneSandbox
             small.normal.textColor = new Color(0.65f, 0.75f, 0.8f);
             centered = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(14f * s), richText = true };
+            leftButton = new GUIStyle(button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(Mathf.RoundToInt(16f * s), 8, 4, 4) };
+            big = new GUIStyle(label) { fontSize = Mathf.RoundToInt(34f * s), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            heading = new GUIStyle(label) { fontSize = Mathf.RoundToInt(24f * s), fontStyle = FontStyle.Bold };
+            wrap = new GUIStyle(label) { wordWrap = true };
+            targetLabel = Tinted(centered, TargetColor);
+            lockedLabel = new GUIStyle(small) { alignment = TextAnchor.MiddleRight };
         }
 
         void DrawWorldOverlays()
@@ -115,17 +147,25 @@ namespace DroneSandbox
             float s = Scale;
 
             foreach (var e in game.enemies)
-                if (e.type == EnemyType.AAGun) ThreatRing(e, e == rts.HoveredEnemy);
+            {
+                if (e.Hidden) SearchCircle(e.searchCenter);
+                else if (e.type == EnemyType.AAGun) ThreatRing(e, e == rts.HoveredEnemy);
+            }
 
             foreach (var e in game.enemies)
             {
-                if (!ToGui(e.AimPoint, out Vector2 c)) continue;
+                if (e.Hidden || !ToGui(e.AimPoint, out Vector2 c)) continue;
                 bool hovered = e == rts.HoveredEnemy;
                 float half = PixelRadius(e.AimPoint, e.radius);
                 if (hovered)
                 {
                     Brackets(c, half, Hostile);
                     GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), e.unitName, centered);
+                }
+                else if (e.isTarget)
+                {
+                    Brackets(c, half + 4f * s, TargetColor);
+                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), "<b>TARGET</b>", targetLabel);
                 }
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
             }
@@ -158,6 +198,24 @@ namespace DroneSandbox
             }
         }
 
+        // Dashed yellow circle on the ground where a hidden target is somewhere inside.
+        void SearchCircle(Vector3 center)
+        {
+            const int dashes = 40;
+            float size = 4f * Scale;
+            var color = new Color(TargetColor.r, TargetColor.g, TargetColor.b, 0.8f);
+            for (int i = 0; i < dashes; i++)
+            {
+                float a = i * Mathf.PI * 2f / dashes;
+                Vector3 p = center + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * SandboxGame.SearchRadius;
+                p.y = Ground.HeightAt(p) + 0.1f;
+                if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), color);
+            }
+            Vector3 mid = Ground.OnGround(center) + Vector3.up * 0.5f;
+            if (ToGui(mid, out Vector2 m))
+                GUI.Label(new Rect(m.x - 70f * Scale, m.y - 10f * Scale, 140f * Scale, 20f * Scale), "<b>SEARCH AREA</b>", targetLabel);
+        }
+
         void DrawDragBox()
         {
             if (!rts.IsDragging) return;
@@ -174,11 +232,24 @@ namespace DroneSandbox
             float s = Scale;
             Rect r = StatsPanel();
             Fill(r, PanelColor);
-            GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "DRONE SANDBOX", title);
-            GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
-                $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Enemy units: {game.enemies.Count}", label);
-            GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
-                $"Drones: <b>{game.drones.Count}</b>/{SandboxGame.MaxDrones}     Lost: {game.dronesLost}     Expended: {game.dronesExpended}", label);
+            if (game.Mode == GameMode.Mission)
+            {
+                var m = game.Mission;
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), m.name.ToUpperInvariant(), title);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
+                    $"Targets: <b>{game.TargetsDestroyed} / {game.TargetsTotal}</b>     Time: {Clock(game.MissionTime)}", label);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
+                    $"Drones used: <b>{game.DronesUsed}</b>     Three stars: {m.par} or fewer", label);
+            }
+            else
+            {
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "DRONE SANDBOX", title);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
+                    $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Enemy units: {game.enemies.Count}", label);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
+                    $"Drones: <b>{game.drones.Count}</b>/{SandboxGame.MaxDrones}     Lost: {game.dronesLost}     Expended: {game.dronesExpended}", label);
+            }
+            if (GUI.Button(MenuButton(), "Menu", button)) game.OpenMenu();
         }
 
         void DrawLaunchBar()
@@ -188,14 +259,17 @@ namespace DroneSandbox
             float pad = 6f * s;
             Fill(new Rect(bar.x - pad, bar.y - pad, bar.width + 2f * pad, bar.height + 2f * pad), PanelColor);
 
-            GUI.enabled = game.drones.Count < SandboxGame.MaxDrones;
+            bool wasEnabled = GUI.enabled;
             for (int i = 0; i < 3; i++)
             {
+                int left = game.StockLeft((DroneType)i);
+                GUI.enabled = wasEnabled && game.drones.Count < SandboxGame.MaxDrones && left != 0;
                 var b = new Rect(bar.x + i * (LaunchButtonWidth + LaunchButtonGap) * s, bar.y, LaunchButtonWidth * s, bar.height);
-                string text = $"<b>[{i + 1}] {LaunchNames[i]}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[i]}</size>";
+                string count = left >= 0 ? $"   x{left}" : "";
+                string text = $"<b>[{i + 1}] {LaunchNames[i]}{count}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[i]}</size>";
                 if (GUI.Button(b, text, button)) game.SpawnDrone((DroneType)i);
             }
-            GUI.enabled = true;
+            GUI.enabled = wasEnabled;
         }
 
         void DrawSelection()
@@ -252,7 +326,164 @@ namespace DroneSandbox
                     i == 0 ? label : small);
         }
 
+        // Short news at the top of the screen: a target spotted or destroyed, no drones of a type left.
+        void DrawMessage()
+        {
+            if (string.IsNullOrEmpty(game.Message) || Time.unscaledTime > game.MessageUntil) return;
+            float s = Scale;
+            var r = new Rect((Screen.width - 420f * s) / 2f, 16f * s, 420f * s, 34f * s);
+            Fill(r, PanelColor);
+            GUI.Label(r, $"<b>{game.Message}</b>", targetLabel);
+        }
+
+        // ---- Menu, briefing, results ----
+
+        void DrawMenu()
+        {
+            float s = Scale;
+            var missions = Missions.All;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
+            float rowHeight = 50f, gap = 8f;
+            float height = 150f + (missions.Count + 1) * (rowHeight + gap) + 56f;
+            Rect r = Centered(580f, height);
+            Fill(r, ModalColor);
+
+            GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
+            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));
+            GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 44f * s),
+                "Destroy enemy targets with a limited stock of drones. Fewer drones, more stars.",
+                Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(13f * s) }, small.normal.textColor));
+
+            float y = r.y + 150f * s;
+            for (int i = 0; i < missions.Count; i++)
+            {
+                var row = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+                bool open = SandboxGame.Unlocked(i);
+                GUI.enabled = open;
+                if (GUI.Button(row, $"<b>{i + 1}.  {missions[i].name}</b>", leftButton)) game.StartMission(i);
+                GUI.enabled = true;
+                if (open) DrawStars(new Rect(row.xMax - 110f * s, row.y + 13f * s, 96f * s, 24f * s), SandboxGame.BestStars(i));
+                else GUI.Label(new Rect(row.xMax - 110f * s, row.y, 96f * s, row.height), "Locked", lockedLabel);
+                y += (rowHeight + gap) * s;
+            }
+            var sandbox = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+            if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, enemies respawn</size>", leftButton))
+                game.StartSandbox();
+            GUI.Label(new Rect(r.x, r.yMax - 40f * s, r.width, 24f * s), "Finish a mission to unlock the next one.", Tinted(centered, small.normal.textColor));
+        }
+
+        void DrawBriefing()
+        {
+            float s = Scale;
+            var m = game.Mission;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
+            Rect r = Centered(620f, 340f);
+            Fill(r, ModalColor);
+            float x = r.x + 28f * s, w = r.width - 56f * s;
+            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s), $"MISSION {game.MissionIndex + 1}", Tinted(small, TargetColor));
+            GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
+            GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
+            GUI.Label(new Rect(x, r.y + 188f * s, w, 22f * s),
+                $"Drones:   Scout x{m.scouts}     Strike x{m.strikes}     Kamikaze x{m.kamikazes}", label);
+            GUI.Label(new Rect(x, r.y + 212f * s, w, 22f * s),
+                $"Targets: {game.TargetsTotal}     Three stars: use {m.par} drones or fewer", label);
+            var start = new Rect(r.x + (r.width - 220f * s) / 2f, r.yMax - 76f * s, 220f * s, 46f * s);
+            bool enter = Event.current.type == EventType.KeyDown &&
+                         (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
+            if (GUI.Button(start, "<b>Start mission</b>  (Enter)", button) || enter)
+            {
+                if (enter) Event.current.Use();
+                game.CloseBriefing();
+            }
+        }
+
+        void DrawResults()
+        {
+            float s = Scale;
+            bool won = game.Result == MissionResult.Won;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
+            Rect r = Centered(480f, 320f);
+            Fill(r, ModalColor);
+            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
+                Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
+            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
+            DrawStars(new Rect(r.x + (r.width - 180f * s) / 2f, r.y + 100f * s, 180f * s, 52f * s), game.Stars);
+            GUI.Label(new Rect(r.x, r.y + 166f * s, r.width, 22f * s),
+                $"Drones used: <b>{game.DronesUsed}</b>  (three stars: {game.Mission.par} or fewer)     Time: {Clock(game.MissionTime)}", centered);
+
+            float bw = 130f * s, gap = 12f * s;
+            float x0 = r.x + (r.width - 3f * bw - 2f * gap) / 2f, y = r.yMax - 72f * s;
+            if (GUI.Button(new Rect(x0, y, bw, 44f * s), "<b>Retry</b>", button)) game.RetryMission();
+            GUI.enabled = won && game.HasNextMission;
+            if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Next mission</b>", button)) game.NextMission();
+            GUI.enabled = true;
+            if (GUI.Button(new Rect(x0 + 2f * (bw + gap), y, bw, 44f * s), "<b>Menu</b>", button)) game.OpenMenu();
+        }
+
+        // Three stars side by side in the rect, the first `filled` of them gold.
+        void DrawStars(Rect r, int filled)
+        {
+            float size = Mathf.Min(r.height, r.width / 3f);
+            float gap = (r.width - 3f * size) / 2f;
+            Color old = GUI.color;
+            for (int i = 0; i < 3; i++)
+            {
+                GUI.color = i < filled ? TargetColor : new Color(1f, 1f, 1f, 0.18f);
+                GUI.DrawTexture(new Rect(r.x + i * (size + gap), r.y + (r.height - size) / 2f, size, size), Star());
+            }
+            GUI.color = old;
+        }
+
+        // A white five-pointed star with soft edges, made once.
+        static Texture2D Star()
+        {
+            if (starTexture != null) return starTexture;
+            const int n = 64;
+            var corners = new Vector2[10];
+            for (int i = 0; i < 10; i++)
+            {
+                float a = Mathf.PI / 2f + i * Mathf.PI / 5f, radius = i % 2 == 0 ? 0.48f : 0.2f;
+                corners[i] = new Vector2(0.5f + Mathf.Cos(a) * radius, 0.5f + Mathf.Sin(a) * radius) * n;
+            }
+            var pixels = new Color32[n * n];
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++)
+                {
+                    int inside = 0;
+                    for (int sy = 0; sy < 4; sy++)
+                        for (int sx = 0; sx < 4; sx++)
+                            if (InPolygon(new Vector2(x + (sx + 0.5f) / 4f, y + (sy + 0.5f) / 4f), corners)) inside++;
+                    pixels[y * n + x] = new Color32(255, 255, 255, (byte)(inside * 255 / 16));
+                }
+            }
+            starTexture = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            starTexture.SetPixels32(pixels);
+            starTexture.Apply();
+            return starTexture;
+        }
+
+        static bool InPolygon(Vector2 p, Vector2[] polygon)
+        {
+            bool inside = false;
+            for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++)
+            {
+                Vector2 a = polygon[i], b = polygon[j];
+                if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+            }
+            return inside;
+        }
+
         // ---- Primitives ----
+
+        static string Clock(float seconds) => $"{(int)seconds / 60}:{(int)seconds % 60:00}";
+
+        static GUIStyle Tinted(GUIStyle style, Color color)
+        {
+            var tinted = new GUIStyle(style);
+            tinted.normal.textColor = color;
+            return tinted;
+        }
 
         bool ToGui(Vector3 world, out Vector2 gui)
         {

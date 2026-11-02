@@ -19,6 +19,7 @@ namespace DroneSandbox
         Vector3 focus;
         float yaw = 45f;
         float distance = 55f;
+        bool orbiting;
 
         public void Init(SandboxGame sandbox, SandboxHud overlay, Camera camera, Vector3 startFocus)
         {
@@ -29,7 +30,14 @@ namespace DroneSandbox
             ApplyCamera();
         }
 
-        // Points the camera at a spot on the map (used by the auto-test; handy for future cutscenes too).
+        // Behind the main menu the camera circles the middle of the map.
+        public void Orbit(bool on)
+        {
+            orbiting = on;
+            if (on) LookAt(new Vector3(-10f, 0f, -10f), 105f, yaw);
+        }
+
+        // Points the camera at a spot on the map (used by missions and the auto-test).
         public void LookAt(Vector3 point, float zoomDistance, float yawDegrees)
         {
             focus = Ground.OnGround(point);
@@ -42,6 +50,18 @@ namespace DroneSandbox
         {
             if (Cam == null) return;
             selected.RemoveAll(d => d == null || !d.IsAlive);
+            if (game.UiBlocking)
+            {
+                // Menus and mission panels have the mouse; only the menu's slow orbit moves the camera.
+                IsDragging = false;
+                HoveredEnemy = null;
+                if (orbiting)
+                {
+                    yaw += 4f * Time.unscaledDeltaTime;
+                    ApplyCamera();
+                }
+                return;
+            }
             MoveCamera(Time.unscaledDeltaTime);
             HandleKeys();
             HandleMouse();
@@ -191,7 +211,7 @@ namespace DroneSandbox
             float bestPixels = 36f * hud.Scale;
             foreach (var e in game.enemies)
             {
-                if (!ToScreen(e.AimPoint, out Vector2 p)) continue;
+                if (e.Hidden || !ToScreen(e.AimPoint, out Vector2 p)) continue;
                 float pixels = Vector2.Distance(p, mouse);
                 if (pixels < bestPixels)
                 {

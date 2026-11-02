@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import box, cylinder, export, material, render_preview, reset_scene, root, sphere  # noqa: E402
+from common import box, box_uv_all, cylinder, export, material, render_preview, reset_scene, root, sphere  # noqa: E402
 
 import bpy  # noqa: E402
 
@@ -153,6 +153,7 @@ def main():
         M.clear()
         make_materials()
         r = build()
+        box_uv_all(r)  # real-scale UVs for Unity's photo textures
         export(r, os.path.join(OUT_DIR, name + ".fbx"))
         print(f"EXPORTED {name}")
         if PREVIEW_DIR:

@@ -3,14 +3,21 @@
 A real-time drone strategy prototype. You command a squad of drones from a top-down RTS camera:
 select them, send them across the map, and hit enemy tanks, trucks, AA guns and radars.
 
-This first version is a **bare sandbox**: there's no win or lose yet. Destroyed enemies respawn after
-30 seconds, and you can launch more drones whenever you want (up to 30).
+It starts at a menu with two ways to play:
 
-The world is built from code when you press Play, so there are no scenes or prefabs to set up:
-rolling terrain with a valley for the battlefield, villages, woods, a hazy sky and filmic colour grading.
-Drones, vehicles and scenery are low-poly models made by the Blender scripts in `Tools/Blender`
-(see below); if a model is missing, the game falls back to simple shapes. Ground textures and the
-sky come from [Poly Haven](https://polyhaven.com) (CC0, see Credits).
+- **Asset Hunt** (missions): destroy a mission's targets with a fixed stock of drones. Each mission adds one
+  idea, and you earn up to three stars for using few drones; finishing one unlocks the next.
+- **Free play sandbox:** no win or lose. Destroyed enemies respawn after 30 seconds, and you can launch drones
+  whenever you want (up to 30).
+
+The world is built from code: green summer farmland in a valley ringed by wooded hills, with a river
+between your base and enemy land, a bridge, dirt roads, villages with a church, patchwork fields (wheat,
+young crops, ploughed soil, sunflowers, mown hay with bales), hedgerows and poplar rows. Your base is a
+HESCO-walled drone yard with a Quonset hangar and launch pads; the enemy holds a fortified command post.
+The layout follows the concept art in `Docs/Concept` (made with ChatGPT image generation).
+Models are made by the Blender scripts in `Tools/Blender` (see below) and dressed in photo textures;
+if a model is missing, the game falls back to simple shapes. Textures and the sky come from
+[Poly Haven](https://polyhaven.com) (CC0, see Credits).
 
 ## Getting it running
 
@@ -18,7 +25,9 @@ This is a Unity 6 project (6000.6, Universal Render Pipeline).
 
 1. Install **Unity Hub** and a **Unity 6** editor (6000.6.x) with Windows Build Support.
 2. In Unity Hub: **Add → Add project from disk** and pick this folder.
-3. Open it, open `Assets/Scenes/SampleScene`, and press **Play**. The sandbox builds itself in whatever scene is open.
+3. Open it and open `Assets/Scenes/SampleScene`. The map shows in the Scene view straight away (a preview
+   that is rebuilt, never saved; untick *Show Map* on the *Map Preview* object to hide it). Press **Play**
+   and the sandbox builds itself in whatever scene is open.
 
 To make a standalone Windows build, use the menu **Drone Sandbox → Build for Windows**
 (it writes `Builds/Windows/DroneWarfare.exe`), or from the command line:
@@ -38,6 +47,19 @@ screenshots and a log of errors and stats into that folder, then quits:
 ```
 Builds\Windows\DroneWarfare.exe -autotest AutoTestOutput
 ```
+
+## Asset Hunt missions
+
+| # | Mission | Targets | What it teaches |
+| --- | --- | --- | --- |
+| 1 | First Light | 3 parked supply trucks | Launching drones and ordering a Kamikaze strike |
+| 2 | Open the Sky | A radar and the AA gun it boosts | Kill order: the radar first, then outrange the AA gun |
+| 3 | Hidden Guns | 3 artillery guns under camouflage nets | Searching the yellow circles with Scouts; targets stay hidden until a drone is within 26 m |
+| 4 | Convoy | 4 fuel trucks driving to the enemy HQ | Catching moving targets before they arrive |
+| 5 | Command Post | The enemy HQ building | Breaking into a compound guarded by a radar and three AA guns |
+
+Missions are data in `Missions.cs` (targets, defences, drone stock, the drone count for three stars), so new
+ones need no new code. Best stars are kept per mission in the player's saved preferences.
 
 ## Controls
 
@@ -76,6 +98,8 @@ Gun and missile drones fire on enemies in range by themselves when they're idle.
 | Truck | none | Patrols, fragile |
 | AA gun | shoots drones | Red dotted ring shows how far it reaches a drone cruising 8 m up (it bends with the hills) |
 | Radar | none | AA guns within 35 m of a working radar get +6 range. Kill it first. |
+| Artillery | none (to drones) | Towed gun under a camouflage net; its muzzle flash shows even while hidden (missions only) |
+| Command post | none | The enemy HQ building itself, 320 HP (missions only) |
 
 ## How the code is organised
 
@@ -84,8 +108,16 @@ All scripts are in `Assets/DroneSandbox/Scripts`:
 | File | What it does |
 | --- | --- |
 | `Bootstrap.cs` | Starts the sandbox when you press Play |
-| `SandboxGame.cs` | Builds the map, scenery, base and enemy forces; tracks units, score and respawns |
-| `Ground.cs` | Terrain: hills, levelled sites for bases and defences, texture splatting, height queries |
+| `SandboxGame.cs` | Builds the world, runs the menu, sandbox and missions; tracks units, targets, stars and respawns |
+| `Missions.cs` | The Asset Hunt missions as data |
+| `MapLayout.cs` | The hand-made map: bases, defences, river, roads, villages, and where the fields go |
+| `World.cs` | Builds the map from the layout: terrain, river, fields, villages, woods, bridge, bases |
+| `Ground.cs` | Terrain: hills, river channel, roads, levelled sites, texture splatting, height queries |
+| `Farmland.cs` | Fields with generated crop textures, hay bales, hedgerows, poplar rows |
+| `Water.cs` | The river's surface (drawn by `Assets/DroneSandbox/Shaders/River.shader`: flowing ripples, see-through shallows, sky reflections, sun glints) |
+| `Bases.cs` | Layout of your drone base and the enemy command post |
+| `PathField.cs` | Fast "distance to the river / nearest road" lookups |
+| `MapPreview.cs` | Shows the map in the editor without pressing Play |
 | `Atmosphere.cs` | Sky, sun, haze and post-processing |
 | `RtsController.cs` | Camera, selection and move/attack orders |
 | `SandboxHud.cs` | On-screen HUD: health bars, selection, threat rings, launch buttons, help |
@@ -95,16 +127,20 @@ All scripts are in `Assets/DroneSandbox/Scripts`:
 | `Projectile.cs` | Bullets and homing missiles |
 | `Combat.cs` | Target finding and blast damage |
 | `Effects.cs` | Explosions, smoke, sparks, order markers, wrecks |
-| `Art.cs` | Colours, materials, model loading and primitive stand-ins |
+| `Art.cs` | Colours, materials, model loading (with photo materials) and primitive stand-ins |
 | `GameInput.cs` | Keyboard and mouse for either input system |
-| `AutoTest.cs` | The `-autotest` smoke test |
+| `AutoTest.cs` | The `-autotest` smoke test (sandbox battle, then missions) |
 
 `Assets/DroneSandbox/Editor` adds the **Drone Sandbox** menu: *Build for Windows*, and
-*Configure Project*, which sets player and shadow settings and creates the material assets the game
-loads at runtime (re-run it after adding new terrain textures or a new sky). Models live in
-`Assets/DroneSandbox/Resources/Models` and are loaded by name (`Drone_Scout`, `Enemy_Tank`, ...).
-Terrain textures are `Resources/Textures/Terrain/<grass|meadow|dirt|rock>_diff` and `_nor`, and the sky is
-`Resources/Sky/sky.hdr`; drop in replacements with the same names and run *Configure Project*.
+*Configure Project*, which sets player and shadow settings, creates the material assets the game
+loads at runtime (re-run it after adding new textures or a new sky) and saves the sky, sun and map preview
+into the main scene. Models live in `Assets/DroneSandbox/Resources/Models` and are loaded by name
+(`Drone_Scout`, `Enemy_Tank`, `Base_Hangar`, ...). Each model's flat-coloured materials are swapped at load
+for photo-textured ones of the same name from `Resources/Materials/PBR` (the table is
+`ProjectSetup.PbrMaterials`; the textures are in `Assets/DroneSandbox/Textures/PBR`, fetched by
+`python Tools/fetch_textures.py`). Terrain textures are `Resources/Textures/Terrain/<meadow|lush|dirt|rock>_diff`
+and `_nor`, and the sky is `Resources/Sky/sky.hdr`; drop in replacements with the same names and run
+*Configure Project*.
 
 Unit stats (HP, speed, range, damage) are set in `Drone.Setup` and `EnemyUnit.Setup`, so balance
 tweaks are one-line changes.
@@ -117,12 +153,17 @@ With Blender 4.2 or newer:
 ```
 blender --background --factory-startup --python Tools/Blender/make_drones.py -- Assets/DroneSandbox/Resources/Models
 blender --background --factory-startup --python Tools/Blender/make_world.py -- Assets/DroneSandbox/Resources/Models
+blender --background --factory-startup --python Tools/Blender/make_base.py -- Assets/DroneSandbox/Resources/Models
+blender --background --factory-startup --python Tools/Blender/make_scenery.py -- Assets/DroneSandbox/Resources/Models
 ```
 
-Add a preview folder as a second argument to also render a PNG of each model. `make_world.py` takes an
-optional third argument, a comma-separated list of names, to rebuild only some models
-(for example `Enemy_Tank,Scenery_Pine`). Rotating parts are found by name: drone propellers are
-`Prop_*`, and turrets and radar heads hang under an empty called `Turret`.
+`make_world.py` builds the enemy vehicles, `make_base.py` the two bases and their props, and
+`make_scenery.py` the trees, buildings, bridge and rocks. Add a preview folder as a second argument to also
+render a PNG of each model, and a comma-separated list of names as a third to rebuild only some
+(for example `Enemy_Tank` or `Scenery_Pine,Scenery_Spruce`). Models get UVs in real-world metres so photo
+textures sit at the right scale, and static models are merged into one mesh each so the map stays fast.
+Rotating parts are found by name: drone propellers are `Prop_*`, and turrets and radar heads hang under an
+empty called `Turret`.
 
 ## Next features to pick from
 
@@ -136,9 +177,32 @@ optional third argument, a comma-separated list of names, to rebuild only some m
 
 ## Credits
 
-Terrain textures and sky from [Poly Haven](https://polyhaven.com), released under CC0:
-[Aerial Grass Rock](https://polyhaven.com/a/aerial_grass_rock),
+Textures and sky from [Poly Haven](https://polyhaven.com), released under CC0:
 [Forrest Ground 01](https://polyhaven.com/a/forrest_ground_01),
 [Forest Ground 04](https://polyhaven.com/a/forest_ground_04),
-[Aerial Rocks 02](https://polyhaven.com/a/aerial_rocks_02) and
+[Aerial Rocks 02](https://polyhaven.com/a/aerial_rocks_02),
+[Concrete Floor Worn 001](https://polyhaven.com/a/concrete_floor_worn_001),
+[Concrete Wall 004](https://polyhaven.com/a/concrete_wall_004),
+[Corrugated Iron 02](https://polyhaven.com/a/corrugated_iron_02),
+[Worn Corrugated Iron](https://polyhaven.com/a/worn_corrugated_iron),
+[Metal Plate](https://polyhaven.com/a/metal_plate),
+[Green Metal Rust](https://polyhaven.com/a/green_metal_rust),
+[Rusty Painted Metal](https://polyhaven.com/a/rusty_painted_metal),
+[White Plaster Rough 01](https://polyhaven.com/a/white_plaster_rough_01),
+[Grey Plaster 02](https://polyhaven.com/a/grey_plaster_02),
+[Plastered Stone Wall](https://polyhaven.com/a/plastered_stone_wall),
+[Brick Wall 02](https://polyhaven.com/a/brick_wall_02),
+[Clay Roof Tiles 02](https://polyhaven.com/a/clay_roof_tiles_02),
+[Weathered Plank Siding](https://polyhaven.com/a/weathered_plank_siding),
+[Wood Planks Grey](https://polyhaven.com/a/wood_planks_grey),
+[Rough Wood](https://polyhaven.com/a/rough_wood),
+[Bark Brown 02](https://polyhaven.com/a/bark_brown_02),
+[Pine Bark](https://polyhaven.com/a/pine_bark),
+[Hessian 230](https://polyhaven.com/a/hessian_230),
+[Mossy Rock](https://polyhaven.com/a/mossy_rock),
+[Gravel Floor](https://polyhaven.com/a/gravel_floor),
+[Asphalt 02](https://polyhaven.com/a/asphalt_02),
+[Leafy Grass](https://polyhaven.com/a/leafy_grass) and
 [Kloofendal 48d Partly Cloudy (Pure Sky)](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky).
+
+Concept art in `Docs/Concept` was generated with ChatGPT for reference.
