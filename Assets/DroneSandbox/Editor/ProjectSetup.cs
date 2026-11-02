@@ -233,20 +233,47 @@ namespace DroneSandbox.EditorTools
         }
 
         // Grass and wildflower clumps for the terrain (see Grass.cs): painted blades on a transparent card, alpha-cut,
-        // both sides drawn, GPU instanced (the terrain draws detail meshes with instancing).
+        // both sides drawn, GPU instanced (the terrain draws detail meshes with instancing). They sway in the wind
+        // with Shaders/Foliage/WindFoliage, Unity's fern shader from the Shader Graph samples (Production Ready
+        // Shaders); plain HDRP Lit if it's missing.
         static void CreateGrassMaterials()
         {
-            var shader = HdrpSetup.Lit;
+            var wind = Shader.Find("Shader Graphs/WindFoliage");
+            var shader = wind != null ? wind : HdrpSetup.Lit;
             if (shader == null) return;
             foreach (var (name, kind) in new[] { ("Grass", 0), ("Flowers", 1), ("Reeds", 2) })
             {
                 var texture = GeneratedTexture(Root + "/Textures/" + name + "Blades.png", () => BladesPng(kind), clamp: true);
                 var material = LoadOrCreateMaterial(Root + "/Materials/" + name + ".mat", shader);
-                HdrpSetup.Albedo(material, texture, Color.white, Vector2.one);
-                HdrpSetup.Surface(material, 0.08f, 0f);
-                HdrpSetup.Cutout(material, 0.4f, doubleSided: true, keepNormals: true);
+                if (wind != null) WindFoliage(material, texture, kind == 2 ? 0.16f : kind == 1 ? 0.24f : 0.3f);
+                else
+                {
+                    HdrpSetup.Albedo(material, texture, Color.white, Vector2.one);
+                    HdrpSetup.Surface(material, 0.08f, 0f);
+                    HdrpSetup.Cutout(material, 0.4f, doubleSided: true, keepNormals: true);
+                }
                 HdrpSetup.Finish(material);
             }
+        }
+
+        // The WindFoliage settings (the graph's own property names). The clumps are 0.55 m tall, so their tips get the
+        // full sway; reeds, taller and stiffer, sway less. No distance fade: the terrain stops drawing grass at 120 m.
+        static void WindFoliage(Material m, Texture texture, float sway)
+        {
+            m.SetTexture("Texture2D_E1B0D043", texture);                        // Base Map
+            m.SetFloat("Vector1_a5b8b09028ce49a39f4d090894c89e22", 0.4f);        // Alpha Clip Threshold
+            m.SetFloat("Vector1_8651797e3e304e108dbd25f9d5a426ba", 0.08f);       // Smoothness Scale
+            m.SetFloat("_GroundFalloff", 0.55f);
+            m.SetFloat("Wind_Intensity", sway);
+            m.SetFloat("Wind_Speed", 6f);
+            m.SetFloat("Wind_Wavelength", 14f);
+            m.SetFloat("Wind_Blast", 0.04f);
+            m.SetFloat("Wind_Ripples", 0.08f);
+            m.SetFloat("Wind_Turbulence", 0.2f);
+            m.SetFloat("Wind_Yaw", 200f);
+            m.SetFloat("Animation_Cutoff", 400f);
+            m.SetFloat("Distance_Fade_Start", 500f);
+            m.SetFloat("Distance_Fade_End", 600f);
         }
 
         // Blades of grass growing up from the bottom edge, dark at the root and lighter (some dry) at the tip.

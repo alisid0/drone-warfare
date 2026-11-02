@@ -226,6 +226,34 @@ namespace DroneSandbox
                 yield return Shot(shot.name);
                 foreach (var r in hidden) if (r != null) r.enabled = true;
             }
+
+            // Two short clips, frame by frame (made into GIFs outside the game), to see the grass sway in the wind
+            // and the river run: the meadow by the bridge, and the river a little downstream from a low drone.
+            var line = MapLayout.RiverField.points;
+            int near = 0;
+            for (int i = 1; i < line.Count; i++)
+                if ((line[i] - MapLayout.BridgePoint).sqrMagnitude < (line[near] - MapLayout.BridgePoint).sqrMagnitude) near = i;
+            int at = Mathf.Clamp(near + 14, 1, line.Count - 2);
+            Vector2 flow = (line[at + 1] - line[at - 1]).normalized, bank = new Vector2(-flow.y, flow.x);
+            float water = MapLayout.RiverField.values[at];
+            var clips = new (string name, Vector3 from, Vector3 to)[]
+            {
+                ("40_clip_grass", At(MapLayout.BridgePoint + new Vector2(20f, 24f), 5f), At(MapLayout.BridgePoint, 1f)),
+                ("41_clip_river", At(line[at] + bank * 12f - flow * 8f, water + 12f), At(line[at] + flow * 6f, water)),
+            };
+            dayNight.SetTime(8.5f, 0f);
+            foreach (var clip in clips)
+            {
+                photo.PlaceLooking(clip.from, clip.to, 45f);
+                var hidden = ClearView(clip.from, clip.to);
+                yield return new WaitForSeconds(1.2f);
+                for (int frame = 0; frame < 16; frame++)
+                {
+                    yield return Shot($"{clip.name}_{frame:00}");
+                    yield return new WaitForSecondsRealtime(0.1f);
+                }
+                foreach (var r in hidden) if (r != null) r.enabled = true;
+            }
             photo.Exit();
             dayNight.SetTime(10f, 1f);
             log.WriteLine($"Photo mode: {shots.Length} shots, dam at {dam}, lake level {lake}, river at the dam {river:F1}");

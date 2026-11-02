@@ -8,7 +8,8 @@ namespace DroneSandbox
     // refraction, caustics and foam):
     // - The river: a ribbon along the river line at the water level Ground worked out, a little wider than the
     //   channel so the shoreline is wherever the banks rise out of it, plus the oval plunge pool below the dam.
-    //   Foam is masked in around the spillway's landing and drifts away downstream.
+    //   A current map makes it flow down its own course; foam is masked in around the spillway's landing and on
+    //   riffles, and drifts away downstream.
     // - The lake behind the dam: a grid kept wherever the lake is, with small wind waves.
     // - Natural lakes and marsh pools: one surface over all of them, each at its own level.
     // A sector without a river, a dam or pools simply has none of that surface.
@@ -36,16 +37,86 @@ namespace DroneSandbox
             river.refractionColor = new Color(0.12f, 0.36f, 0.3f);
             river.scatteringColor = new Color(0.04f, 0.17f, 0.13f);
             river.absorptionDistance = 2.5f;
-            river.largeWindSpeed = dam ? 35f : 14f; // choppy enough below the dam to churn up foam, where the mask lets it
+            river.largeWindSpeed = dam ? 35f : 18f; // choppy enough below the dam to churn up foam, where the mask lets it
             river.largeChaos = 0.9f;
-            if (!dam) return;
+
+            // The current runs down the river's own course (a map of its direction, bend by bend), carrying the
+            // ripples and foam along with it.
+            FlowMaps(start, out var current, out var foamMask, out Vector2 extent, out Vector2 offset);
+            river.largeCurrentSpeedValue = 6f; // km/h: a brisk lowland river
+            river.ripplesMotionMode = WaterPropertyOverrideMode.Inherit;
+            river.largeCurrentMap = current;
+            river.largeCurrentRegionExtent = extent;
+            river.largeCurrentRegionOffset = offset;
+            river.largeCurrentMapInfluence = 1f;
+
+            // Foam: churned up where the spillway lands, and in streaks over riffles down the river. HDRP only
+            // makes foam in strong wind by default, so the river makes it at any wind, where the mask lets it.
             river.foam = true;
-            river.simulationFoamAmount = 1f;
+            river.simulationFoamAmount = dam ? 0.8f : 0.6f;
             river.foamPersistenceMultiplier = 1f;
+            river.simulationFoamWindCurve = AnimationCurve.Constant(0f, 1f, 1f);
             river.supportSimulationFoamMask = true;
-            river.simulationFoamMask = FoamMask();
-            river.simulationFoamMaskExtent = new Vector2(FoamReach * 2f, FoamReach * 2f);
-            river.simulationFoamMaskOffset = Vector2.zero;
+            river.simulationFoamMask = foamMask;
+            river.simulationFoamMaskExtent = extent;
+            river.simulationFoamMaskOffset = offset;
+        }
+
+        // Two maps over the river, in the water surface's own space (centred on `origin`; HDRP places both by extent
+        // and offset): the current, red and green the direction downstream (a neutral (1, 0.5) is +X) and blue full
+        // strength; and the foam mask, white below the dam and in riffles along the way.
+        static void FlowMaps(Vector2 origin, out Texture2D current, out Texture2D foam, out Vector2 extent, out Vector2 offset)
+        {
+            var field = MapLayout.RiverField;
+            var line = field.points;
+            float limit = Ground.Size / 2f;
+            Vector2 min = new Vector2(float.MaxValue, float.MaxValue), max = -min;
+            foreach (var p in line)
+            {
+                var q = new Vector2(Mathf.Clamp(p.x, -limit, limit), Mathf.Clamp(p.y, -limit, limit));
+                min = Vector2.Min(min, q);
+                max = Vector2.Max(max, q);
+            }
+            float margin = MapLayout.RiverHalfWidth + 20f; // the plunge pool and the river's edges
+            min -= Vector2.one * margin;
+            max += Vector2.one * margin;
+            extent = max - min;
+            offset = (min + max) / 2f - origin;
+
+            // Downstream is the way the water level falls.
+            float downstream = field.values[field.values.Length - 1] <= field.values[0] ? 1f : -1f;
+            bool dam = MapLayout.HasDam;
+            const int size = 256;
+            current = new Texture2D(size, size, TextureFormat.RGBA32, false, true) { name = "River Current", wrapMode = TextureWrapMode.Clamp };
+            foam = new Texture2D(size, size, TextureFormat.R8, false, true) { name = "River Foam", wrapMode = TextureWrapMode.Clamp };
+            var flow = new Color[size * size];
+            var froth = new Color[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float wx = min.x + (x + 0.5f) * extent.x / size, wz = min.y + (y + 0.5f) * extent.y / size;
+                    float d = field.Query(wx, wz, out _, out int s);
+                    // The direction along a few segments either side, so the current turns smoothly round bends.
+                    Vector2 dir = Vector2.zero;
+                    for (int k = -3; k <= 3; k++)
+                        if (field.IsValidSegment(s + k)) dir += field.Direction(s + k);
+                    dir = dir.sqrMagnitude > 0f ? dir.normalized * downstream : Vector2.right;
+                    flow[y * size + x] = new Color(dir.x * 0.5f + 0.5f, dir.y * 0.5f + 0.5f, 1f, 1f);
+
+                    float churn = 0f;
+                    if (dam)
+                    {
+                        float r = Vector2.Distance(new Vector2(wx, wz), MapLayout.DamPoint) / FoamReach;
+                        churn = 1f - Mathf.SmoothStep(0f, 1f, (r - 0.15f) / 0.85f);
+                    }
+                    float riffle = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(wx * 0.018f + 11f, wz * 0.018f + 4f) - 0.56f) / 0.14f) * 0.55f;
+                    float v = d < MapLayout.RiverHalfWidth + 4f ? Mathf.Max(churn, riffle) : churn;
+                    froth[y * size + x] = new Color(v, v, v, 1f);
+                }
+            current.SetPixels(flow);
+            current.Apply();
+            foam.SetPixels(froth);
+            foam.Apply();
         }
 
         static void BuildLake(Transform root)
@@ -190,24 +261,6 @@ namespace DroneSandbox
         }
 
         static Vector2 LakeMiddle => MapLayout.DamPoint - MapLayout.DamDown * 60f + MapLayout.DamAcross * 40f;
-
-        // White around the dam fading to black FoamReach metres out: where the river surface churns up foam.
-        static Texture2D FoamMask()
-        {
-            const int size = 64;
-            var texture = new Texture2D(size, size, TextureFormat.R8, false) { wrapMode = TextureWrapMode.Clamp };
-            var pixels = new Color[size * size];
-            for (int y = 0; y < size; y++)
-                for (int x = 0; x < size; x++)
-                {
-                    float r = new Vector2(x + 0.5f - size / 2f, y + 0.5f - size / 2f).magnitude / (size / 2f);
-                    float v = 1f - Mathf.SmoothStep(0f, 1f, (r - 0.15f) / 0.85f);
-                    pixels[y * size + x] = new Color(v, v, v, 1f);
-                }
-            texture.SetPixels(pixels);
-            texture.Apply();
-            return texture;
-        }
 
         static Mesh RiverMesh()
         {

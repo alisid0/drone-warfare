@@ -102,6 +102,7 @@ namespace DroneSandbox
         {
             var vertices = new Vector3[12];
             var uvs = new Vector2[12];
+            var sway = new Vector2[12]; // for the wind shader (WindFoliage): x a phase per card, y how far it moves
             var normals = new Vector3[12];
             var triangles = new int[18];
             for (int k = 0; k < 3; k++)
@@ -117,12 +118,16 @@ namespace DroneSandbox
                 uvs[v + 1] = new Vector2(1f, 0f);
                 uvs[v + 2] = new Vector2(1f, 1f);
                 uvs[v + 3] = new Vector2(0f, 1f);
-                for (int i = 0; i < 4; i++) normals[v + i] = Vector3.up;
+                for (int i = 0; i < 4; i++)
+                {
+                    normals[v + i] = Vector3.up;
+                    sway[v + i] = new Vector2(k * 0.37f, uvs[v + i].y); // roots stay put, tips sway
+                }
                 int t = k * 6;
                 triangles[t] = v; triangles[t + 1] = v + 2; triangles[t + 2] = v + 1;
                 triangles[t + 3] = v; triangles[t + 4] = v + 3; triangles[t + 5] = v + 2;
             }
-            var mesh = new Mesh { name = "Grass Clump", vertices = vertices, uv = uvs, normals = normals, triangles = triangles };
+            var mesh = new Mesh { name = "Grass Clump", vertices = vertices, uv = uvs, uv2 = sway, normals = normals, triangles = triangles };
             mesh.RecalculateBounds();
             return mesh;
         }
