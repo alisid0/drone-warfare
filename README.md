@@ -3,6 +3,11 @@
 A real-time drone strategy prototype. You command a squad of drones from a top-down RTS camera:
 select them, send them across the map, and hit enemy tanks, trucks, AA guns and radars.
 
+**Setting:** the fictional Varrow Valley. You fly for the Norvane Defence Force (teal, a white chevron in a
+hexagon) against the Dravin Coalition (black and orange, a triangle in a diamond). Every side, place, flag and
+emblem is invented (`Factions.cs`, where they can be renamed); the gameplay borrows how drones are used in
+modern wars without standing in for any real country or army.
+
 It starts at a menu with two ways to play:
 
 - **Asset Hunt** (missions): destroy a mission's targets with a fixed stock of drones. Each mission adds one
@@ -58,6 +63,10 @@ Builds\Windows\DroneWarfare.exe -autotest AutoTestOutput
 | 4 | Convoy | 4 fuel trucks driving to the enemy HQ | Catching moving targets before they arrive |
 | 5 | Command Post | The enemy HQ building | Breaking into a compound guarded by a radar and three AA guns |
 
+Each mission has its own time of day (First Light at dawn, Hidden Guns at dusk, Convoy at night, Command Post
+before dawn), and the clock keeps running, so light changes as you play. Free play runs a full day every
+24 minutes.
+
 Missions are data in `Missions.cs` (targets, defences, drone stock, the drone count for three stars), so new
 ones need no new code. Best stars are kept per mission in the player's saved preferences.
 
@@ -77,6 +86,8 @@ ones need no new code. Best stars are kept per mission in the player's saved pre
 | X | Stop |
 | Esc | Deselect |
 | H | Show or hide the help panel |
+| T | Thermal view (white-hot camera; needs a Scout in the air) |
+| N | Skip ahead 2 hours (free play) |
 
 ## Units
 
@@ -110,6 +121,9 @@ All scripts are in `Assets/DroneSandbox/Scripts`:
 | `Bootstrap.cs` | Starts the sandbox when you press Play |
 | `SandboxGame.cs` | Builds the world, runs the menu, sandbox and missions; tracks units, targets, stars and respawns |
 | `Missions.cs` | The Asset Hunt missions as data |
+| `DayNight.cs` | Time of day: sun and moon, sky, fog, night lights (headlights, floodlights, windows) and the thermal view |
+| `Factions.cs` | The fictional sides, their emblems and flags (drawn in code), and the place names |
+| `Flag.cs` | Waving flags at both bases |
 | `MapLayout.cs` | The hand-made map: bases, defences, river, roads, villages, and where the fields go |
 | `World.cs` | Builds the map from the layout: terrain, river, fields, villages, woods, bridge, bases |
 | `Ground.cs` | Terrain: hills, river channel, roads, levelled sites, texture splatting, height queries |

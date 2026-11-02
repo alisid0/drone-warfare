@@ -20,6 +20,7 @@ namespace DroneSandbox
         public string name, briefing;
         public int scouts, strikes, kamikazes;
         public int par;                    // drones used for three stars
+        public float startHour = 12f;      // time of day the mission starts (0-24)
         public Vector3 cameraFocus;
         public float cameraYaw = 40f, cameraDistance = 80f;
         public List<MissionUnit> units = new List<MissionUnit>();
@@ -52,9 +53,9 @@ namespace DroneSandbox
             var firstLight = new Mission
             {
                 name = "First Light",
-                briefing = "Three enemy supply trucks are parked beside the south road, past the crossroads. " +
+                briefing = "Three Dravin supply trucks are parked beside the south road, between the crossroads and Tolbeck. " +
                            "Destroy all three. Launch a Kamikaze drone with [3], select it and right-click a truck.",
-                scouts = 2, strikes = 0, kamikazes = 4, par = 3,
+                scouts = 2, strikes = 0, kamikazes = 4, par = 3, startHour = 5.7f,
                 cameraFocus = new Vector3(-28f, 0f, -48f), cameraYaw = 70f, cameraDistance = 85f,
             };
             Add(firstLight, EnemyType.Truck, 14f, -35f, 30f, target: true);
@@ -65,9 +66,9 @@ namespace DroneSandbox
             var openSky = new Mission
             {
                 name = "Open the Sky",
-                briefing = "An AA gun guards the crossroads, and a radar beside it stretches the gun's reach. " +
+                briefing = "A Dravin AA gun guards the crossroads, and a radar beside it stretches the gun's reach. " +
                            "Destroy both. Hit the radar first, then Strike drones can outrange the AA gun.",
-                scouts = 1, strikes = 2, kamikazes = 3, par = 3,
+                scouts = 1, strikes = 2, kamikazes = 3, par = 3, startHour = 12.5f,
                 cameraFocus = new Vector3(-35f, 0f, -35f), cameraYaw = 55f, cameraDistance = 80f,
             };
             Add(openSky, EnemyType.AAGun, -10f, -5f, 200f, target: true);
@@ -78,10 +79,10 @@ namespace DroneSandbox
             var hiddenGuns = new Mission
             {
                 name = "Hidden Guns",
-                briefing = "Three artillery guns under camouflage nets are shelling our lines. They can't be seen until " +
+                briefing = "Three Dravin guns under camouflage nets are shelling Forward Base Kestrel. They can't be seen until " +
                            "a drone flies close. Search the yellow circles with Scouts, then strike what you find. " +
                            "An AA gun covers the north.",
-                scouts = 3, strikes = 2, kamikazes = 4, par = 5,
+                scouts = 3, strikes = 2, kamikazes = 4, par = 5, startHour = 20f,
                 cameraFocus = new Vector3(-20f, 0f, 0f), cameraYaw = 30f, cameraDistance = 105f,
             };
             Add(hiddenGuns, EnemyType.Artillery, -30f, 32f, 150f, target: true, hidden: true);
@@ -93,11 +94,12 @@ namespace DroneSandbox
             var convoy = new Mission
             {
                 name = "Convoy",
-                briefing = "Four fuel trucks are driving up the east road to the enemy HQ, led by a tank. " +
-                           "Stop every truck before it arrives. An AA gun watches the road junction.",
-                scouts = 2, strikes = 2, kamikazes = 5, par = 5,
+                briefing = "Four Dravin fuel trucks are driving up the east road from Marrowfield to their command post, led by a tank. " +
+                           "Stop every truck before it arrives. It is night: keep a Scout up and press T for thermal view. " +
+                           "An AA gun watches the road junction.",
+                scouts = 2, strikes = 2, kamikazes = 5, par = 5, startHour = 23f,
                 cameraFocus = new Vector3(20f, 0f, -35f), cameraYaw = 60f, cameraDistance = 100f,
-                escapeFailure = "A fuel truck reached the enemy HQ.",
+                escapeFailure = "A fuel truck reached the Dravin command post.",
             };
             // The east road in from the far south-east to the junction, then the main road up to the HQ.
             convoy.convoyRoute = RoadPath(2, new Vector2(140f, -114f), new Vector2(18f, 0f));
@@ -110,9 +112,9 @@ namespace DroneSandbox
             var commandPost = new Mission
             {
                 name = "Command Post",
-                briefing = "Destroy the enemy command post building. A radar and three AA guns defend the compound: " +
+                briefing = "Destroy the Dravin Command Post building. A radar and three AA guns defend the compound: " +
                            "open a way in before you send the heavy hitters.",
-                scouts = 2, strikes = 4, kamikazes = 6, par = 8,
+                scouts = 2, strikes = 4, kamikazes = 6, par = 8, startHour = 4.4f,
                 cameraFocus = new Vector3(10f, 0f, 10f), cameraYaw = 40f, cameraDistance = 95f,
             };
             commandPost.units.Add(new MissionUnit { type = EnemyType.Command, target = true });

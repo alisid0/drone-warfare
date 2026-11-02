@@ -8,7 +8,7 @@ namespace DroneSandbox
     public enum GameKey
     {
         Up, Down, Left, Right, RotateLeft, RotateRight, Shift,
-        SelectAll, Deselect, Stop, Help, Launch1, Launch2, Launch3
+        SelectAll, Deselect, Stop, Help, Launch1, Launch2, Launch3, Thermal, SkipTime
     }
 
     // Reads mouse and keyboard through whichever input backend the project uses
@@ -60,6 +60,8 @@ namespace DroneSandbox
                 case GameKey.Launch1: return new[] { Key.Digit1, Key.Numpad1 };
                 case GameKey.Launch2: return new[] { Key.Digit2, Key.Numpad2 };
                 case GameKey.Launch3: return new[] { Key.Digit3, Key.Numpad3 };
+                case GameKey.Thermal: return new[] { Key.T };
+                case GameKey.SkipTime: return new[] { Key.N };
                 default: return new Key[0];
             }
         }
@@ -103,6 +105,8 @@ namespace DroneSandbox
                 case GameKey.Launch1: return new[] { KeyCode.Alpha1, KeyCode.Keypad1 };
                 case GameKey.Launch2: return new[] { KeyCode.Alpha2, KeyCode.Keypad2 };
                 case GameKey.Launch3: return new[] { KeyCode.Alpha3, KeyCode.Keypad3 };
+                case GameKey.Thermal: return new[] { KeyCode.T };
+                case GameKey.SkipTime: return new[] { KeyCode.N };
                 default: return new KeyCode[0];
             }
         }
