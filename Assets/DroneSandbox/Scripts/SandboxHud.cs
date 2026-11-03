@@ -6,7 +6,7 @@ namespace DroneSandbox
     // briefing and results, health bars, selection brackets, target markers, search circles, AA threat rings,
     // jamming circles, launch buttons and help.
     // Fine for a prototype; move to UI Toolkit once the look of the game is decided.
-    public class SandboxHud : MonoBehaviour
+    public partial class SandboxHud : MonoBehaviour
     {
         const float LaunchButtonWidth = 160f;
         const float LaunchButtonGap = 8f;
@@ -26,6 +26,10 @@ namespace DroneSandbox
             "Left-click / drag  -  select drones",
             "Shift + click  -  add to selection",
             "Right-click  -  move, or attack an enemy",
+            "Shift + right-click  -  queue a waypoint",
+            "Ctrl + right-click  -  attack-move (engage on the way)",
+            "Tab  -  tactical pause     F  -  centre on selection",
+            "B  -  bring selected (or all) drones home",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
             "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
@@ -132,6 +136,7 @@ namespace DroneSandbox
                 DrawWorldOverlays();
                 DrawDragBox();
             }
+            if (!game.UiBlocking) AutoHideHelp();
             GUI.enabled = !game.UiBlocking;
             DrawStats();
             DrawLaunchBar();
@@ -139,6 +144,7 @@ namespace DroneSandbox
             DrawHelp();
             GUI.enabled = true;
             DrawMessage();
+            DrawPauseBanner();
 
             if (game.BriefingOpen) DrawBriefing();
             else if (game.Result != MissionResult.None && Time.unscaledTime >= game.ResultsAt) DrawResults();
@@ -178,36 +184,37 @@ namespace DroneSandbox
             foreach (var e in game.enemies)
             {
                 if (e.Hidden) SearchCircle(e.searchCenter);
+                else if (e.Intel < Intel.Identified) continue; // a gun nobody has found draws no ring
                 else if (e.type == EnemyType.AAGun) ThreatRing(e, e == rts.HoveredEnemy);
                 else if (e.type == EnemyType.Jammer) JamCircle(e);
             }
 
             foreach (var e in game.enemies)
             {
-                if (e.Hidden || !ToGui(e.AimPoint, out Vector2 c)) continue;
+                if (e.Hidden) continue;
+                if (!e.Drawn)
+                {
+                    IntelMarker(e);
+                    continue;
+                }
+                if (!ToGui(e.AimPoint, out Vector2 c)) continue;
                 bool hovered = e == rts.HoveredEnemy;
-                float half = PixelRadius(e.AimPoint, e.radius);
+                float half = Mathf.Max(PixelRadius(e.AimPoint, e.radius), 14f * s);
                 if (hovered)
                 {
-                    Brackets(c, half, Hostile);
+                    TargetBrackets(e, c, half, Hostile);
                     GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), e.unitName, centered);
                 }
                 else if (e.isTarget)
                 {
-                    Brackets(c, half + 4f * s, TargetColor);
+                    TargetBrackets(e, c, half + 4f * s, TargetColor);
                     GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), "<b>TARGET</b>", targetLabel);
                 }
+                else EnemyMarker(e, c);
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
             }
 
-            foreach (var d in game.drones)
-            {
-                if (!ToGui(d.AimPoint, out Vector2 c)) continue;
-                bool isSelected = rts.selected.Contains(d);
-                float half = PixelRadius(d.AimPoint, d.radius);
-                if (isSelected) Brackets(c, half, Friendly);
-                if (isSelected || d.hp < d.maxHp) HealthBar(new Vector2(c.x, c.y - half - 8f * s), d.hp / d.maxHp, Friendly);
-            }
+            DrawTactical();
         }
 
         // Dotted line on the ground showing how far this AA gun reaches a drone cruising at DroneFlightAltitude
@@ -312,16 +319,15 @@ namespace DroneSandbox
             {
                 var m = game.Mission;
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), m.name.ToUpperInvariant(), title);
-                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
-                    $"Targets: <b>{game.TargetsDestroyed} / {game.TargetsTotal}</b>     Time: {Clock(game.MissionTime)}", label);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s), Objective(), label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
-                    $"Drones used: <b>{game.DronesUsed}</b>     Three stars: {m.par} or fewer", label);
+                    $"Drones used <b>{game.DronesUsed}</b>/{m.par}   lost <b>{game.dronesLost}</b>     {Clock(game.MissionTime)}", label);
             }
             else
             {
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "FREE PLAY", title);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
-                    $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Enemy units: {game.enemies.Count}", label);
+                    $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Known enemies: {KnownEnemies()}", label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
                     $"Drones: <b>{game.drones.Count}</b>/{SandboxGame.MaxDrones}     Lost: {game.dronesLost}     Expended: {game.dronesExpended}", label);
             }
@@ -389,7 +395,7 @@ namespace DroneSandbox
                 Line($"Scout {counts[0]}     Strike {counts[1]}     Kamikaze {counts[2]}" + (counts[3] > 0 ? $"     Nightjar {counts[3]}" : ""), label);
                 Line("Right-click an enemy to attack together.", small);
             }
-            Line("Right-click ground: move", small);
+            Line("Right-click: move   Shift: queue   Ctrl: attack-move", small);
         }
 
         void DrawHelp()
@@ -557,7 +563,7 @@ namespace DroneSandbox
                 $"Drones:   Scout x{game.StockLeft(DroneType.Scout)}     Strike x{game.StockLeft(DroneType.Strike)}     " +
                 $"Kamikaze x{game.StockLeft(DroneType.Kamikaze)}" + (bombers > 0 ? $"     Nightjar x{bombers}" : ""), label);
             GUI.Label(new Rect(x, r.y + 212f * s, w, 22f * s),
-                $"Targets: {game.TargetsTotal}     Three stars: use {m.par} drones or fewer", label);
+                $"Targets: {game.TargetsTotal}     Three stars: {m.par} drones or fewer, none lost", label);
             var start = new Rect(r.x + (r.width - 220f * s) / 2f, r.yMax - 76f * s, 220f * s, 46f * s);
             bool enter = Event.current.type == EventType.KeyDown &&
                          (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
@@ -579,10 +585,12 @@ namespace DroneSandbox
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
             DrawStars(new Rect(r.x + (r.width - 180f * s) / 2f, r.y + 100f * s, 180f * s, 52f * s), game.Stars);
-            GUI.Label(new Rect(r.x, r.y + 166f * s, r.width, 22f * s),
-                $"Drones used: <b>{game.DronesUsed}</b>  (three stars: {game.Mission.par} or fewer)     Time: {Clock(game.MissionTime)}", centered);
+            GUI.Label(new Rect(r.x, r.y + 160f * s, r.width, 22f * s),
+                $"Drones used: <b>{game.DronesUsed}</b> (par {game.Mission.par})     Lost: <b>{game.dronesLost}</b>     Home: <b>{game.DronesHome}</b>     Time: {Clock(game.MissionTime)}", centered);
+            GUI.Label(new Rect(r.x, r.y + 178f * s, r.width, 18f * s),
+                "Three stars: par or fewer drones, none lost.", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
             string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
-            GUI.Label(new Rect(r.x, r.y + 194f * s, r.width, 22f * s),
+            GUI.Label(new Rect(r.x, r.y + 202f * s, r.width, 22f * s),
                 $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
 
             float bw = 130f * s, gap = 12f * s;
@@ -807,9 +815,9 @@ namespace DroneSandbox
             Fill(new Rect(back.x, back.y, w * Mathf.Clamp01(fraction), h), color);
         }
 
-        void Brackets(Vector2 c, float half, Color color)
+        void Brackets(Vector2 c, float half, Color color, float thickness = 0f)
         {
-            float t = Mathf.Max(1f, 2f * Scale);
+            float t = thickness > 0f ? thickness : Mathf.Max(1f, 2f * Scale);
             float len = half * 0.6f;
             float left = c.x - half, right = c.x + half, top = c.y - half, bottom = c.y + half;
             Fill(new Rect(left, top, len, t), color);

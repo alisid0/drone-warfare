@@ -7,6 +7,10 @@ namespace DroneSandbox
     public enum GameMode { Menu, Sandbox, Mission }
     public enum MissionResult { None, Won, Failed }
 
+    // A mission runs in phases: find the targets (Recon, skipped when the briefing already knows where they all
+    // are), destroy them (Strike), then bring the surviving drones home (Extract).
+    public enum MissionPhase { Recon, Strike, Extract }
+
     // Builds the world once, then runs whichever game mode is picked from the menu, and tracks every unit:
     // - Sandbox: free play. Destroyed enemies respawn and you can launch drones any time.
     // - Mission (Asset Hunt): destroy a mission's targets with a fixed stock of drones. Some targets are
@@ -33,6 +37,7 @@ namespace DroneSandbox
         public Vector3 enemyHqPosition => MapLayout.EnemyHqPosition;
         public Hotspot Hotspot { get; private set; } // the theatre hotspot being played, if any
         public bool Loading { get; private set; }
+        public bool Paused { get; private set; } // tactical pause: the world stops, orders can still be given
 
         public GameMode Mode { get; private set; } = GameMode.Menu;
         public Mission Mission { get; private set; }
@@ -50,6 +55,10 @@ namespace DroneSandbox
         public int StarBonus { get; private set; }
         public string Message { get; private set; }
         public float MessageUntil { get; private set; }
+        public MissionPhase Phase { get; private set; }
+        public float ExtractEndsAt { get; private set; } // MissionTime the extraction window closes
+        public int DronesHome { get; private set; }      // drones back over the base when the mission ended
+        public const float ExtractSeconds = 60f, HomeRadius = 18f;
 
         // Menus, the briefing and the results panel take the mouse and keyboard.
         public bool UiBlocking => Mode == GameMode.Menu || BriefingOpen || Result != MissionResult.None;
@@ -74,6 +83,8 @@ namespace DroneSandbox
             gameObject.AddComponent<ShadowFit>().Init(rts);
             hud.Init(this, rts);
             gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
+            Sound.Create(gameObject, cam, rts);
+            gameObject.AddComponent<Recon>();
             OpenMenu();
         }
 
@@ -97,7 +108,7 @@ namespace DroneSandbox
             Mode = GameMode.Sandbox;
             rts.Orbit(false);
             DayNight.Instance.SetTime(10f, 1f); // a full day every 24 minutes; N skips ahead
-            foreach (var d in MapLayout.FixedDefences) SpawnEnemy(d.type, d.position);
+            foreach (var d in MapLayout.FixedDefences) SpawnEnemy(d.type, d.position).Brief(Intel.Identified); // on the map from earlier recon
             for (int i = 0; i < 5; i++) SpawnEnemy(EnemyType.Tank, RandomEnemyPoint());
             for (int i = 0; i < 4; i++) SpawnEnemy(EnemyType.Truck, RandomEnemyPoint());
             for (int i = 0; i < 3; i++) SpawnDrone(DroneType.Scout);
@@ -192,9 +203,12 @@ namespace DroneSandbox
                     float angle = (float)rng.NextDouble() * Mathf.PI * 2f, off = 4f + (float)rng.NextDouble() * 10f;
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
+                // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
+                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified);
                 if (u.target) TargetsTotal++;
             }
 
+            Phase = TargetsLocated() ? MissionPhase.Strike : MissionPhase.Recon;
             BriefingOpen = true;
             Time.timeScale = 0f;
             rts.LookAt(Mission.cameraFocus, Mission.cameraDistance, Mission.cameraYaw);
@@ -204,6 +218,50 @@ namespace DroneSandbox
         {
             BriefingOpen = false;
             Time.timeScale = 1f;
+            ShowMessage(Phase == MissionPhase.Recon ? "RECON: find the targets. Each drone sees about 45 m around it."
+                : "STRIKE: the targets are known. Destroy them.", 5f);
+        }
+
+        // Every target is on the map (identified, found, or already destroyed).
+        bool TargetsLocated()
+        {
+            foreach (var e in enemies)
+                if (e != null && e.isTarget && (e.Hidden || e.Intel < Intel.Identified)) return false;
+            return true;
+        }
+
+        // B: the selected drones (or all of them) fly home to the base.
+        public void Recall(List<Drone> which)
+        {
+            var list = which.Count > 0 ? which : drones;
+            foreach (var d in list)
+                if (d != null && !d.IsKamikaze) d.MoveTo(basePosition + new Vector3(Random.Range(-6f, 6f), 0f, Random.Range(-6f, 6f)));
+            if (list.Count > 0) ShowMessage("Returning to base");
+        }
+
+        // Drones back over the base, out of those still flying (kamikazes don't come back).
+        public int CountHome(out int flying)
+        {
+            int home = 0;
+            flying = 0;
+            foreach (var d in drones)
+            {
+                if (d == null || d.IsKamikaze) continue;
+                flying++;
+                Vector3 offset = d.transform.position - basePosition;
+                offset.y = 0f;
+                if (offset.magnitude <= HomeRadius) home++;
+            }
+            return home;
+        }
+
+        // Tab: stop the world to plan, and start it again.
+        public void TogglePause()
+        {
+            if (UiBlocking || Loading) return;
+            Paused = !Paused;
+            Time.timeScale = Paused ? 0f : 1f;
+            AudioListener.pause = Paused;
         }
 
         public void RetryMission()
@@ -258,6 +316,8 @@ namespace DroneSandbox
             DronesUsed = TargetsTotal = TargetsDestroyed = PointsEarned = StarBonus = 0;
             Message = null;
             Time.timeScale = 1f;
+            Paused = false;
+            AudioListener.pause = false;
         }
 
         // ---- Mission flow ----
@@ -292,6 +352,19 @@ namespace DroneSandbox
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
             MissionTime += Time.deltaTime;
             SpotHidden();
+            if (Phase == MissionPhase.Recon && TargetsLocated())
+            {
+                Phase = MissionPhase.Strike;
+                ShowMessage("STRIKE: all targets located. Destroy them.", 4f);
+                Sound.Alert("objective", 0.5f);
+            }
+            if (Phase == MissionPhase.Extract)
+            {
+                int home = CountHome(out int flying);
+                if (home >= flying) Finish(true, flying > 0 ? "All targets destroyed. Every drone home." : "All targets destroyed.");
+                else if (MissionTime >= ExtractEndsAt) Finish(true, $"All targets destroyed. {flying - home} drone(s) left behind.");
+                return;
+            }
             bool dronesLeft = drones.Count > 0;
             foreach (int left in stock) dronesLeft |= left > 0;
             if (!dronesLeft && TargetsDestroyed < TargetsTotal) Finish(false, "Out of drones.");
@@ -315,7 +388,34 @@ namespace DroneSandbox
             }
         }
 
-        public void OnSpotted(EnemyUnit enemy) => ShowMessage(enemy.unitName + " spotted");
+        float identifiedNewsAt = -100f, alertNewsAt = -100f;
+
+        // Recon has a new enemy on the map.
+        public void OnIdentified(EnemyUnit enemy)
+        {
+            if (Mode == GameMode.Menu) return;
+            if (Time.time - identifiedNewsAt > 2f)
+            {
+                ShowMessage(enemy.unitName + " identified");
+                identifiedNewsAt = Time.time;
+            }
+            Sound.Alert("contact", 1.5f);
+        }
+
+        // An enemy we can see has noticed us.
+        public void OnEnemyAlerted(EnemyUnit enemy)
+        {
+            if (Time.time - alertNewsAt < 6f) return;
+            alertNewsAt = Time.time;
+            ShowMessage(enemy.unitName + " alerted - they know you're here");
+            Sound.Alert("alarm", 6f);
+        }
+
+        public void OnSpotted(EnemyUnit enemy)
+        {
+            ShowMessage(enemy.unitName + " spotted");
+            Sound.Alert("contact", 0.5f);
+        }
 
         public void OnEnemyEscaped(EnemyUnit enemy)
         {
@@ -328,7 +428,13 @@ namespace DroneSandbox
         {
             Result = won ? MissionResult.Won : MissionResult.Failed;
             ResultReason = reason;
-            Stars = !won ? 0 : DronesUsed <= Mission.par ? 3 : DronesUsed <= Mission.par + 2 ? 2 : 1;
+            Paused = false;
+            AudioListener.pause = false;
+            Sound.Alert(won ? "success" : "failure", 0f);
+            int home = CountHome(out int flying);
+            DronesHome = home;
+            if (won) dronesLost += flying - home; // left behind over enemy country
+            Stars = !won ? 0 : DronesUsed <= Mission.par && dronesLost == 0 ? 3 : DronesUsed <= Mission.par + 2 && dronesLost <= 1 ? 2 : 1;
             StarBonus = Mathf.Max(0, Stars - BestStars(Mission.key)) * Tech.PointsPerNewStar; // only stars you didn't have
             if (StarBonus > 0)
             {
@@ -343,6 +449,21 @@ namespace DroneSandbox
             if (won && Hotspot != null) Theatre.Won(Hotspot);
             ResultsAt = Time.unscaledTime + ResultsDelay;
             StartCoroutine(FreezeForResults());
+        }
+
+        // Targets down: the drones still flying have a minute to get home (straight to the results if there are none).
+        void BeginExtract()
+        {
+            CountHome(out int flying);
+            if (flying == 0)
+            {
+                Finish(true, "All targets destroyed.");
+                return;
+            }
+            Phase = MissionPhase.Extract;
+            ExtractEndsAt = MissionTime + ExtractSeconds;
+            ShowMessage($"EXTRACT: targets destroyed. Bring your drones home (B) within {ExtractSeconds:0} s.", 5f);
+            Sound.Alert("objective", 0.3f);
         }
 
         IEnumerator FreezeForResults()
@@ -368,6 +489,7 @@ namespace DroneSandbox
                 {
                     ShowMessage(type == DroneType.Bomber ? (BomberAvailable ? "The Nightjar is already flying" : "Buy the Nightjar in the Tech shop")
                         : $"No {type} drones left");
+                    Sound.Ui("invalid");
                     return null;
                 }
                 stock[(int)type]--;
@@ -376,6 +498,7 @@ namespace DroneSandbox
             Vector3 pad = basePosition + new Vector3(Random.Range(-5f, 5f), 1f, Random.Range(-5f, 5f));
             var drone = Drone.Create(type, pad);
             drones.Add(drone);
+            Sound.At("launch", pad, 0.8f);
             return drone;
         }
 
@@ -394,6 +517,7 @@ namespace DroneSandbox
             {
                 drones.Remove(drone);
                 dronesLost++;
+                Sound.At("drone down", drone.transform.position);
             }
             else if (unit is EnemyUnit enemy)
             {
@@ -419,7 +543,8 @@ namespace DroneSandbox
                     {
                         TargetsDestroyed++;
                         ShowMessage($"{enemy.unitName} destroyed  ({TargetsDestroyed}/{TargetsTotal})   +{value} pts");
-                        if (TargetsDestroyed >= TargetsTotal) Finish(true, "All targets destroyed.");
+                        if (TargetsDestroyed < TargetsTotal) Sound.Alert("objective", 0.3f);
+                        if (TargetsDestroyed >= TargetsTotal) BeginExtract();
                     }
                 }
             }

@@ -16,13 +16,18 @@ namespace DroneSandbox
 
         public bool IsAlive => hp > 0f;
         public Vector3 AimPoint => transform.position + Vector3.up * aimHeight;
+        public float LastHitTime { get; private set; } = -100f; // when it last took damage (Time.time), for the HUD
 
         public void TakeDamage(float amount)
         {
             if (!IsAlive) return;
+            LastHitTime = Time.time;
             hp = Mathf.Max(0f, hp - amount);
             if (hp <= 0f) Die();
+            else OnHit();
         }
+
+        protected virtual void OnHit() { }
 
         protected virtual void Die()
         {

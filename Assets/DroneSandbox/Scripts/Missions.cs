@@ -62,17 +62,22 @@ namespace DroneSandbox
             MapLayout.Prepare();
             var list = new List<Mission>();
 
+            // The teaching mission, in the three phases every mission now has: find the trucks (they're only rough
+            // contacts), get the strike past a known AA gun, then bring the scouts home.
             var firstLight = new Mission
             {
                 name = "First Light",
-                briefing = "Three Dravin supply trucks are parked beside the south road, between the crossroads and Tolbeck. " +
-                           "Destroy all three. Launch a Kamikaze drone with [3], select it and right-click a truck.",
-                scouts = 2, strikes = 0, kamikazes = 4, par = 3, startHour = 5.7f,
+                briefing = "A villager reports three Dravin supply trucks parked by the south road toward Tolbeck: the grey ? marks " +
+                           "are rough positions. RECON: launch a Scout [1] and fly it over them to find them. STRIKE: send Kamikazes [3] " +
+                           "at each truck. An AA gun covers the direct route (red ring): Shift + right-click to fly around it. " +
+                           "EXTRACT: bring the Scouts home (B). Drones lost cost you stars.",
+                scouts = 2, strikes = 0, kamikazes = 4, par = 5, startHour = 5.7f,
                 cameraFocus = new Vector3(-28f, 0f, -48f), cameraYaw = 70f, cameraDistance = 85f,
             };
             Add(firstLight, EnemyType.Truck, 14f, -35f, 30f, target: true);
             Add(firstLight, EnemyType.Truck, 18f, -41f, 45f, target: true);
             Add(firstLight, EnemyType.Truck, 11f, -45f, 20f, target: true);
+            Add(firstLight, EnemyType.AAGun, -20f, -47f, 120f);
             list.Add(firstLight);
 
             var openSky = new Mission

@@ -86,11 +86,11 @@ namespace DroneSandbox
             Instance = this;
             sun = sunLight;
 
-            // Night: a little brighter and less colourful than the raw light (exposure already adapts), so it
-            // stays playable.
+            // Night: brighter and less colourful than the raw light (exposure already adapts), so the ground stays
+            // readable: dark fields at roughly a sixth of full brightness rather than near black.
             var night = ScriptableObject.CreateInstance<VolumeProfile>();
             var nightColour = night.Add<ColorAdjustments>(true);
-            nightColour.postExposure.Override(0.5f);
+            nightColour.postExposure.Override(1.2f);
             nightColour.saturation.Override(-45f);
             nightVolume = MakeVolume("Night Grade", night, 15f);
 

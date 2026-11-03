@@ -5,8 +5,9 @@ namespace DroneSandbox
 {
     public enum DroneType { Scout, Strike, Kamikaze, Bomber }
 
-    // A player drone. It flies at its own cruise altitude, follows move and attack
-    // orders, and fires on enemies in range by itself when it has nothing to do.
+    // A player drone. It flies at its own cruise altitude, follows move and attack orders (moves can be queued
+    // as a chain of waypoints, and flown as an attack-move that engages whatever comes in range on the way), and
+    // fires on enemies in range by itself when it has nothing to do.
     // The Nightjar bomber (from the tech shop) drops bombs instead, then flies home to rearm.
     public class Drone : Unit
     {
@@ -22,11 +23,15 @@ namespace DroneSandbox
         public float fireInterval;
 
         Vector3? moveTarget;
+        readonly List<Vector3> waypoints = new List<Vector3>(); // queued moves after moveTarget
+        bool attackMove;    // engage anything in range while moving
         Unit attackTarget;
         bool attackOrdered; // false when the drone picked the target itself
         float fireCooldown;
         Vector3 velocity;
         float bobOffset;
+        AudioSource motor;
+        float motorPitch;
         Transform body;
         readonly List<Transform> rotors = new List<Transform>();
         readonly List<GameObject> bombModels = new List<GameObject>();
@@ -39,6 +44,25 @@ namespace DroneSandbox
         public bool IsBomber => type == DroneType.Bomber;
         public int BombsLeft { get; private set; }
         public Unit AttackTarget => attackTarget;
+        public Vector3? MoveTarget => moveTarget;
+        public IReadOnlyList<Vector3> Waypoints => waypoints;
+        public bool AttackMoving => attackMove && moveTarget.HasValue;
+        public bool IsJammed => jammedFor > 0f;
+        public bool UnderFire => Time.time - LastHitTime < 2f;
+
+        // One word for the HUD's tag under a selected drone.
+        public string StatusTag
+        {
+            get
+            {
+                if (IsJammed) return "JAMMED";
+                if (IsBomber && BombsLeft == 0) return returning ? "RETURNING" : "REARMING";
+                if (UnderFire) return "UNDER FIRE";
+                if (attackTarget != null) return IsKamikaze ? "DIVING" : IsBomber ? "BOMBING" : "ATTACKING";
+                if (moveTarget.HasValue) return attackMove ? "ATTACK-MOVE" : "MOVING";
+                return "HOLDING";
+            }
+        }
 
         // The Nightjar always carries a thermal camera; Scouts do once the Wren-T camera is bought.
         public bool HasThermal => IsBomber || (type == DroneType.Scout && Tech.Active(TechId.ThermalCamera));
@@ -47,10 +71,13 @@ namespace DroneSandbox
         {
             get
             {
+                if (IsJammed) return "Jammed: link lost";
                 if (IsBomber && BombsLeft == 0) return returning ? "Returning to rearm" : $"Rearming ({Mathf.CeilToInt(rearmTimer)} s)";
-                if (attackTarget != null) return (IsKamikaze ? "Diving on " : IsBomber ? "Bombing " : "Attacking ") + attackTarget.unitName;
-                if (moveTarget.HasValue) return "Moving";
-                return "Hovering";
+                string fire = UnderFire ? "Under fire - " : "";
+                string queued = waypoints.Count > 0 ? $" (+{waypoints.Count} queued)" : "";
+                if (attackTarget != null) return fire + (IsKamikaze ? "Diving on " : IsBomber ? "Bombing " : "Attacking ") + attackTarget.unitName + queued;
+                if (moveTarget.HasValue) return fire + (attackMove ? "Attack-moving" : "Moving") + queued;
+                return fire + "Hovering";
             }
         }
 
@@ -112,6 +139,8 @@ namespace DroneSandbox
             if (Tech.Active(TechId.Warheads)) weaponDamage *= Tech.WarheadBonus;
             hp = maxHp;
             bobOffset = Random.value * 10f;
+            motor = Sound.Motor(this);
+            if (motor != null) motorPitch = motor.pitch;
 
             // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes.
             var model = Art.TryModel(droneType == DroneType.Bomber ? "Drone_Nightjar" : "Drone_" + droneType, body, modelScale);
@@ -213,11 +242,21 @@ namespace DroneSandbox
         // A bomber out of bombs ignores orders until it has rearmed.
         bool BusyRearming => IsBomber && BombsLeft == 0;
 
-        public void MoveTo(Vector3 point)
+        // A move order. queue adds it after the moves already given (Shift); attackMove engages anything that
+        // comes in range on the way (Ctrl), then carries on.
+        public void MoveTo(Vector3 point, bool queue = false, bool attackMove = false)
         {
             if (BusyRearming) return;
+            if (queue && (moveTarget.HasValue || attackTarget != null))
+            {
+                waypoints.Add(point);
+                this.attackMove |= attackMove;
+                return;
+            }
+            waypoints.Clear();
             moveTarget = point;
             attackTarget = null;
+            this.attackMove = attackMove;
         }
 
         public void Attack(Unit target)
@@ -226,6 +265,8 @@ namespace DroneSandbox
             attackTarget = target;
             attackOrdered = true;
             moveTarget = null;
+            waypoints.Clear();
+            attackMove = false;
         }
 
         public void Stop()
@@ -233,6 +274,23 @@ namespace DroneSandbox
             if (BusyRearming) return;
             moveTarget = null;
             attackTarget = null;
+            waypoints.Clear();
+            attackMove = false;
+        }
+
+        // On to the next queued waypoint, if there is one.
+        void NextWaypoint()
+        {
+            if (waypoints.Count > 0)
+            {
+                moveTarget = waypoints[0];
+                waypoints.RemoveAt(0);
+            }
+            else
+            {
+                moveTarget = null;
+                attackMove = false;
+            }
         }
 
         // ---- Behaviour ----
@@ -257,20 +315,25 @@ namespace DroneSandbox
                 jammedFor += dt;
                 attackTarget = null;
                 moveTarget = null;
+                waypoints.Clear();
                 Fly(transform.position + Vector3.down * 1.5f, false, dt * 0.5f);
                 if (jammedFor > 6f) TakeDamage(maxHp * 0.5f * dt);
                 return;
             }
             jammedFor = 0f;
 
-            // Idle gun and missile drones engage the nearest enemy in range on their own.
-            if (attackTarget == null && !moveTarget.HasValue && !IsKamikaze)
+            // After an attack, carry on with any queued moves.
+            if (attackTarget == null && !moveTarget.HasValue && waypoints.Count > 0) NextWaypoint();
+
+            // Idle gun and missile drones engage the nearest enemy in range on their own, and so does anything on
+            // an attack-move (a kamikaze dives on the first enemy within 18 m).
+            if (attackTarget == null && (!moveTarget.HasValue || attackMove) && (!IsKamikaze || attackMove))
             {
-                var nearest = Combat.NearestHostile(transform.position, team, weaponRange, true);
+                var nearest = Combat.NearestHostile(transform.position, team, IsKamikaze ? 18f : weaponRange, true);
                 if (nearest != null)
                 {
                     attackTarget = nearest;
-                    attackOrdered = false;
+                    attackOrdered = IsKamikaze; // a kamikaze committed to its dive
                 }
             }
 
@@ -317,7 +380,7 @@ namespace DroneSandbox
                 goal = new Vector3(m.x, CruiseHeight(m) + bob, m.z);
                 Vector3 flat = goal - transform.position;
                 flat.y = 0f;
-                if (flat.magnitude < 0.6f) moveTarget = null;
+                if (flat.magnitude < 0.6f) NextWaypoint();
             }
 
             Fly(goal, diving, dt);
@@ -369,6 +432,7 @@ namespace DroneSandbox
             Vector3 local = transform.InverseTransformDirection(flatVelocity);
             body.localRotation = Quaternion.Euler(local.z / speed * 20f, 0f, -local.x / speed * 20f);
             foreach (var rotor in rotors) rotor.Rotate(body.up, 1800f * dt, Space.World);
+            if (motor != null) motor.pitch = motorPitch * (0.92f + 0.22f * Mathf.Clamp01(velocity.magnitude / speed)) * (diving ? 1.12f : 1f);
             float beat = Mathf.Repeat(Time.time + bobOffset, 1.3f); // the strobe double-flashes every 1.3 s
             bool flash = beat < 0.05f || (beat > 0.16f && beat < 0.21f);
             foreach (var strobe in strobes) strobe.enabled = flash;
@@ -424,6 +488,7 @@ namespace DroneSandbox
             if (BombsLeft < bombModels.Count) bombModels[BombsLeft].SetActive(false);
             float hitChance = attackTarget is EnemyUnit enemy && enemy.IsMoving ? BombHitMoving : BombHitStill;
             Projectile.Bomb(transform.position + Vector3.down * 0.7f, attackTarget, team, weaponDamage, 4.5f, velocity, hitChance);
+            Sound.At("whistle", transform.position, 0.8f, 0.03f);
             if (BombsLeft > 0) return;
             returning = true;
             attackTarget = null;
@@ -440,9 +505,15 @@ namespace DroneSandbox
             }
             Vector3 muzzle = transform.position + transform.forward * radius * 0.6f + Vector3.down * 0.2f;
             if (type == DroneType.Scout)
+            {
                 Projectile.Bullet(muzzle, attackTarget, team, weaponDamage, 0.8f, new Color(1f, 0.9f, 0.4f));
+                Sound.At("gunshot", muzzle, 0.55f);
+            }
             else
+            {
                 Projectile.Missile(muzzle, attackTarget, team, weaponDamage, 3f, transform.forward);
+                Sound.At("missile", muzzle);
+            }
         }
 
         void Detonate()

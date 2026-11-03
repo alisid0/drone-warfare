@@ -260,6 +260,7 @@ namespace DroneSandbox
 
         public static void Explosion(Vector3 at, float size)
         {
+            Sound.At(size >= 4f ? "big explosion" : "explosion", at, Mathf.Clamp(0.55f + size * 0.12f, 0.6f, 1.2f), 0.1f);
             if (!Ready())
             {
                 Spawn(PrimitiveType.Sphere, at, Vector3.one * size, 0.6f, new Color(1f, 0.85f, 0.4f), new Color(0.6f, 0.15f, 0.05f), true);

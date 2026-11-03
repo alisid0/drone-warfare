@@ -67,6 +67,7 @@ namespace DroneSandbox
             }
             yield return Shot("00_menu");
             game.StartSandbox();
+            Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
             log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count}, " +
                           $"screen {Screen.width}x{Screen.height}");
@@ -130,7 +131,8 @@ namespace DroneSandbox
                 yield return Shot("02j_nightjar");
             }
 
-            // Send everyone toward the forward AA post and follow them.
+            // Send everyone toward the forward AA post and follow them, with the fog of war on.
+            Recon.ForceShowAll = false;
             Vector3 staging = new Vector3(-32f, 0f, -26f);
             rts.selected.Clear();
             rts.selected.AddRange(game.drones);
@@ -162,6 +164,25 @@ namespace DroneSandbox
             yield return new WaitForSeconds(4f);
             yield return Shot("06_battle_later");
 
+            // Orders: an attack-move with two waypoints queued after it, then the tactical pause.
+            rts.selected.Clear();
+            rts.selected.AddRange(game.drones);
+            Vector3 sweep = staging + new Vector3(-20f, 0f, 18f);
+            foreach (var d in game.drones)
+            {
+                d.MoveTo(sweep, false, true);
+                d.MoveTo(sweep + new Vector3(15f, 0f, 15f), true);
+                d.MoveTo(game.basePosition + new Vector3(8f, 0f, 8f), true);
+            }
+            rts.LookAt(sweep, 60f, 45f);
+            yield return new WaitForSeconds(1.5f);
+            yield return Shot("06a_orders_route");
+            game.TogglePause();
+            yield return new WaitForSecondsRealtime(0.4f);
+            yield return Shot("06b_tactical_pause");
+            log.WriteLine($"Orders: paused {game.Paused}, timeScale {Time.timeScale}, first drone '{(game.drones.Count > 0 ? game.drones[0].Status : "-")}'");
+            game.TogglePause();
+
             // Wide view of the whole map.
             rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
             yield return new WaitForSeconds(1f);
@@ -192,8 +213,10 @@ namespace DroneSandbox
             dayNight.SetTime(10f, 1f);
 
             yield return BeautyShots();
+            Recon.ForceShowAll = true;
             yield return ExplosionShots(game, rts);
             yield return UnitShots(game, rts);
+            Recon.ForceShowAll = false;
             yield return EmptyAndRearm(game, rts);
             yield return PlayMissions(game, rts);
             yield return SectorTour(game, rts);
@@ -568,17 +591,38 @@ namespace DroneSandbox
             game.CloseBriefing();
             game.ToggleThermal();
             log.WriteLine($"Mission 1 thermal with no tech: {DayNight.Instance.Thermal} (\"{game.Message}\")");
+            // Recon: a Scout flies out over the rough contacts until the trucks are found.
             var targets = game.enemies.FindAll(e => e.isTarget);
+            log.WriteLine($"Mission 1 phase at start: {game.Phase}, target intel {(targets.Count > 0 ? targets[0].Intel.ToString() : "-")}");
+            var scout = game.SpawnDrone(DroneType.Scout);
+            if (scout != null && targets.Count > 0)
+            {
+                scout.MoveTo(new Vector3(-30f, 0f, -80f)); // south of the AA gun's ring
+                scout.MoveTo(targets[1].ContactPosition + new Vector3(-12f, 0f, -6f), true);
+            }
+            rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 75f, 70f);
+            for (float t = 0f; t < 30f && game.Phase == MissionPhase.Recon && game.Result == MissionResult.None; t += 0.5f)
+                yield return new WaitForSecondsRealtime(0.5f);
+            log.WriteLine($"Mission 1 recon: phase {game.Phase} after {game.MissionTime:F1}s");
+            yield return Shot("08e_first_light_strike");
+
+            // Strike: a Kamikaze at each truck.
             foreach (var target in targets)
             {
                 var drone = game.SpawnDrone(DroneType.Kamikaze);
-                if (drone != null) drone.Attack(target);
+                if (drone != null && target != null) drone.Attack(target);
             }
-            rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 60f, 70f);
-            for (float t = 0f; t < 30f && game.Result == MissionResult.None; t += 0.5f)
+            for (float t = 0f; t < 30f && game.Phase != MissionPhase.Extract && game.Result == MissionResult.None; t += 0.5f)
+                yield return new WaitForSecondsRealtime(0.5f);
+            yield return Shot("08f_first_light_extract");
+
+            // Extract: bring the Scout home.
+            game.Recall(new List<Drone>());
+            rts.LookAt(game.basePosition, 70f, 70f);
+            for (float t = 0f; t < 40f && game.Result == MissionResult.None; t += 0.5f)
                 yield return new WaitForSecondsRealtime(0.5f);
             log.WriteLine($"Mission 1: {game.Result}, {game.ResultReason} Stars {game.Stars}, drones used {game.DronesUsed}, " +
-                          $"targets {game.TargetsDestroyed}/{game.TargetsTotal}, time {game.MissionTime:F1}s, " +
+                          $"lost {game.dronesLost}, home {game.DronesHome}, targets {game.TargetsDestroyed}/{game.TargetsTotal}, time {game.MissionTime:F1}s, " +
                           $"points +{game.PointsEarned} (stars {game.StarBonus}), total {Tech.Points}");
             yield return new WaitForSecondsRealtime(2f);
             yield return Shot("09_mission_complete");

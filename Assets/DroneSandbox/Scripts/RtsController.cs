@@ -123,7 +123,19 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Deselect)) selected.Clear();
             if (GameInput.Pressed(GameKey.Stop))
                 foreach (var d in selected) d.Stop();
-            if (GameInput.Pressed(GameKey.Help)) hud.showHelp = !hud.showHelp;
+            if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
+            if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
+            if (GameInput.Pressed(GameKey.Recall))
+            {
+                game.Recall(selected);
+                Sound.Ui("move");
+            }
+            if (GameInput.Pressed(GameKey.Focus) && selected.Count > 0)
+            {
+                Vector3 middle = Vector3.zero;
+                foreach (var d in selected) middle += d.transform.position;
+                LookAt(middle / selected.Count, distance, yaw);
+            }
             if (GameInput.Pressed(GameKey.Launch1)) game.SpawnDrone(DroneType.Scout);
             if (GameInput.Pressed(GameKey.Launch2)) game.SpawnDrone(DroneType.Strike);
             if (GameInput.Pressed(GameKey.Launch3)) game.SpawnDrone(DroneType.Kamikaze);
@@ -151,8 +163,10 @@ namespace DroneSandbox
             {
                 IsDragging = false;
                 bool additive = GameInput.Held(GameKey.Shift);
+                int before = selected.Count;
                 if ((mouse - DragStart).magnitude < ClickPixels) ClickSelect(mouse, additive);
                 else BoxSelect(ScreenRect(DragStart, mouse), additive);
+                if (selected.Count > 0 && selected.Count != before) Sound.Ui("select");
             }
 
             if (GameInput.RightDown && !overHud && selected.Count > 0) IssueOrder(mouse);
@@ -177,14 +191,28 @@ namespace DroneSandbox
 
         void IssueOrder(Vector2 mouse)
         {
+            if (HoveredEnemy != null && !HoveredEnemy.Observed)
+            {
+                // Something we can't see right now: fly to where it was, ready to engage.
+                Vector3 last = Ground.OnGround(HoveredEnemy.MarkerPosition);
+                foreach (var d in selected) d.MoveTo(last, GameInput.Held(GameKey.Shift), true);
+                hud.Acknowledge(last, true);
+                Sound.Ui("attack");
+                return;
+            }
             if (HoveredEnemy != null)
             {
                 foreach (var d in selected) d.Attack(HoveredEnemy);
                 Effects.Marker(HoveredEnemy.transform.position, Art.EnemyRed);
+                hud.Acknowledge(HoveredEnemy.AimPoint, true);
+                Sound.Ui("attack");
                 return;
             }
             if (!GroundPoint(mouse, out Vector3 point)) return;
-            Effects.Marker(point, new Color(0.35f, 1f, 0.6f));
+            bool queue = GameInput.Held(GameKey.Shift), attackMove = GameInput.Held(GameKey.Ctrl);
+            Effects.Marker(point, attackMove ? new Color(1f, 0.76f, 0.35f) : new Color(0.35f, 1f, 0.6f));
+            hud.Acknowledge(point, false);
+            Sound.Ui(attackMove ? "attack" : "move");
 
             // Spread the group in a loose grid around the clicked point, lined up with the camera.
             int count = selected.Count;
@@ -196,7 +224,7 @@ namespace DroneSandbox
             {
                 int row = i / columns, column = i % columns;
                 var offset = new Vector3((column - (columns - 1) * 0.5f) * spacing, 0f, -(row - (rows - 1) * 0.5f) * spacing);
-                selected[i].MoveTo(point + facing * offset);
+                selected[i].MoveTo(point + facing * offset, queue, attackMove);
             }
         }
 
@@ -225,7 +253,7 @@ namespace DroneSandbox
             float bestPixels = 36f * hud.Scale;
             foreach (var e in game.enemies)
             {
-                if (e.Hidden || !ToScreen(e.AimPoint, out Vector2 p)) continue;
+                if (!e.Known || !ToScreen(e.MarkerPosition, out Vector2 p)) continue;
                 float pixels = Vector2.Distance(p, mouse);
                 if (pixels < bestPixels)
                 {

@@ -119,6 +119,7 @@ namespace DroneSandbox
             {
                 target.TakeDamage(damage);
                 Effects.Spark(transform.position);
+                if (target is EnemyUnit) Sound.At("ricochet", transform.position, 0.35f, 0.15f);
             }
             Destroy(gameObject);
         }
