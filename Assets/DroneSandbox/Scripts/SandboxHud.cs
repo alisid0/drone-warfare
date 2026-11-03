@@ -30,6 +30,7 @@ namespace DroneSandbox
             "Ctrl + right-click  -  attack-move (engage on the way)",
             "Tab  -  tactical pause     F  -  centre on selection",
             "B  -  bring selected (or all) drones home",
+            "Double-click a drone  -  follow it with the camera",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
             "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
@@ -519,7 +520,10 @@ namespace DroneSandbox
                 bool owned = Tech.Owns(item.id);
                 Fill(row, owned ? new Color(Friendly.r, Friendly.g, Friendly.b, 0.08f) : new Color(1f, 1f, 1f, 0.04f));
                 float textWidth = row.width - 190f * s;
-                GUI.Label(new Rect(row.x + 14f * s, row.y + 7f * s, textWidth, 22f * s), $"<b>{item.name}</b>", label);
+                Color branch = item.branch == "RECON" ? Amber : item.branch == "STRIKE" ? DravinOrange : Teal;
+                Fill(new Rect(row.x, row.y, 4f * s, row.height), branch);
+                GUI.Label(new Rect(row.x + 14f * s, row.y + 7f * s, textWidth, 22f * s),
+                    $"<b>{item.name}</b>   <size={Mathf.RoundToInt(10f * s)}><color=#{ColorUtility.ToHtmlStringRGB(branch)}>{item.branch}</color></size>", label);
                 GUI.Label(new Rect(row.x + 14f * s, row.y + 29f * s, textWidth, 32f * s), item.info, smallWrap);
                 var buy = new Rect(row.xMax - 160f * s, row.y + 12f * s, 146f * s, row.height - 24f * s);
                 if (owned)

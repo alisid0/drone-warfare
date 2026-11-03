@@ -594,11 +594,11 @@ namespace DroneSandbox
             // Recon: a Scout flies out over the rough contacts until the trucks are found.
             var targets = game.enemies.FindAll(e => e.isTarget);
             log.WriteLine($"Mission 1 phase at start: {game.Phase}, target intel {(targets.Count > 0 ? targets[0].Intel.ToString() : "-")}");
-            var scout = game.SpawnDrone(DroneType.Scout);
-            if (scout != null && targets.Count > 0)
+            var recon = game.SpawnDrone(DroneType.Scout);
+            if (recon != null && targets.Count > 1)
             {
-                scout.MoveTo(new Vector3(-30f, 0f, -80f)); // south of the AA gun's ring
-                scout.MoveTo(targets[1].ContactPosition + new Vector3(-12f, 0f, -6f), true);
+                recon.MoveTo(new Vector3(-30f, 0f, -80f)); // south of the AA gun's ring
+                recon.MoveTo(targets[1].ContactPosition + new Vector3(-12f, 0f, -6f), true);
             }
             rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 75f, 70f);
             for (float t = 0f; t < 30f && game.Phase == MissionPhase.Recon && game.Result == MissionResult.None; t += 0.5f)

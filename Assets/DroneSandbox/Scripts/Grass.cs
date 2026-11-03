@@ -9,7 +9,7 @@ namespace DroneSandbox
     public static class Grass
     {
         const int Resolution = 512;      // detail cells across the terrain (just under a metre each)
-        const float DrawDistance = 120f;
+        public const float DrawDistance = 120f;
 
         public static void Plant(Terrain terrain)
         {

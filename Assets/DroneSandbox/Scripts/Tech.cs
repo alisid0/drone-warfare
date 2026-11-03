@@ -10,6 +10,7 @@ namespace DroneSandbox
         public TechId id;
         public string name, info;
         public int cost;
+        public string branch; // RECON, STRIKE or SURVIVAL: the three ways to build up
     }
 
     // The tech shop. Destroying Dravin units in missions earns points, which buy new drones and upgrades.
@@ -22,19 +23,19 @@ namespace DroneSandbox
 
         public static readonly TechItem[] Items =
         {
-            new TechItem { id = TechId.ThermalCamera, cost = 50, name = "Wren-T thermal camera",
-                info = "Scouts carry a thermal camera: press T to see heat at night." },
-            new TechItem { id = TechId.Nightjar, cost = 150, name = "Nightjar heavy bomber",
+            new TechItem { id = TechId.ThermalCamera, cost = 50, branch = "RECON", name = "Wren-T thermal camera",
+                info = "Scouts carry a thermal camera: press T to see heat, and they find vehicles 52 m away by night as by day." },
+            new TechItem { id = TechId.Nightjar, cost = 150, branch = "STRIKE", name = "Nightjar heavy bomber",
                 info = "One per mission, counts as two drones for stars. Three bombs, rearms at base, own thermal camera. Key 4." },
-            new TechItem { id = TechId.Armour, cost = 80, name = "Armoured frames",
+            new TechItem { id = TechId.Armour, cost = 80, branch = "SURVIVAL", name = "Armoured frames",
                 info = "Every drone takes 40% more damage before it goes down." },
-            new TechItem { id = TechId.Motors, cost = 70, name = "High-output motors",
+            new TechItem { id = TechId.Motors, cost = 70, branch = "SURVIVAL", name = "High-output motors",
                 info = "Every drone flies 20% faster." },
-            new TechItem { id = TechId.Warheads, cost = 100, name = "Heavier warheads",
+            new TechItem { id = TechId.Warheads, cost = 100, branch = "STRIKE", name = "Heavier warheads",
                 info = "Guns, missiles, kamikaze charges and bombs hit 30% harder." },
-            new TechItem { id = TechId.Optics, cost = 60, name = "Long-range optics",
-                info = $"Drones spot hidden targets from {OpticsSpotRange:0} m instead of {SandboxGame.SpotRange:0} m." },
-            new TechItem { id = TechId.Supply, cost = 120, name = "Supply contract",
+            new TechItem { id = TechId.Optics, cost = 60, branch = "RECON", name = "Long-range optics",
+                info = $"Drones see {Recon.OpticsBonus:0} m further and spot camouflaged targets from {OpticsSpotRange:0} m instead of {SandboxGame.SpotRange:0} m." },
+            new TechItem { id = TechId.Supply, cost = 120, branch = "SURVIVAL", name = "Supply contract",
                 info = "One extra Scout, Strike and Kamikaze drone in every mission." },
         };
 

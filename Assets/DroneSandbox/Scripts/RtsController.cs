@@ -20,7 +20,11 @@ namespace DroneSandbox
         Vector3 focus;
         float yaw = 45f;
         float distance = 55f;
+        float zoomTarget = 55f;   // the mouse wheel sets this; the camera eases to it
         bool orbiting;
+        Drone following;          // double-clicked: the camera keeps it in the middle until you pan
+        Drone lastClicked;
+        float lastClickTime;
 
         public void Init(SandboxGame sandbox, SandboxHud overlay, Camera camera, Vector3 startFocus)
         {
@@ -42,8 +46,9 @@ namespace DroneSandbox
         public void LookAt(Vector3 point, float zoomDistance, float yawDegrees)
         {
             focus = Ground.OnGround(point);
-            distance = zoomDistance;
+            distance = zoomTarget = zoomDistance;
             yaw = yawDegrees;
+            following = null;
             ApplyCamera();
         }
 
@@ -83,6 +88,9 @@ namespace DroneSandbox
             if (GameInput.Held(GameKey.Down)) pan.z -= 1f;
             if (GameInput.Held(GameKey.Right)) pan.x += 1f;
             if (GameInput.Held(GameKey.Left)) pan.x -= 1f;
+            if (pan != Vector3.zero) following = null;
+            if (following != null && following.IsAlive)
+                focus = Vector3.Lerp(focus, following.transform.position, 1f - Mathf.Exp(-6f * dt));
             focus += Quaternion.Euler(0f, yaw, 0f) * Vector3.ClampMagnitude(pan, 1f) * distance * 0.9f * dt;
             float limit = SandboxGame.MapHalfSize;
             focus.x = Mathf.Clamp(focus.x, -limit, limit);
@@ -94,7 +102,8 @@ namespace DroneSandbox
 
             float scroll = GameInput.Scroll;
             if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
-                distance = Mathf.Clamp(distance * (scroll > 0f ? 0.88f : 1.12f), 15f, 110f);
+                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), 15f, 110f);
+            distance = Mathf.Lerp(distance, zoomTarget, 1f - Mathf.Exp(-dt / 0.15f)); // eased over about 0.15 s
 
             ApplyCamera();
         }
@@ -175,6 +184,14 @@ namespace DroneSandbox
         void ClickSelect(Vector2 mouse, bool additive)
         {
             Drone hit = PickDrone(mouse);
+            // A double-click on a drone follows it with the camera.
+            if (hit != null && hit == lastClicked && Time.unscaledTime - lastClickTime < 0.35f)
+            {
+                following = hit;
+                game.ShowMessage("Following " + hit.unitName + " (pan to stop)");
+            }
+            lastClicked = hit;
+            lastClickTime = Time.unscaledTime;
             if (!additive) selected.Clear();
             if (hit == null) return;
             if (additive && selected.Contains(hit)) selected.Remove(hit);

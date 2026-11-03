@@ -133,6 +133,8 @@ namespace DroneSandbox
             Thermal = on;
             if (!on) Cool();
             heatTimer = 0f;
+            // The thermal camera sees grass as one cool, even field, so the tufts go: hot things stand out alone.
+            if (Ground.Current != null) Ground.Current.detailObjectDistance = on ? 0f : Grass.DrawDistance;
             Apply();
         }
 
