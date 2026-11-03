@@ -101,7 +101,11 @@ namespace DroneSandbox
             if (GameInput.Held(GameKey.RotateRight)) yaw -= 90f * dt;
 
             float scroll = GameInput.Scroll;
-            if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
+            var feed = DroneFeed.Instance;
+            bool inspecting = feed != null && feed.Visible && feed.Source != null && GameInput.Held(GameKey.Inspect);
+            if (feed != null) feed.Inspecting = inspecting;
+            if (inspecting && scroll != 0f) feed.Zoom = Mathf.Clamp(feed.Zoom * (scroll > 0f ? 1.2f : 1f / 1.2f), 1f, 3f); // the wheel zooms the drone's camera
+            else if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
                 zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), 15f, 110f);
             distance = Mathf.Lerp(distance, zoomTarget, 1f - Mathf.Exp(-dt / 0.15f)); // eased over about 0.15 s
 
@@ -149,6 +153,14 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
             if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
             if (GameInput.Pressed(GameKey.Telemetry)) hud.ToggleTelemetry();
+            if (GameInput.Pressed(GameKey.Sync)) game.CoordinateStrike(selected);
+            // C: look at the fight - halfway between the first selected drone and what it's attacking.
+            if (GameInput.Pressed(GameKey.Combat) && selected.Count > 0 && selected[0] != null)
+            {
+                var d = selected[0];
+                Vector3 at = d.AttackTarget != null && d.AttackTarget.IsAlive ? (d.transform.position + d.AttackTarget.transform.position) / 2f : d.transform.position;
+                LookAt(at, distance, yaw);
+            }
             if (GameInput.Pressed(GameKey.Feed) && DroneFeed.Instance != null) DroneFeed.Instance.Visible = !DroneFeed.Instance.Visible;
             if (GameInput.Pressed(GameKey.Recall))
             {

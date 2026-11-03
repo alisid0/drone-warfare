@@ -55,6 +55,24 @@ namespace DroneSandbox
         public bool IsJammed => jammedFor > 0f;
         public bool UnderFire => Time.time - LastHitTime < 2f;
 
+        // ---- Coordinated strike (SandboxGame.CoordinateStrike) ----
+        public float HoldUntil { get; set; } = -1f;  // waits (hovering, facing its target) until this time
+        public float StrikeAt { get; set; } = -1f;   // when the group's hits are due to land
+        public int SyncGroup { get; set; }           // 0 when not part of one
+        public bool Holding => attackTarget != null && Time.time < HoldUntil;
+
+        // Seconds until this drone can hit its attack target from where it is (to firing range, or to impact for a
+        // Kamikaze, whose dive speeds up).
+        public float TimeToStrike()
+        {
+            if (attackTarget == null) return 0f;
+            Vector3 to = attackTarget.AimPoint - transform.position;
+            if (IsKamikaze) return to.magnitude / (speed * 1.25f);
+            to.y = 0f;
+            float reach = IsBomber ? 0.5f : weaponRange * 0.9f;
+            return Mathf.Max(0f, to.magnitude - reach) / speed + (type == DroneType.Strike ? 0.6f : 0.2f);
+        }
+
         // One word for the HUD's tag under a selected drone.
         public string StatusTag
         {
@@ -63,6 +81,7 @@ namespace DroneSandbox
                 if (IsJammed) return "JAMMED";
                 if (OutOfAmmo) return returning ? "RETURNING" : "REARMING";
                 if (UnderFire) return "UNDER FIRE";
+                if (Holding) return $"SYNC  T-{Mathf.CeilToInt(StrikeAt - Time.time)}";
                 if (attackTarget != null) return IsKamikaze ? "DIVING" : IsBomber ? "BOMBING" : "ATTACKING";
                 if (moveTarget.HasValue) return attackMove ? "ATTACK-MOVE" : "MOVING";
                 return "HOLDING";
@@ -253,6 +272,8 @@ namespace DroneSandbox
         public void MoveTo(Vector3 point, bool queue = false, bool attackMove = false)
         {
             if (BusyRearming) return;
+            HoldUntil = -1f;
+            SyncGroup = 0;
             if (queue && (moveTarget.HasValue || attackTarget != null))
             {
                 waypoints.Add(point);
@@ -268,6 +289,8 @@ namespace DroneSandbox
         public void Attack(Unit target)
         {
             if (BusyRearming) return;
+            HoldUntil = -1f;
+            SyncGroup = 0;
             attackTarget = target;
             attackOrdered = true;
             moveTarget = null;
@@ -333,7 +356,7 @@ namespace DroneSandbox
 
             // Idle gun and missile drones engage the nearest enemy in range on their own, and so does anything on
             // an attack-move (a kamikaze dives on the first enemy within 18 m).
-            if (attackTarget == null && (!moveTarget.HasValue || attackMove) && (!IsKamikaze || attackMove))
+            if (attackTarget == null && (!moveTarget.HasValue || attackMove) && (!IsKamikaze || attackMove) && !SandboxGame.WeaponsTight)
             {
                 var nearest = Combat.NearestHostile(transform.position, team, IsKamikaze ? 18f : weaponRange, true);
                 if (nearest != null)
@@ -347,7 +370,14 @@ namespace DroneSandbox
             var goal = new Vector3(transform.position.x, CruiseHeight(transform.position) + bob, transform.position.z); // default: hold position
             bool diving = false;
 
-            if (attackTarget != null)
+            if (attackTarget != null && Holding)
+            {
+                // Part of a coordinated strike: wait here, facing the target, until it's time to go.
+                Vector3 look = attackTarget.AimPoint - transform.position;
+                look.y = 0f;
+                if (look.sqrMagnitude > 0.01f) transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(look), 180f * dt);
+            }
+            else if (attackTarget != null)
             {
                 Vector3 targetPos = attackTarget.AimPoint;
                 if (IsKamikaze)

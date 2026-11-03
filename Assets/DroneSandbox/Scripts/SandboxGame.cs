@@ -59,6 +59,11 @@ namespace DroneSandbox
         public float ExtractEndsAt { get; private set; } // MissionTime the extraction window closes
         public int DronesHome { get; private set; }      // drones back over the base when the mission ended
         public const float ExtractSeconds = 60f, HomeRadius = 18f;
+        public float ShadowProgress { get; private set; } // seconds the column has been watched unseen (Shadow missions)
+        public bool ShadowSpotted { get; private set; }   // the column has noticed us (watching doesn't count for now)
+        public bool IsShadow => Mode == GameMode.Mission && Mission != null && Mission.shadowSeconds > 0f;
+        // Drones don't open fire on their own (a Shadow mission: one stray burst at the column ends it).
+        public static bool WeaponsTight => Instance != null && Instance.IsShadow;
 
         // Menus, the briefing and the results panel take the mouse and keyboard.
         public bool UiBlocking => Mode == GameMode.Menu || BriefingOpen || Result != MissionResult.None;
@@ -77,6 +82,7 @@ namespace DroneSandbox
             world = World.Build(transform, preview: false);
             Canopy.Build(world);
             gameObject.AddComponent<DayNight>().Init(sun);
+            MapSnapshot.Capture(world);
 
             rts = gameObject.AddComponent<RtsController>();
             var hud = gameObject.AddComponent<SandboxHud>();
@@ -134,6 +140,7 @@ namespace DroneSandbox
             MapLayout.Use(plan);
             world = World.Build(transform, preview: false);
             Canopy.Build(world);
+            MapSnapshot.Capture(world);
         }
 
         // Flies into a theatre hotspot: builds its sector (a moment's pause while the land is laid out), then
@@ -261,6 +268,48 @@ namespace DroneSandbox
             return home;
         }
 
+        // ---- Coordinated strike ----
+
+        int nextSyncGroup = 1;
+
+        // G: the selected drones that have attack orders strike together. Each one's time to its target is worked
+        // out, and the quicker ones hold back so all the hits land within about a second and a half of each other.
+        public void CoordinateStrike(List<Drone> selection)
+        {
+            var group = selection.FindAll(d => d != null && d.IsAlive && d.AttackTarget != null && d.AttackTarget.IsAlive);
+            if (group.Count < 2)
+            {
+                ShowMessage("Coordinated strike: give two or more drones attack orders first, then G");
+                Sound.Ui("invalid");
+                return;
+            }
+            float latest = 0f;
+            foreach (var d in group) latest = Mathf.Max(latest, d.TimeToStrike());
+            int id = nextSyncGroup++;
+            float now = Time.time;
+            foreach (var d in group)
+            {
+                d.SyncGroup = id;
+                d.StrikeAt = now + latest;
+                d.HoldUntil = now + Mathf.Max(0f, latest - d.TimeToStrike() - 0.3f);
+            }
+            syncWatch[id] = group.Count;
+            ShowMessage($"Coordinated strike: {group.Count} drones, hits in {latest:0} s");
+            Sound.Alert("objective", 0.3f);
+        }
+
+        readonly Dictionary<int, int> syncWatch = new Dictionary<int, int>();
+
+        // A drone lost (or cut off) before its group struck: the strike is compromised, and the rest go anyway.
+        void WatchSync(Drone lost)
+        {
+            if (lost.SyncGroup == 0 || !syncWatch.ContainsKey(lost.SyncGroup) || Time.time > lost.StrikeAt) return;
+            syncWatch.Remove(lost.SyncGroup);
+            ShowMessage($"Strike compromised: {lost.unitName} lost before the hit", 3.5f);
+            foreach (var d in drones)
+                if (d != null && d.SyncGroup == lost.SyncGroup) d.HoldUntil = -1f;
+        }
+
         // Tab: stop the world to plan, and start it again. The world drains to a cool grey while it's stopped.
         public void TogglePause()
         {
@@ -306,6 +355,7 @@ namespace DroneSandbox
         // A mission's own drones plus what the tech shop adds: the supply contract's extra drones and the Nightjar.
         public static int MissionStock(Mission mission, DroneType type)
         {
+            if (mission.shadowSeconds > 0f && type != DroneType.Scout) return 0; // a Shadow mission is eyes only
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) ? 1 : 0;
             return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + (type == DroneType.Kamikaze ? Theatre.SupplyBonus : 0);
         }
@@ -342,6 +392,8 @@ namespace DroneSandbox
             DronesUsed = TargetsTotal = TargetsDestroyed = PointsEarned = StarBonus = 0;
             Message = null;
             Feed.Clear();
+            ShadowProgress = 0f;
+            ShadowSpotted = false;
             Tracks.Clear();
             Events.Clear();
             trackIds.Clear();
@@ -384,6 +436,22 @@ namespace DroneSandbox
             MissionTime += Time.deltaTime;
             RecordTracks();
             SpotHidden();
+            if (IsShadow && Phase != MissionPhase.Extract)
+            {
+                bool watched = false, spotted = false;
+                foreach (var e in enemies)
+                {
+                    if (e == null || !e.isTarget) continue;
+                    if (e.Observed) watched = true;
+                    if (e.Alerted) spotted = true;
+                }
+                if (spotted && !ShadowSpotted) ShowMessage("They've seen the tail - watching won't count till they settle. Drop back.", 4f);
+                ShadowSpotted = spotted;
+                if (watched && !spotted) ShadowProgress += Time.deltaTime;
+                if (Phase == MissionPhase.Recon && watched) Phase = MissionPhase.Strike; // "Strike" is the watch, for a Shadow mission
+                if (ShadowProgress >= Mission.shadowSeconds) BeginExtract();
+                return;
+            }
             if (Phase == MissionPhase.Recon && TargetsLocated())
             {
                 Phase = MissionPhase.Strike;
@@ -393,8 +461,9 @@ namespace DroneSandbox
             if (Phase == MissionPhase.Extract)
             {
                 int home = CountHome(out int flying);
-                if (home >= flying) Finish(true, flying > 0 ? "All targets destroyed. Every drone home." : "All targets destroyed.");
-                else if (MissionTime >= ExtractEndsAt) Finish(true, $"All targets destroyed. {flying - home} drone(s) left behind.");
+                string done = IsShadow ? "Column watched." : "All targets destroyed.";
+                if (home >= flying) Finish(true, flying > 0 ? done + " Every drone home." : done);
+                else if (MissionTime >= ExtractEndsAt) Finish(true, $"{done} {flying - home} drone(s) left behind.");
                 return;
             }
             bool dronesLeft = drones.Count > 0;
@@ -498,12 +567,13 @@ namespace DroneSandbox
             CountHome(out int flying);
             if (flying == 0)
             {
-                Finish(true, "All targets destroyed.");
+                Finish(true, IsShadow ? "Column watched." : "All targets destroyed.");
                 return;
             }
             Phase = MissionPhase.Extract;
             ExtractEndsAt = MissionTime + ExtractSeconds;
-            ShowMessage($"EXTRACT: targets destroyed. Bring your drones home (B) within {ExtractSeconds:0} s.", 5f);
+            ShowMessage(IsShadow ? $"EXTRACT: we have what we need. Bring your drones home (B) within {ExtractSeconds:0} s."
+                : $"EXTRACT: targets destroyed. Bring your drones home (B) within {ExtractSeconds:0} s.", 5f);
             Sound.Alert("objective", 0.3f);
         }
 
@@ -584,6 +654,8 @@ namespace DroneSandbox
             {
                 drones.Remove(drone);
                 dronesLost++;
+                WatchSync(drone);
+                Effects.Breakup(drone.transform.position);
                 Sound.At("drone down", drone.transform.position);
                 Events.Add((new Vector2(drone.transform.position.x, drone.transform.position.z), false));
                 DroneFeed.Instance?.SignalLost(drone);
@@ -611,7 +683,9 @@ namespace DroneSandbox
                     int value = Tech.KillValue(enemy.type);
                     Tech.Earn(value);
                     PointsEarned += value;
-                    if (enemy.isTarget && Result == MissionResult.None)
+                    if (enemy.isTarget && Result == MissionResult.None && IsShadow)
+                        Finish(false, "We were meant to watch the column, not hit it.");
+                    else if (enemy.isTarget && Result == MissionResult.None)
                     {
                         TargetsDestroyed++;
                         ShowMessage($"{enemy.unitName} destroyed  ({TargetsDestroyed}/{TargetsTotal})   +{value} pts");

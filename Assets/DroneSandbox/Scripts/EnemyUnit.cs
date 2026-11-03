@@ -820,6 +820,7 @@ namespace DroneSandbox
                 Vector3 muzzle = turret != null ? turret.position + TurretFacing * muzzleLocal : AimPoint;
                 Projectile.Bullet(muzzle, target, team, damage, 0.6f, new Color(1f, 0.45f, 0.2f));
                 Sound.At("cannon", muzzle, 0.7f);
+                Effects.Spark(muzzle); // the muzzle flash
                 LastShotTime = Time.time;
             }
         }

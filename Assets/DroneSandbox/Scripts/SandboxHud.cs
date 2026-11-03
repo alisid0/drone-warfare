@@ -31,6 +31,8 @@ namespace DroneSandbox
             "Tab  -  tactical pause     F  -  centre on selection",
             "B  -  bring selected (or all) drones home",
             "Double-click a drone  -  follow it with the camera",
+            "G  -  coordinated strike: drones with attack orders hit together",
+            "C  -  look at the fight     hold Z  -  inspect the drone feed (wheel zooms)",
             "V  -  show or hide the drone's camera feed",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
@@ -43,7 +45,7 @@ namespace DroneSandbox
             "Yellow: mission targets and search areas.",
         };
 
-        public bool showHelp = true;
+        public bool showHelp = false; // the full controls, on H; otherwise a one-line hint strip
         public bool ShopOpen;  // the tech shop, opened from the main menu
         public bool TheatreOpen; // the theatre map, opened from the main menu
         Hotspot chosen;          // the hotspot picked on the theatre map
@@ -228,6 +230,7 @@ namespace DroneSandbox
                 else if (e.ExposedDecoy)
                     GUI.Label(new Rect(c.x - 60f * s, c.y - half - 22f * s, 120f * s, 18f * s), "<b>DECOY</b>", Tinted(centered, new Color(0.75f, 0.78f, 0.8f)));
                 else EnemyMarker(e, c);
+                PriorityMarker(e, c);
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
                 // An enemy that knows we're here: an amber "!" over it.
                 if (e.Alerted && !e.isTarget)
@@ -439,7 +442,11 @@ namespace DroneSandbox
             float s = Scale;
             if (!showHelp)
             {
-                GUI.Label(new Rect(Screen.width - 140f * s, 12f * s, 128f * s, 22f * s), "H  -  help", small);
+                // The essentials in one line; H for the rest.
+                var hint = new Rect(Screen.width - 520f * s, 12f * s, 508f * s, 22f * s);
+                Fill(hint, new Color(PanelColor.r, PanelColor.g, PanelColor.b, 0.6f));
+                GUI.Label(hint, "H controls    Tab pause    G sync strike    C fight    V feed    B home",
+                    new GUIStyle(small) { alignment = TextAnchor.MiddleCenter });
                 return;
             }
             Rect r = HelpPanel();
@@ -505,6 +512,11 @@ namespace DroneSandbox
             float height = 172f + (missions.Count + 3) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
+            // A teal rule along the top and the Norvane emblem either side of the title.
+            Fill(new Rect(r.x, r.y, r.width, 3f * s), Teal);
+            float emblem = 40f * s;
+            GUI.DrawTexture(new Rect(r.x + 34f * s, r.y + 20f * s, emblem, emblem), Factions.PlayerEmblem);
+            GUI.DrawTexture(new Rect(r.xMax - 34f * s - emblem, r.y + 20f * s, emblem, emblem), Factions.PlayerEmblem);
 
             GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));

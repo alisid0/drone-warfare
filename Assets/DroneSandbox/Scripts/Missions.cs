@@ -27,6 +27,7 @@ namespace DroneSandbox
         public List<MissionUnit> units = new List<MissionUnit>();
         public List<Vector3> convoyRoute;  // where convoy units drive; a target reaching its end fails the mission
         public string escapeFailure = "A target got away.";
+        public float shadowSeconds;        // > 0: a Shadow mission - watch the targets this long, unseen, instead of destroying them
         public string key;                 // where its best stars are saved (the Asset Hunt missions use their number)
         public float contactRadius = 14f;  // how roughly the briefing places the vehicles (metres)
 
@@ -146,6 +147,25 @@ namespace DroneSandbox
                 if (Vector3.Distance(d.position, MapLayout.EnemyHqPosition) < 20f)
                     commandPost.units.Add(new MissionUnit { type = d.type, position = d.position });
             list.Add(commandPost);
+
+            // A Shadow mission: learn where a column is going without being seen. Watching it counts only while it
+            // hasn't noticed you (stay outside its 26 m but inside your 46 m); destroying any of it fails.
+            var longWatch = new Mission
+            {
+                name = "Long Watch",
+                briefing = "A Dravin column is moving up the east road to their command post. We need its route and escort, not a fight: " +
+                           "keep a drone watching it for a minute in all, without being seen. Hang back outside its 26 m, inside your 46 m. " +
+                           "If they notice you, the watch pauses until they settle. Don't shoot. Bring the drones home after.",
+                scouts = 3, strikes = 0, kamikazes = 0, par = 3, startHour = 13f, shadowSeconds = 60f,
+                cameraFocus = new Vector3(40f, 0f, -40f), cameraYaw = 60f, cameraDistance = 100f,
+                escapeFailure = "The column reached the command post before we had watched it long enough.",
+            };
+            longWatch.convoyRoute = RoadPath(2, new Vector2(140f, -114f), new Vector2(18f, 0f));
+            longWatch.convoyRoute.AddRange(RoadPath(0, new Vector2(18f, 0f), new Vector2(36f, 32f)));
+            longWatch.units.Add(new MissionUnit { type = EnemyType.APC, convoy = 1, target = true });
+            for (int i = 0; i < 3; i++) longWatch.units.Add(new MissionUnit { type = EnemyType.Truck, target = true, convoy = i + 2 });
+            Add(longWatch, EnemyType.AAGun, 30f, -30f, 40f);
+            list.Add(longWatch);
 
             return list;
         }

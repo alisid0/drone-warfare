@@ -90,7 +90,7 @@ namespace DroneSandbox
                 float below = Mathf.Max(size * 0.5f * show, half) + 6f * s;
                 HealthBar(new Vector2(c.x, c.y + below), d.hp / d.maxHp, hit > 0f ? Amber : Teal);
                 // The word under it: for a few selected drones always, for a big group only when it's news.
-                if (isSelected && (rts.selected.Count <= 4 || d.UnderFire || d.IsJammed || d.StatusTag == "REARMING"))
+                if (d.Holding || (isSelected && (rts.selected.Count <= 4 || d.UnderFire || d.IsJammed || d.StatusTag == "REARMING")))
                     StatusTag(d, c, below + 4f * s);
             }
         }
@@ -275,6 +275,11 @@ namespace DroneSandbox
         {
             int located = 0;
             foreach (var e in game.enemies) if (e != null && e.isTarget && !e.Hidden && e.Intel >= Intel.Identified) located++;
+            if (game.IsShadow && game.Phase != MissionPhase.Extract)
+            {
+                string state = game.ShadowSpotted ? "<color=#FF5040><b>SEEN</b></color>" : "unseen";
+                return $"<color=#FFC15A><b>SHADOW</b></color>  Watch the column: <b>{game.ShadowProgress:0}/{game.Mission.shadowSeconds:0} s</b>  {state}  <color=#8FA3A8>weapons tight</color>";
+            }
             switch (game.Phase)
             {
                 case MissionPhase.Recon:
@@ -360,6 +365,25 @@ namespace DroneSandbox
             Fill(new Rect(c.x - size / 2f - 1.5f, c.y - size / 2f - 1.5f, size + 3f, size + 3f), new Color(1f, 1f, 1f, 0.9f * strategic)); // live: edged white
             Fill(new Rect(c.x - size / 2f, c.y - size / 2f, size, size), colour);
             GUI.matrix = matrix;
+        }
+
+        // What matters most stands out at any zoom: the enemy a selected drone is attacking gets a big bright
+        // diamond, and an AA gun laying on one of our drones a pulsing red ring.
+        void PriorityMarker(EnemyUnit e, Vector2 c)
+        {
+            float s = Scale;
+            foreach (var d in rts.selected)
+                if (d != null && d.AttackTarget == e)
+                {
+                    Diamond(c, 15f * s, new Color(Ink.r, Ink.g, Ink.b, 0.7f));
+                    Diamond(c, 14f * s, DravinOrange);
+                    break;
+                }
+            if (e.type == EnemyType.AAGun && e.TrackedDrone != null)
+            {
+                float pulse = 0.6f + 0.4f * Mathf.Sin(Time.unscaledTime * 8f);
+                Ring(c, 12f * s, new Color(Hostile.r, Hostile.g, Hostile.b, pulse));
+            }
         }
 
         static string ClassTag(EnemyType t) => t switch

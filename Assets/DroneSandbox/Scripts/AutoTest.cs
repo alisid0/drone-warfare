@@ -68,6 +68,11 @@ namespace DroneSandbox
             yield return Shot("00_menu");
             Sound.ExportReel(Path.Combine(outDir, "sound_reel.wav"));
             log.WriteLine("Sound reel written");
+            if (MapSnapshot.Picture != null)
+            {
+                // The battle map the debrief draws over, saved to check it.
+                File.WriteAllBytes(Path.Combine(outDir, "map_snapshot.png"), MapSnapshot.Picture.EncodeToPNG());
+            }
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
@@ -184,6 +189,24 @@ namespace DroneSandbox
             yield return Shot("06b_tactical_pause");
             log.WriteLine($"Orders: paused {game.Paused}, timeScale {Time.timeScale}, first drone '{(game.drones.Count > 0 ? game.drones[0].Status : "-")}'");
             game.TogglePause();
+
+            // A coordinated strike: three drones at three different enemies, timed to hit together.
+            var strikers = game.drones.FindAll(d => d != null && !d.IsBomber);
+            var marks = new List<EnemyUnit>(game.enemies.FindAll(e => e != null && e.IsAlive && !e.Hidden));
+            marks.Sort((a, b) => Vector3.Distance(a.transform.position, sweep).CompareTo(Vector3.Distance(b.transform.position, sweep)));
+            rts.selected.Clear();
+            for (int i = 0; i < 3 && i < strikers.Count && i < marks.Count; i++)
+            {
+                strikers[i].Attack(marks[i]);
+                rts.selected.Add(strikers[i]);
+            }
+            game.CoordinateStrike(rts.selected);
+            rts.LookAt(sweep, 70f, 45f);
+            yield return new WaitForSeconds(0.8f);
+            yield return Shot("06c_sync_strike");
+            string tags = "";
+            foreach (var d in rts.selected) if (d != null) tags += d.StatusTag + "; ";
+            log.WriteLine($"Sync strike: {rts.selected.Count} drones, tags {tags} (\"{game.Message}\")");
 
             // Wide view of the whole map.
             rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
@@ -718,6 +741,34 @@ namespace DroneSandbox
             yield return new WaitForSecondsRealtime(1f);
             yield return Shot("12_command_post");
             log.WriteLine($"Command Post: {game.TargetsTotal} target, {game.enemies.Count} enemies");
+
+            // Long Watch (Shadow): a Scout shadows the column side-on, 38 m out from its middle (outside every
+            // vehicle's 26 m, inside the Scout's 46 m).
+            int watch = Missions.All.FindIndex(m => m.shadowSeconds > 0f);
+            if (watch >= 0)
+            {
+                game.StartMission(watch);
+                game.CloseBriefing();
+                var shadow = game.SpawnDrone(DroneType.Scout);
+                var column = game.enemies.FindAll(e => e.isTarget);
+                var lead = column.Count > 0 ? column[0] : null;
+                for (float t = 0f; t < 40f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
+                {
+                    Vector3 middle = Vector3.zero;
+                    int alive = 0;
+                    foreach (var e in column)
+                        if (e != null && e.IsAlive) { middle += e.transform.position; alive++; }
+                    if (alive == 0) break;
+                    middle /= alive;
+                    Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized;
+                    if (Vector3.Dot(shadow.transform.position - middle, side) < 0f) side = -side;
+                    shadow.MoveTo(middle + side * 38f);
+                    rts.LookAt(middle, 70f, 60f);
+                    if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
+                    yield return new WaitForSecondsRealtime(0.5f);
+                }
+                log.WriteLine($"Long Watch: watched {game.ShadowProgress:F0}/{Missions.All[watch].shadowSeconds:F0} s, spotted {game.ShadowSpotted}, phase {game.Phase}, result {game.Result}");
+            }
 
             game.OpenMenu();
             yield return new WaitForSecondsRealtime(1f);

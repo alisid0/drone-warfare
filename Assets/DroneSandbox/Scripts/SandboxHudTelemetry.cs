@@ -61,8 +61,13 @@ namespace DroneSandbox
             GUI.Label(new Rect(panel.x, panel.y + 8f * s, panel.width, 20f * s), "<b>DEBRIEF</b>", Tinted(centered, Teal));
             var map = new Rect(panel.x + 12f * s, panel.y + 34f * s, panel.width - 24f * s, panel.width - 24f * s);
             Fill(map, new Color(0.12f, 0.17f, 0.12f, 1f));
+            if (MapSnapshot.Picture != null)
+            {
+                GUI.DrawTexture(map, MapSnapshot.Picture, ScaleMode.StretchToFill, false);
+                Fill(map, new Color(0f, 0f, 0f, 0.2f)); // a touch darker, so the paths stand out
+            }
             Outline(map, new Color(1f, 1f, 1f, 0.15f), 1f);
-            float half = SandboxGame.MapHalfSize + 20f;
+            float half = MapSnapshot.Half;
             Vector2 ToMap(Vector2 w) => new Vector2(map.x + (w.x + half) / (2f * half) * map.width, map.yMax - (w.y + half) / (2f * half) * map.height);
             Color[] typeColours = { Teal, new Color(0.45f, 0.75f, 1f), DravinOrange, new Color(0.85f, 0.85f, 0.95f) };
             var last = new Dictionary<int, Vector2>();
@@ -88,11 +93,19 @@ namespace DroneSandbox
                 }
                 else Dot(p, 4f * s, Hostile);
             }
+            // What's still out there that we'd identified: air defence as red diamonds, anything else as amber rings.
+            foreach (var e in game.enemies)
+            {
+                if (e == null || !e.IsAlive || e.Intel < Intel.Identified) continue;
+                Vector2 p = ToMap(new Vector2(e.transform.position.x, e.transform.position.z));
+                if (e.type == EnemyType.AAGun || e.type == EnemyType.Radar) Diamond(p, 5f * s, Hostile);
+                else Ring(p, 4f * s, Amber);
+            }
             var key = Tinted(small, small.normal.textColor);
             key.fontSize = Mathf.RoundToInt(10f * s);
             GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 6f * s, panel.width, 16f * s),
                 "<color=#49DFCF>Scout</color>  <color=#73BFFF>Strike</color>  <color=#FF7848>Kamikaze</color>  <color=#D9D9F2>Nightjar</color>", key);
-            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 22f * s, panel.width, 16f * s), "x  enemy destroyed     ●  drone lost", key);
+            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 22f * s, panel.width, 16f * s), "x destroyed   ● drone lost   ◊ AA   ○ enemy left", key);
         }
 
         // The one alert that beats everything: an AA gun shooting at one of our drones. Returns the strip's height.

@@ -11,7 +11,7 @@ namespace DroneSandbox
 
         Rect FeedPanel()
         {
-            float s = Scale;
+            float s = Scale * (DroneFeed.Instance != null && DroneFeed.Instance.Inspecting ? 1.5f : 1f); // bigger while inspecting
             float w = DroneFeed.Width * s, h = DroneFeed.Height * s;
             return new Rect(Screen.width - w - 12f * s, Screen.height - h - 12f * s, w, h);
         }
@@ -103,6 +103,12 @@ namespace DroneSandbox
             var at = new Rect(r.x + 6f * s, r.yMax - 18f * s, r.width, 16f * s);
             GUI.Label(new Rect(at.x + 1f, at.y + 1f, at.width, at.height), text, shadow);
             GUI.Label(at, text, tele);
+            if (f.Inspecting || f.Zoom > 1.01f)
+            {
+                var zoom = Tinted(small, Teal);
+                zoom.alignment = TextAnchor.UpperRight;
+                GUI.Label(new Rect(r.x, r.y + 4f * s, r.width - 8f * s, 16f * s), $"<b>INSPECT  {f.Zoom:0.0}x</b>", zoom);
+            }
             if (d.UnderFire)
             {
                 var warn = Tinted(centered, Hostile);

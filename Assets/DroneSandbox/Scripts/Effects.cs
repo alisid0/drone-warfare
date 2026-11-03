@@ -354,6 +354,17 @@ namespace DroneSandbox
         }
 
         // A bullet striking metal.
+        // A drone shot down: a flash, pieces tumbling out and falling, and a trail of smoke.
+        public static void Breakup(Vector3 at)
+        {
+            if (!Ready()) return;
+            for (int i = 0; i < 7; i++)
+                Emit(debris, at, Random.onUnitSphere * Random.Range(2f, 5f) + Vector3.up * 2f, Random.Range(0.08f, 0.22f), Random.Range(1.2f, 2.2f), Color.white);
+            for (int i = 0; i < 5; i++)
+                Emit(smoke, at + Vector3.down * i * 0.6f, Vector3.down * 0.8f + Random.insideUnitSphere * 0.3f, Random.Range(0.7f, 1.1f), Random.Range(1.4f, 2.2f), Shade(new Color(0.3f, 0.3f, 0.3f, 0.6f)));
+            Spark(at);
+        }
+
         // A puff of dust from the ground (a vehicle driving hard on a dirt road or across a field).
         public static void Dust(Vector3 at)
         {
