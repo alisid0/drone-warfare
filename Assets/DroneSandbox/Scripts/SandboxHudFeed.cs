@@ -16,6 +16,33 @@ namespace DroneSandbox
             return new Rect(Screen.width - w - 12f * s, Screen.height - h - 12f * s, w, h);
         }
 
+        // The enemy under the cursor in the drone feed's picture, found by where it sits in the drone camera's view
+        // (only what we already know about: picking it out of the picture doesn't identify anything), or null.
+        public EnemyUnit FeedPick(Vector2 screenPosition)
+        {
+            var f = DroneFeed.Instance;
+            if (!FeedShowing || f.Source == null || f.FeedCamera == null) return null;
+            Rect r = FeedPanel();
+            var g = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+            if (!r.Contains(g)) return null;
+            float u = (g.x - r.x) / r.width, v = 1f - (g.y - r.y) / r.height;
+            EnemyUnit best = null;
+            float bestPixels = 22f * Scale;
+            foreach (var e in game.enemies)
+            {
+                if (e == null || !e.IsAlive || e.Hidden || e.Intel == Intel.Unknown) continue;
+                Vector3 at = f.FeedCamera.WorldToViewportPoint(e.AimPoint);
+                if (at.z <= 0f) continue;
+                float pixels = new Vector2((at.x - u) * r.width, (at.y - v) * r.height).magnitude;
+                if (pixels < bestPixels)
+                {
+                    best = e;
+                    bestPixels = pixels;
+                }
+            }
+            return best;
+        }
+
         bool FeedShowing
         {
             get

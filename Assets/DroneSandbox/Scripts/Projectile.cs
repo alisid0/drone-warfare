@@ -10,7 +10,7 @@ namespace DroneSandbox
         Team team;
         float speed, damage, blastRadius, turnRate;
         float life = 4f;
-        bool smokeTrail;
+        bool smokeTrail, heavy;
         float trailTimer;
         Vector3 velocity;
 
@@ -73,6 +73,7 @@ namespace DroneSandbox
             p.turnRate = 4f;
             p.life = 6f;
             p.velocity = dropVelocity + Vector3.down * 2f;
+            p.heavy = true;
         }
 
         void Update()
@@ -112,7 +113,8 @@ namespace DroneSandbox
         {
             if (blastRadius > 0f)
             {
-                Combat.Blast(transform.position, blastRadius, damage, team);
+                if (heavy) Combat.HeavyBlast(transform.position, blastRadius, damage, team);
+                else Combat.Blast(transform.position, blastRadius, damage, team);
                 Effects.Explosion(transform.position, blastRadius);
             }
             else if (target != null && target.IsAlive && damage > 0f)

@@ -27,8 +27,43 @@ namespace DroneSandbox
                 if (e == null) continue;
                 if (e.Hidden) GroundDisc(e.searchCenter, SandboxGame.SearchRadius, new Color(Amber.r, Amber.g, Amber.b, 0.1f));
                 else if (!e.Drawn && e.Intel == Intel.Contact) GroundDisc(e.ContactPosition, e.ContactRadius, new Color(Amber.r, Amber.g, Amber.b, 0.08f));
+                else if (e.type == EnemyType.AAGun && e.Intel >= Intel.Identified && e.Suppressed)
+                {
+                    // Pinned down: its reach greyed out, and how long it'll keep its head down.
+                    GroundDisc(e.transform.position, e.CurrentRange, new Color(0.6f, 0.65f, 0.7f, 0.07f));
+                    if (ToGui(e.transform.position + Vector3.up * 4f, out Vector2 g))
+                        GUI.Label(new Rect(g.x - 50f * Scale, g.y - 26f * Scale, 100f * Scale, 18f * Scale),
+                            $"<b>PINNED {Mathf.CeilToInt(e.SuppressedUntil - Time.time)}</b>", Tinted(centered, Teal));
+                }
                 else if (e.type == EnemyType.AAGun && e.Intel >= Intel.Identified)
                     GroundDisc(e.transform.position, e.CurrentRange, new Color(Hostile.r, Hostile.g, Hostile.b, game.Paused ? 0.16f : 0.08f));
+            }
+            // A shadowed column's notice range round the vehicle nearest our drones (the one that matters): amber,
+            // going red as the column grows suspicious.
+            if (game.IsShadow && game.Phase != MissionPhase.Extract)
+            {
+                EnemyUnit closest = null;
+                float best = float.MaxValue;
+                foreach (var e in game.enemies)
+                {
+                    if (e == null || !e.isTarget || e.Intel < Intel.Identified) continue;
+                    foreach (var d in game.drones)
+                    {
+                        if (d == null) continue;
+                        float gap = Vector3.Distance(d.transform.position, e.transform.position);
+                        if (gap < best)
+                        {
+                            best = gap;
+                            closest = e;
+                        }
+                    }
+                }
+                if (closest != null)
+                {
+                    Color ring = Color.Lerp(Amber, Hostile, game.ShadowSuspicion);
+                    ring.a = 0.6f + 0.4f * game.ShadowSuspicion;
+                    GroundRing(closest.transform.position, game.ShadowNoticeRange, ring, 120, 3.5f);
+                }
             }
             // What each selected Scout can see.
             float dark = DayNight.Instance != null ? 1f - DayNight.Instance.Daylight : 0f;
@@ -64,9 +99,9 @@ namespace DroneSandbox
         }
 
         // A dashed ring on the ground.
-        void GroundRing(Vector3 centre, float radius, Color colour, int dashes)
+        void GroundRing(Vector3 centre, float radius, Color colour, int dashes, float dot = 2.5f)
         {
-            float size = 2.5f * Scale;
+            float size = dot * Scale;
             for (int i = 0; i < dashes; i += 2)
             {
                 float a = i * Mathf.PI * 2f / dashes;

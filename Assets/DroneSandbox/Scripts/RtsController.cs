@@ -134,6 +134,7 @@ namespace DroneSandbox
         // A short nudge of the view (strength about 1 for a tank, more for an ammunition dump).
         public void Impulse(float strength)
         {
+            if (!Settings.Shake) return;
             impulse = Mathf.Max(strength, Time.unscaledTime < impulseUntil ? impulse : 0f);
             impulseUntil = Time.unscaledTime + 0.13f;
         }
@@ -188,7 +189,15 @@ namespace DroneSandbox
         {
             Vector2 mouse = GameInput.MousePosition;
             bool overHud = hud.IsPointerOverHud(mouse);
-            HoveredEnemy = overHud ? null : PickEnemy(mouse);
+            // Over the drone feed, what's under the cursor in the drone's picture counts as hovered.
+            HoveredEnemy = overHud ? hud.FeedPick(mouse) : PickEnemy(mouse);
+            // A left click on something in the feed swings the map camera onto it.
+            if (GameInput.LeftDown && overHud && HoveredEnemy != null)
+            {
+                LookAt(HoveredEnemy.transform.position, distance, yaw);
+                Effects.Marker(HoveredEnemy.transform.position, Art.EnemyRed);
+                Sound.Ui("click");
+            }
 
             if (GameInput.LeftDown && !overHud)
             {
@@ -206,7 +215,7 @@ namespace DroneSandbox
                 if (selected.Count > 0 && selected.Count != before) Sound.Ui("select");
             }
 
-            if (GameInput.RightDown && !overHud && selected.Count > 0) IssueOrder(mouse);
+            if (GameInput.RightDown && (!overHud || HoveredEnemy != null) && selected.Count > 0) IssueOrder(mouse); // the feed too
         }
 
         void ClickSelect(Vector2 mouse, bool additive)

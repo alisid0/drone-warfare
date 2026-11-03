@@ -6,6 +6,16 @@ namespace DroneSandbox
     // Targeting and area damage shared by drones, enemies and projectiles.
     public static class Combat
     {
+        // True while a heavy bomb's blast is being dealt out: the only thing a hardened target really feels.
+        public static bool Heavy { get; private set; }
+
+        public static void HeavyBlast(Vector3 center, float blastRadius, float damage, Team attacker)
+        {
+            Heavy = true;
+            try { Blast(center, blastRadius, damage, attacker); }
+            finally { Heavy = false; }
+        }
+
         static IEnumerable<Unit> HostilesOf(Team team)
         {
             var game = SandboxGame.Instance;

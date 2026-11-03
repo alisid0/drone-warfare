@@ -23,7 +23,6 @@ namespace DroneSandbox
         public const float SpotRange = 26f;     // a drone this close (across the ground) spots a hidden enemy
         public const float SearchRadius = 24f;  // size of the circle the HUD draws around a hidden target
         const float EnemyRespawnSeconds = 30f;
-        const float ConvoySpeed = 3.5f;
         const float ResultsDelay = 1.5f;        // let the last explosion play before the results panel
 
         public static SandboxGame Instance { get; private set; }
@@ -61,6 +60,13 @@ namespace DroneSandbox
         public const float ExtractSeconds = 60f, HomeRadius = 18f;
         public float ShadowProgress { get; private set; } // seconds the column has been watched unseen (Shadow missions)
         public bool ShadowSpotted { get; private set; }   // the column has noticed us (watching doesn't count for now)
+        public float ShadowSuspicion { get; private set; } // 0-1: how close the column is to spotting the tail
+        public int ShadowDetections { get; private set; }  // the third ends the mission
+        public int ShadowIntel { get; private set; }       // milestones logged so far, of three
+        public const int ShadowDetectionLimit = 3;
+        // How close a drone can get before the column grows suspicious; further while its escort sweeps the flanks.
+        public float ShadowNoticeRange => (Time.time < escortSweepUntil ? 34f : 26f) * Recon.WeatherFactor;
+        float escortSweepUntil;
         public bool IsShadow => Mode == GameMode.Mission && Mission != null && Mission.shadowSeconds > 0f;
         // Drones don't open fire on their own (a Shadow mission: one stray burst at the column ends it).
         public static bool WeaponsTight => Instance != null && Instance.IsShadow;
@@ -180,7 +186,19 @@ namespace DroneSandbox
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
 
             var rng = new System.Random(index * 101 + 7); // search circles land in the same place every try
-            foreach (var u in Mission.units)
+            // Which of two look-alike vehicles is the real one changes from try to try.
+            var units = new List<MissionUnit>(Mission.units);
+            int empty = units.FindIndex(x => x.empty), real = units.FindIndex(x => x.target && x.convoy > 0 && empty >= 0 && x.type == units[empty].type);
+            if (empty >= 0 && real >= 0 && Random.value < 0.5f)
+            {
+                var a = units[empty];
+                var b = units[real];
+                (a.convoy, b.convoy) = (b.convoy, a.convoy);
+                units[empty] = a;
+                units[real] = b;
+            }
+            Diverted = false;
+            foreach (var u in units)
             {
                 Vector3 position = u.position;
                 float yaw = u.yaw;
@@ -195,7 +213,7 @@ namespace DroneSandbox
                 {
                     // The lead starts 24 points (about 48 m) along the route, the rest 10 m apart behind it.
                     var route = Mission.convoyRoute;
-                    routeStart = Mathf.Clamp(24 - (u.convoy - 1) * 5, 0, route.Count - 2);
+                    routeStart = Mathf.Clamp(Mission.convoyStart - (u.convoy - 1) * 5, 0, route.Count - 2);
                     position = route[routeStart];
                     Vector3 ahead = route[routeStart + 1] - position;
                     yaw = Mathf.Atan2(ahead.x, ahead.z) * Mathf.Rad2Deg;
@@ -203,13 +221,20 @@ namespace DroneSandbox
 
                 var enemy = SpawnEnemy(u.type, position, yaw);
                 enemy.isTarget = u.target;
+                if (u.target && Mission.shadowSeconds > 0f) enemy.alertSeconds = 8f;
+                if (u.target && Mission.nightjar) enemy.hardened = true;
+                if (Mission.nightjar && u.type == EnemyType.AAGun) enemy.Upgun();
                 if (u.decoy)
                 {
                     enemy.isDecoy = true;
-                    enemy.maxHp = enemy.hp = 15f;
+                    if (!u.empty) enemy.maxHp = enemy.hp = 15f;
                 }
                 if (building != null) enemy.AttachStructure(building);
-                if (u.convoy > 0) enemy.Drive(Mission.convoyRoute, routeStart + 1, ConvoySpeed);
+                if (u.convoy > 0)
+                {
+                    enemy.Drive(Mission.convoyRoute, routeStart + 1, Mission.convoySpeed);
+                    enemy.departAt = Time.time + Mission.convoyDelay;
+                }
                 else if (enemy.IsMobile) enemy.Park();
                 if (u.hidden)
                 {
@@ -356,12 +381,12 @@ namespace DroneSandbox
         public static int MissionStock(Mission mission, DroneType type)
         {
             if (mission.shadowSeconds > 0f && type != DroneType.Scout) return 0; // a Shadow mission is eyes only
-            if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) ? 1 : 0;
+            if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) || mission.nightjar ? 1 : 0;
             return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + (type == DroneType.Kamikaze ? Theatre.SupplyBonus : 0);
         }
 
         // The Nightjar's launch button shows in free play, and in missions once it's bought.
-        public bool BomberAvailable => Mode == GameMode.Sandbox || (Mode == GameMode.Mission && Tech.Owns(TechId.Nightjar));
+        public bool BomberAvailable => Mode == GameMode.Sandbox || (Mode == GameMode.Mission && (Tech.Owns(TechId.Nightjar) || (Mission != null && Mission.nightjar)));
 
         // How close a drone must fly to spot a hidden enemy; long-range optics push it out.
         public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;
@@ -394,6 +419,10 @@ namespace DroneSandbox
             Feed.Clear();
             ShadowProgress = 0f;
             ShadowSpotted = false;
+            ShadowSuspicion = 0f;
+            ShadowDetections = 0;
+            ShadowIntel = 0;
+            escortSweepUntil = 0f;
             Tracks.Clear();
             Events.Clear();
             trackIds.Clear();
@@ -436,19 +465,47 @@ namespace DroneSandbox
             MissionTime += Time.deltaTime;
             RecordTracks();
             SpotHidden();
+            WatchBranch();
             if (IsShadow && Phase != MissionPhase.Extract)
             {
                 bool watched = false, spotted = false;
+                float nearest = float.MaxValue;
+                Drone tail = null;
                 foreach (var e in enemies)
                 {
                     if (e == null || !e.isTarget) continue;
                     if (e.Observed) watched = true;
                     if (e.Alerted) spotted = true;
+                    foreach (var d in drones)
+                    {
+                        if (d == null) continue;
+                        Vector3 offset = d.transform.position - e.transform.position;
+                        offset.y = 0f;
+                        if (offset.magnitude < nearest)
+                        {
+                            nearest = offset.magnitude;
+                            tail = d;
+                        }
+                    }
                 }
-                if (spotted && !ShadowSpotted) ShowMessage("They've seen the tail - watching won't count till they settle. Drop back.", 4f);
+                // Suspicion builds inside the column's notice range (full in 2.5 s), holds just outside it and drains
+                // beyond (gone in about 5 s). Full suspicion is a detection.
+                if (!spotted)
+                {
+                    if (nearest < ShadowNoticeRange) ShadowSuspicion += Time.deltaTime / 2.5f;
+                    else if (nearest > ShadowNoticeRange + 4f) ShadowSuspicion -= Time.deltaTime / 5f;
+                    ShadowSuspicion = Mathf.Clamp01(ShadowSuspicion);
+                    if (ShadowSuspicion >= 1f && tail != null)
+                    {
+                        ShadowDetected(tail);
+                        if (Result != MissionResult.None) return;
+                        spotted = true;
+                    }
+                }
                 ShadowSpotted = spotted;
                 if (watched && !spotted) ShadowProgress += Time.deltaTime;
                 if (Phase == MissionPhase.Recon && watched) Phase = MissionPhase.Strike; // "Strike" is the watch, for a Shadow mission
+                ShadowMilestones();
                 if (ShadowProgress >= Mission.shadowSeconds) BeginExtract();
                 return;
             }
@@ -462,13 +519,15 @@ namespace DroneSandbox
             {
                 int home = CountHome(out int flying);
                 string done = IsShadow ? "Column watched." : "All targets destroyed.";
-                if (home >= flying) Finish(true, flying > 0 ? done + " Every drone home." : done);
+                // A Shadow mission's intel has to come home with a Scout.
+                if (IsShadow && home == 0 && (flying == 0 || MissionTime >= ExtractEndsAt)) Finish(false, "No scout got the intel home.");
+                else if (home >= flying) Finish(true, flying > 0 ? done + " Every drone home." : done);
                 else if (MissionTime >= ExtractEndsAt) Finish(true, $"{done} {flying - home} drone(s) left behind.");
                 return;
             }
             bool dronesLeft = drones.Count > 0;
             foreach (int left in stock) dronesLeft |= left > 0;
-            if (!dronesLeft && TargetsDestroyed < TargetsTotal) Finish(false, "Out of drones.");
+            if (!dronesLeft && TargetsDestroyed < TargetsTotal) Finish(false, IsShadow ? "Every scout lost - the column went on unwatched." : "Out of drones.");
         }
 
         // A hidden enemy shows itself once any of your drones flies within SpotDistance of it.
@@ -515,7 +574,9 @@ namespace DroneSandbox
         // A long look shows a "vehicle" for what it is.
         public void OnDecoyExposed(EnemyUnit enemy)
         {
-            ShowMessage($"Decoy: that {enemy.unitName.ToLowerInvariant()} is inflatable - don't waste a drone on it", 4f);
+            ShowMessage(Mission != null && Mission.units.Exists(u => u.empty)
+                ? $"Confirmed: that {enemy.unitName.ToLowerInvariant()} rides high - it's the empty one"
+                : $"Decoy: that {enemy.unitName.ToLowerInvariant()} is inflatable - don't waste a drone on it", 4f);
             Sound.Alert("contact", 0.5f);
         }
 
@@ -562,6 +623,71 @@ namespace DroneSandbox
         }
 
         // Targets down: the drones still flying have a minute to get home (straight to the results if there are none).
+        public bool Diverted { get; private set; }
+
+        float lastPinnedMessage = -100f;
+
+        // An AA gun has been pinned down (EnemyUnit.Suppress): say so, unless it was said a moment ago.
+        public void OnSuppressed(EnemyUnit gun, float seconds)
+        {
+            if (Time.time - lastPinnedMessage < 3f) return;
+            lastPinnedMessage = Time.time;
+            ShowMessage($"{gun.ContactId ?? gun.unitName} pinned down - {seconds:0} s to get through", 3f);
+        }
+
+        // A spooked convoy takes the other road at the fork (Mission.convoyBranch), if it hasn't passed it yet.
+        void WatchBranch()
+        {
+            if (Diverted || Mode != GameMode.Mission || Mission == null || Mission.convoyBranch == null) return;
+            bool spooked = false;
+            foreach (var e in enemies)
+                if (e != null && e.OnRoute && e.Alerted) spooked = true;
+            if (!spooked) return;
+            Diverted = true;
+            int turned = 0;
+            foreach (var e in enemies)
+                if (e != null && e.Divert(Mission.convoyBranch, Mission.branchAt)) turned++;
+            if (turned > 0)
+            {
+                ShowMessage("The column's spooked - it's turning north at the crossroads, for the far exit", 4.5f);
+                Sound.Alert("contact", 0.5f);
+            }
+        }
+
+        // The column has spotted the tail: it speeds up for a few seconds and the watch pauses. The third time, it's
+        // over.
+        void ShadowDetected(Drone tail)
+        {
+            ShadowDetections++;
+            ShadowSuspicion = 0f;
+            if (ShadowDetections >= ShadowDetectionLimit)
+            {
+                Finish(false, "Spotted three times: the column called it off and went to ground.");
+                return;
+            }
+            foreach (var e in enemies)
+                if (e != null && e.isTarget) e.Alert(tail.transform.position, false);
+            ShowMessage($"DETECTED {ShadowDetections}/{ShadowDetectionLimit} - they've seen the tail. Watch paused: drop back past {ShadowNoticeRange + 4f:0} m", 4.5f);
+            Sound.Alert("warning", 0.5f);
+        }
+
+        // What the watch turns up, a quarter of the way in, past halfway and near the end. The second sends the
+        // escort sweeping the flanks for 8 s, so a tail sitting close has to back off.
+        void ShadowMilestones()
+        {
+            float[] at = { 0.25f, 0.58f, 0.92f };
+            if (ShadowIntel >= at.Length || ShadowProgress < Mission.shadowSeconds * at[ShadowIntel]) return;
+            ShadowIntel++;
+            if (ShadowIntel == 1) ShowMessage("INTEL 1/3: formation logged - one truck rides low: that's the cargo", 5f);
+            else if (ShadowIntel == 2)
+            {
+                escortSweepUntil = Time.time + 8f;
+                ShowMessage("INTEL 2/3: the escort is sweeping its flanks - 34 m for 8 s. Open the gap!", 5f);
+            }
+            else ShowMessage("INTEL 3/3: route confirmed - they're heading out on the north road", 4f);
+            Sound.Alert("objective", 0.3f);
+        }
+
         void BeginExtract()
         {
             CountHome(out int flying);
@@ -655,6 +781,8 @@ namespace DroneSandbox
                 drones.Remove(drone);
                 dronesLost++;
                 WatchSync(drone);
+                if (Mode == GameMode.Mission && Mission != null && Mission.nightjar && drone.type == DroneType.Bomber && Result == MissionResult.None)
+                    Finish(false, "The Nightjar is down - and with it the operation.");
                 Effects.Breakup(drone.transform.position);
                 Sound.At("drone down", drone.transform.position);
                 Events.Add((new Vector2(drone.transform.position.x, drone.transform.position.z), false));
@@ -676,7 +804,8 @@ namespace DroneSandbox
                 }
                 else if (Mode == GameMode.Mission && enemy.isDecoy)
                 {
-                    ShowMessage("Decoy! An inflatable " + enemy.unitName.ToLowerInvariant() + " - no points", 3f);
+                    ShowMessage(Mission.units.Exists(u => u.empty) ? "Wrong one - that " + enemy.unitName.ToLowerInvariant() + " was empty"
+                        : "Decoy! An inflatable " + enemy.unitName.ToLowerInvariant() + " - no points", 3f);
                 }
                 else if (Mode == GameMode.Mission)
                 {

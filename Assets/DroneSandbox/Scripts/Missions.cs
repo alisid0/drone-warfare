@@ -13,6 +13,7 @@ namespace DroneSandbox
         public bool hidden;  // invisible until one of your drones comes close (see SandboxGame.SpotRange)
         public int convoy;   // > 0: drives the mission's convoy route, this many places back from the lead
         public bool decoy;   // an inflatable fake: worth nothing, and a drone spent on it is wasted
+        public bool empty;   // with decoy: the real vehicle with nothing aboard (as tough as a loaded one)
     }
 
     // An Asset Hunt mission: a list of targets to destroy with a fixed stock of drones.
@@ -30,6 +31,12 @@ namespace DroneSandbox
         public float shadowSeconds;        // > 0: a Shadow mission - watch the targets this long, unseen, instead of destroying them
         public string key;                 // where its best stars are saved (the Asset Hunt missions use their number)
         public float contactRadius = 14f;  // how roughly the briefing places the vehicles (metres)
+        public float convoyDelay;          // seconds before the convoy sets off
+        public float convoySpeed = 3.5f;   // metres a second
+        public int convoyStart = 24;       // how far along its route (in 2 m points) the convoy's lead starts
+        public List<Vector3> convoyBranch; // the road a spooked convoy takes instead: the same as convoyRoute up to branchAt
+        public int branchAt;
+        public bool nightjar;              // a Nightjar operation: one is provided, its targets are hardened, and losing it fails
 
         // The mission's own drones (the tech shop can add more; see SandboxGame.MissionStock).
         public int Stock(DroneType type)
@@ -153,19 +160,63 @@ namespace DroneSandbox
             var longWatch = new Mission
             {
                 name = "Long Watch",
-                briefing = "A Dravin column is moving up the east road to their command post. We need its route and escort, not a fight: " +
-                           "keep a drone watching it for a minute in all, without being seen. Hang back outside its 26 m, inside your 46 m. " +
-                           "If they notice you, the watch pauses until they settle. Don't shoot. Bring the drones home after.",
-                scouts = 3, strikes = 0, kamikazes = 0, par = 3, startHour = 13f, shadowSeconds = 60f,
+                briefing = "A Dravin column is crossing the sector, in on the east road and out on the north road. We need its route and escort, not a fight: " +
+                           "keep a drone watching it for a minute in all, without being seen. Hang back outside its 26 m ring, inside your 46 m. " +
+                           "Too close and they grow suspicious; spotted three times and it's over. Weapons are tight. Bring a scout home with the intel.",
+                scouts = 3, strikes = 0, kamikazes = 0, par = 2, startHour = 13f, shadowSeconds = 60f,
                 cameraFocus = new Vector3(40f, 0f, -40f), cameraYaw = 60f, cameraDistance = 100f,
-                escapeFailure = "The column reached the command post before we had watched it long enough.",
+                escapeFailure = "The column left the sector before we had watched it long enough.", convoySpeed = 3f,
             };
             longWatch.convoyRoute = RoadPath(2, new Vector2(140f, -114f), new Vector2(18f, 0f));
-            longWatch.convoyRoute.AddRange(RoadPath(0, new Vector2(18f, 0f), new Vector2(36f, 32f)));
+            longWatch.convoyRoute.AddRange(RoadPath(0, new Vector2(18f, 0f), new Vector2(-5f, -14f)));
+            longWatch.convoyRoute.AddRange(RoadPath(1, new Vector2(-5f, -14f), new Vector2(-68f, 120f)));
             longWatch.units.Add(new MissionUnit { type = EnemyType.APC, convoy = 1, target = true });
             for (int i = 0; i < 3; i++) longWatch.units.Add(new MissionUnit { type = EnemyType.Truck, target = true, convoy = i + 2 });
             Add(longWatch, EnemyType.AAGun, 30f, -30f, 40f);
             list.Add(longWatch);
+
+            // An Interdiction: one of two identical tankers carries the fuel. Telling them apart takes a Scout inside
+            // 26 m, which the column notices - and a spooked column turns north at the crossroads for the far exit.
+            var delivery = new Mission
+            {
+                name = "Last Delivery",
+                briefing = "The last fuel for the Dravin forward depot is coming up the south road: two tankers, one loaded, one empty, " +
+                           "and from above they look the same. Stop the loaded one before it gets through. A Scout inside 26 m can tell " +
+                           "them apart, but the column will notice - spooked before the crossroads, it turns north for the far exit.",
+                scouts = 1, strikes = 2, kamikazes = 2, par = 3, startHour = 16.5f, contactRadius = 20f, convoySpeed = 3f, convoyStart = 62,
+                cameraFocus = new Vector3(5f, 0f, -45f), cameraYaw = 20f, cameraDistance = 115f,
+                escapeFailure = "The loaded tanker got through - their depot has its fuel.",
+            };
+            delivery.convoyRoute = RoadPath(1, new Vector2(30f, -250f), new Vector2(-5f, -14f)); // in from well south of the map
+            delivery.branchAt = delivery.convoyRoute.Count - 3; // decided a few metres short of the crossroads
+            delivery.convoyRoute.AddRange(RoadPath(0, new Vector2(-5f, -14f), new Vector2(36f, 32f)));
+            delivery.convoyBranch = RoadPath(1, new Vector2(30f, -250f), new Vector2(-68f, 120f));
+            delivery.units.Add(new MissionUnit { type = EnemyType.APC, convoy = 1 });
+            delivery.units.Add(new MissionUnit { type = EnemyType.Tanker, convoy = 2, decoy = true, empty = true });
+            delivery.units.Add(new MissionUnit { type = EnemyType.Tanker, convoy = 3, target = true });
+            delivery.units.Add(new MissionUnit { type = EnemyType.Truck, convoy = 4 });
+            Add(delivery, EnemyType.AAGun, -24f, -34f, 30f); // covers the crossroads
+            list.Add(delivery);
+
+            // A Suppression mission: only the Nightjar's bombs can crack the depot, and two radar-fed AA guns cover the
+            // way in. Pin the guns (steady fire: 12 s; a missile hit: 25 s), kill them or blind their radar, then
+            // take the Nightjar through. Losing it ends the mission.
+            var corridor = new Mission
+            {
+                name = "Silent Corridor",
+                briefing = "A hardened Dravin depot east of the crossroads: only the Nightjar's [4] bombs will crack it, and two heavy AA guns, " +
+                           "fed by a radar, cover the way in. Open a corridor first: steady fire pins a gun down for 12 s, a missile hit " +
+                           "for 25 s, and with the radar dead they're slow to aim. Then take the Nightjar through, bomb the depot and bring " +
+                           "it home. Lose the Nightjar and it's over.",
+                scouts = 2, strikes = 2, kamikazes = 2, par = 5, startHour = 10f, nightjar = true,
+                cameraFocus = new Vector3(30f, 0f, -14f), cameraYaw = 30f, cameraDistance = 105f,
+            };
+            Add(corridor, EnemyType.Depot, 52f, -12f, 20f, target: true);
+            Add(corridor, EnemyType.Radar, 40f, -6f, 0f);
+            Add(corridor, EnemyType.AAGun, 22f, -34f, 220f);
+            Add(corridor, EnemyType.AAGun, 60f, 8f, 250f);
+            Add(corridor, EnemyType.Truck, 46f, -24f, 120f);
+            list.Add(corridor);
 
             return list;
         }

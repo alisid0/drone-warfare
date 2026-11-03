@@ -115,6 +115,9 @@ namespace DroneSandbox
             exposure.adaptationSpeedDarkToLight.Override(3f);
             exposure.adaptationSpeedLightToDark.Override(2f);
 
+            // No motion blur: panning a strategy camera smeared the whole battlefield (and the HUD reads against it).
+            Get<MotionBlur>(profile).intensity.Override(0f);
+
             var shadows = Get<HDShadowSettings>(profile);
             shadows.maxShadowDistance.Override(350f);
             shadows.cascadeShadowSplitCount.Override(4);

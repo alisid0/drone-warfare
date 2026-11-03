@@ -74,7 +74,7 @@ namespace DroneSandbox
             foreach (var (drone, type, at) in game.Tracks)
             {
                 Vector2 p = ToMap(at);
-                if (last.TryGetValue(drone, out Vector2 prev)) Dashes(prev, p, typeColours[(int)type], 1.5f * s, 0f, 0f, 0f);
+                if (last.TryGetValue(drone, out Vector2 prev)) Dashes(prev, p, typeColours[(int)type], 2f * s, 0f, 0f, 0f);
                 last[drone] = p;
             }
             Vector3 home = game.basePosition;
@@ -102,10 +102,10 @@ namespace DroneSandbox
                 else Ring(p, 4f * s, Amber);
             }
             var key = Tinted(small, small.normal.textColor);
-            key.fontSize = Mathf.RoundToInt(10f * s);
-            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 6f * s, panel.width, 16f * s),
+            key.fontSize = Mathf.RoundToInt(12f * s);
+            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 6f * s, panel.width, 18f * s),
                 "<color=#49DFCF>Scout</color>  <color=#73BFFF>Strike</color>  <color=#FF7848>Kamikaze</color>  <color=#D9D9F2>Nightjar</color>", key);
-            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 22f * s, panel.width, 16f * s), "x destroyed   ● drone lost   ◊ AA   ○ enemy left", key);
+            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 25f * s, panel.width, 18f * s), "x destroyed   ● drone lost   ◊ AA   ○ enemy left", key);
         }
 
         // The one alert that beats everything: an AA gun shooting at one of our drones. Returns the strip's height.

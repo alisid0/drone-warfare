@@ -54,7 +54,8 @@ namespace DroneSandbox
 
         // ---- What it knows of us ----
         public float AlertedAt { get; private set; } = -100f;
-        public bool Alerted => Time.time - AlertedAt < AlertSeconds;
+        public float alertSeconds = AlertSeconds; // shorter for a Shadow mission's column, which settles quickly
+        public bool Alerted => Time.time - AlertedAt < alertSeconds;
         Vector3 trouble;          // where the last threat was
         float acquiring;          // AA: how long it has been laying its guns on the current drone
         float acquireBegan, alertBegan;
@@ -408,6 +409,56 @@ namespace DroneSandbox
             moveSpeed = speed;
         }
 
+        public float departAt; // a convoy vehicle waits until this time before it drives off
+        public bool hardened;  // only heavy bombs really hurt it (a tenth of anything else gets through)
+
+        // A heavier gun (Silent Corridor's): reaches high enough to catch a Nightjar and hits much harder.
+        public void Upgun()
+        {
+            range = 24f;
+            damage = 14f;
+            unitName = "Heavy AA";
+        }
+
+        protected override float Absorb(float amount) => hardened && !Combat.Heavy ? amount * 0.1f : amount;
+
+        // ---- Suppression ----
+        // An AA gun under fire keeps its head down: two seconds of steady fire (hits no more than 0.7 s apart) pins
+        // it for 12 s, and a heavy hit (a missile, a blast nearby) for 25 s. A pinned gun neither aims nor fires.
+        public float SuppressedUntil { get; private set; } = -100f;
+        public bool Suppressed => Time.time < SuppressedUntil;
+        float fireBegan = -100f, lastLightHit = -100f;
+
+        void Suppress(float hit)
+        {
+            if (type != EnemyType.AAGun) return;
+            float now = Time.time;
+            if (hit >= 25f)
+            {
+                Pin(25f);
+                return;
+            }
+            if (now - lastLightHit > 0.7f) fireBegan = now;
+            lastLightHit = now;
+            if (now - fireBegan >= 2f) Pin(12f);
+        }
+
+        void Pin(float seconds)
+        {
+            bool was = Suppressed;
+            SuppressedUntil = Mathf.Max(SuppressedUntil, Time.time + seconds);
+            if (!was) SandboxGame.Instance.OnSuppressed(this, seconds);
+        }
+        public bool OnRoute => route != null;
+
+        // Takes the other road at a fork: `path` matches the current route up to `fork`. False if it's already past.
+        public bool Divert(List<Vector3> path, int fork)
+        {
+            if (route == null || route == path || routeIndex >= fork) return false;
+            route = path;
+            return true;
+        }
+
         public void AttachStructure(GameObject building) => structure = building;
 
         // Invisible (and untargetable) until one of your drones comes close; see SandboxGame.SpotHidden.
@@ -549,6 +600,7 @@ namespace DroneSandbox
         // A drone this close: does this unit notice it? Radars see furthest and warn the guns they cover.
         public void Notice(Drone drone, float distance, float dark)
         {
+            if (isTarget && SandboxGame.Instance.IsShadow) return; // a shadowed column grows suspicious instead (SandboxGame)
             float range = type == EnemyType.Radar ? RadarCoverage + 10f
                 : type == EnemyType.AAGun ? CurrentRange + 6f
                 : IsMobile ? 26f : 20f;
@@ -583,6 +635,7 @@ namespace DroneSandbox
         // Hit, or a neighbour hit: everyone close by is on alert, looking toward where it came from.
         protected override void OnHit()
         {
+            Suppress(LastDamage);
             Vector3 from = transform.position;
             var shooter = Combat.NearestHostile(AimPoint, team, 60f, true);
             if (shooter != null) from = shooter.transform.position;
@@ -641,6 +694,7 @@ namespace DroneSandbox
 
         void FollowRoute(float dt)
         {
+            if (Time.time < departAt) return;
             if (routeIndex >= route.Count)
             {
                 route = null;
@@ -792,6 +846,13 @@ namespace DroneSandbox
         void Defend(float dt)
         {
             cooldown -= dt;
+            if (Suppressed)
+            {
+                acquiring = 0f;
+                TrackedDrone = null;
+                AcquireProgress = 0f;
+                return;
+            }
             var target = TrackNearestDrone(CurrentRange, 240f, dt);
             if (target == null)
             {

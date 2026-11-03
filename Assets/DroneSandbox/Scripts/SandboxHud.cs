@@ -38,6 +38,7 @@ namespace DroneSandbox
             "Mouse wheel  -  zoom",
             "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
             "Space  -  select all     X  -  stop     Esc  -  deselect",
+            "Drone feed: click a contact to look at it, right-click to attack it",
             "Red dots: AA gun reach. Radars boost nearby AA.",
             "T  -  thermal view (Wren-T Scout or Nightjar)",
             "N  -  skip 2 hours (free play)",
@@ -48,13 +49,14 @@ namespace DroneSandbox
         public bool showHelp = false; // the full controls, on H; otherwise a one-line hint strip
         public bool ShopOpen;  // the tech shop, opened from the main menu
         public bool TheatreOpen; // the theatre map, opened from the main menu
+        public bool SettingsOpen; // interface size, shake, flashes and sound, from the main menu
         Hotspot chosen;          // the hotspot picked on the theatre map
         static Texture2D dotTexture;
-        public float Scale => Mathf.Max(1f, Screen.height / 900f);
+        public float Scale => Mathf.Max(1f, Screen.height / 900f) * Settings.UiScale;
 
         SandboxGame game;
         RtsController rts;
-        GUIStyle label, title, small, smallWrap, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
+        GUIStyle label, title, small, smallWrap, centered, button, chosenButton, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
         float stylesBuiltForScale;
         static Texture2D starTexture;
 
@@ -126,6 +128,7 @@ namespace DroneSandbox
             {
                 if (ShopOpen) DrawShop();
                 else if (TheatreOpen) DrawTheatre();
+                else if (SettingsOpen) DrawSettings();
                 else DrawMenu();
                 return;
             }
@@ -181,6 +184,9 @@ namespace DroneSandbox
             button.active.textColor = Color.white;
             button.border = new RectOffset(2, 2, 2, 2);
             leftButton = new GUIStyle(button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(Mathf.RoundToInt(16f * s), 8, 4, 4) };
+            chosenButton = new GUIStyle(button); // the picked option in a row of choices
+            chosenButton.normal.background = chosenButton.hover.background = button.active.background;
+            chosenButton.normal.textColor = Color.white;
             big = new GUIStyle(label) { fontSize = Mathf.RoundToInt(34f * s), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             heading = new GUIStyle(label) { fontSize = Mathf.RoundToInt(24f * s), fontStyle = FontStyle.Bold };
             wrap = new GUIStyle(label) { wordWrap = true };
@@ -304,6 +310,7 @@ namespace DroneSandbox
             if (!ToGui(Ground.OnGround(at) + Vector3.up * height, out Vector2 g)) return;
             float s = Scale;
             var r = new Rect(g.x - 110f * s, g.y - 10f * s, 220f * s, 20f * s);
+            if (StatsPanel().Overlaps(r) || MenuButton().Overlaps(r)) return; // never under the top-left panels
             GUI.Label(new Rect(r.x + 1.5f * s, r.y + 1.5f * s, r.width, r.height), text, placeShadow);
             GUI.Label(r, text, placeLabel);
         }
@@ -509,7 +516,8 @@ namespace DroneSandbox
             var missions = Missions.All;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
             float rowHeight = 50f, gap = 8f;
-            float height = 172f + (missions.Count + 3) * (rowHeight + gap) + 56f;
+            int missionRows = (missions.Count + 1) / 2; // two columns of missions
+            float height = 172f + (missionRows + 3) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
             // A teal rule along the top and the Norvane emblem either side of the title.
@@ -521,7 +529,7 @@ namespace DroneSandbox
             GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 22f * s),
-                "Find them. Strike them. Bring your drones home. Every drone you spend or lose costs a star.",
+                "Find them. Strike them. Bring them home. Every drone spent or lost costs a star.",
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(13f * s) }, small.normal.textColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 120f * s, r.width - 60f * s, 40f * s),
                 $"{Capitalised(Factions.Region)}: you fly for the {Factions.Player} against the {Factions.Enemy}. " +
@@ -536,24 +544,28 @@ namespace DroneSandbox
                 chosen = null;
             }
             y += (rowHeight + gap) * s;
+            float column = (r.width - 60f * s - gap * s) / 2f;
             for (int i = 0; i < missions.Count; i++)
             {
-                var row = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+                var row = new Rect(r.x + 30f * s + (i % 2) * (column + gap * s), y + (i / 2) * (rowHeight + gap) * s, column, rowHeight * s);
                 bool open = SandboxGame.Unlocked(i);
                 GUI.enabled = open;
                 if (GUI.Button(row, $"<b>{i + 1}.  {missions[i].name}</b>", leftButton)) game.StartMission(i);
                 GUI.enabled = true;
-                if (open) DrawStars(new Rect(row.xMax - 110f * s, row.y + 13f * s, 96f * s, 24f * s), SandboxGame.BestStars(i));
-                else GUI.Label(new Rect(row.xMax - 110f * s, row.y, 96f * s, row.height), "Locked", lockedLabel);
-                y += (rowHeight + gap) * s;
+                if (open) DrawStars(new Rect(row.xMax - 84f * s, row.y + 15f * s, 72f * s, 18f * s), SandboxGame.BestStars(i));
+                else GUI.Label(new Rect(row.xMax - 84f * s, row.y, 72f * s, row.height), "Locked", lockedLabel);
             }
+            y += missionRows * (rowHeight + gap) * s;
             var sandbox = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
             if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, all tech, enemies respawn</size>", leftButton))
                 game.StartSandbox();
             y += (rowHeight + gap) * s;
-            var shop = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
-            if (GUI.Button(shop, "<b>Tech shop</b>   <size=" + Mathf.RoundToInt(12f * s) + ">new drones and upgrades</size>", leftButton))
+            float halfWidth = (r.width - 60f * s - gap * s) / 2f;
+            var shop = new Rect(r.x + 30f * s, y, halfWidth, rowHeight * s);
+            if (GUI.Button(shop, "<b>Tech shop</b>", leftButton))
                 ShopOpen = true;
+            if (GUI.Button(new Rect(shop.xMax + gap * s, y, halfWidth, rowHeight * s), "<b>Settings</b>", leftButton))
+                SettingsOpen = true;
             GUI.Label(new Rect(shop.xMax - 130f * s, shop.y, 116f * s, shop.height), $"<b>{Tech.Points}</b> points",
                 Tinted(new GUIStyle(label) { alignment = TextAnchor.MiddleRight }, TargetColor));
             GUI.Label(new Rect(r.x, r.yMax - 40f * s, r.width, 24f * s), "Finish a mission to unlock the next one.", Tinted(centered, small.normal.textColor));
@@ -647,9 +659,11 @@ namespace DroneSandbox
             float s = Scale;
             bool won = game.Result == MissionResult.Won;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
-            Rect r = Centered(520f, 350f);
+            // The result on the left and the debrief map beside it, the pair centred on screen.
+            float pair = (520f + 12f + 400f) * s;
+            Rect r = new Rect((Screen.width - pair) / 2f, (Screen.height - 350f * s) / 2f, 520f * s, 350f * s);
             Fill(r, ModalColor);
-            DrawDebriefMap(new Rect(r.xMax + 10f * s, r.y, 260f * s, r.height));
+            DrawDebriefMap(new Rect(r.xMax + 12f * s, (Screen.height - 470f * s) / 2f, 400f * s, 470f * s));
             GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);

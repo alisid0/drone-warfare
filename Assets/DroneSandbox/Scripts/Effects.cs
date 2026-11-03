@@ -411,7 +411,7 @@ namespace DroneSandbox
             fx.mode = Mode.Flash;
             fx.life = 0.4f;
             fx.flash = light;
-            fx.flashPeak = 3500f * s * s;
+            fx.flashPeak = 3500f * s * s * (Settings.Flashes ? 1f : 0.3f);
             light.intensity = fx.flashPeak;
         }
 

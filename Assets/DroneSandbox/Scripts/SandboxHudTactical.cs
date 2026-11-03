@@ -277,8 +277,12 @@ namespace DroneSandbox
             foreach (var e in game.enemies) if (e != null && e.isTarget && !e.Hidden && e.Intel >= Intel.Identified) located++;
             if (game.IsShadow && game.Phase != MissionPhase.Extract)
             {
-                string state = game.ShadowSpotted ? "<color=#FF5040><b>SEEN</b></color>" : "unseen";
-                return $"<color=#FFC15A><b>SHADOW</b></color>  Watch the column: <b>{game.ShadowProgress:0}/{game.Mission.shadowSeconds:0} s</b>  {state}  <color=#8FA3A8>weapons tight</color>";
+                int filled = Mathf.RoundToInt(game.ShadowSuspicion * 5f);
+                string bar = new string('\u25A0', filled) + new string('\u25A1', 5 - filled); // filled and empty squares
+                string state = game.ShadowSpotted ? "<color=#FF5040><b>SEEN</b></color>"
+                    : $"<color={(game.ShadowSuspicion > 0.6f ? "#FF5040" : game.ShadowSuspicion > 0.01f ? "#FFC15A" : "#8FA3A8")}>{bar}</color>";
+                return $"<color=#FFC15A><b>SHADOW</b></color>  <b>{game.ShadowProgress:0}/{game.Mission.shadowSeconds:0} s</b>  intel {game.ShadowIntel}/3  {state}  " +
+                       $"spotted {game.ShadowDetections}/{SandboxGame.ShadowDetectionLimit}";
             }
             switch (game.Phase)
             {

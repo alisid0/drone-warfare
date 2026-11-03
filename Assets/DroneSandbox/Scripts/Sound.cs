@@ -152,7 +152,7 @@ namespace DroneSandbox
         // couple of seconds, and the motors duck under them.
         public static void Alert(string name, float minimumGap = 1.5f)
         {
-            if (Instance == null || !Instance.Ready(name, minimumGap)) return;
+            if (Instance == null || !Settings.AlertSounds || !Instance.Ready(name, minimumGap)) return;
             Instance.ui.PlayOneShot(Instance.Pick(name), GroupVolume[(int)Group.Warning]);
             Instance.duckUntil = Time.unscaledTime + 1f;
         }

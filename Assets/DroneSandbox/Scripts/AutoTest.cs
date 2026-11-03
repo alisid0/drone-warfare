@@ -54,6 +54,7 @@ namespace DroneSandbox
 
         IEnumerator Start()
         {
+            Settings.UseDefaultsForTest();
             yield return new WaitForSeconds(1.5f);
             var game = SandboxGame.Instance;
             var rts = game.GetComponent<RtsController>();
@@ -66,6 +67,16 @@ namespace DroneSandbox
                 yield break;
             }
             yield return Shot("00_menu");
+            var hud = game.GetComponent<SandboxHud>();
+            hud.SettingsOpen = true;
+            Settings.UiScale = 1.4f;
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Shot("00a_settings_140");
+            Settings.UiScale = 0.8f;
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Shot("00b_settings_80");
+            Settings.UiScale = 1f;
+            hud.SettingsOpen = false;
             Sound.ExportReel(Path.Combine(outDir, "sound_reel.wav"));
             log.WriteLine("Sound reel written");
             if (MapSnapshot.Picture != null)
@@ -742,8 +753,9 @@ namespace DroneSandbox
             yield return Shot("12_command_post");
             log.WriteLine($"Command Post: {game.TargetsTotal} target, {game.enemies.Count} enemies");
 
-            // Long Watch (Shadow): a Scout shadows the column side-on, 38 m out from its middle (outside every
-            // vehicle's 26 m, inside the Scout's 46 m).
+            // Long Watch (Shadow), played twice. First properly: a Scout shadows the column side-on, 38 m out from
+            // its middle (outside every vehicle's 26 m, inside the Scout's 46 m), then flies home with the intel.
+            // Then badly: a Scout sits right on top of the column until it's spotted three times.
             int watch = Missions.All.FindIndex(m => m.shadowSeconds > 0f);
             if (watch >= 0)
             {
@@ -752,22 +764,182 @@ namespace DroneSandbox
                 var shadow = game.SpawnDrone(DroneType.Scout);
                 var column = game.enemies.FindAll(e => e.isTarget);
                 var lead = column.Count > 0 ? column[0] : null;
-                for (float t = 0f; t < 40f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
+                bool extractShot = false;
+                for (float t = 0f; t < 120f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
                 {
-                    Vector3 middle = Vector3.zero;
-                    int alive = 0;
-                    foreach (var e in column)
-                        if (e != null && e.IsAlive) { middle += e.transform.position; alive++; }
-                    if (alive == 0) break;
-                    middle /= alive;
-                    Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized;
-                    if (Vector3.Dot(shadow.transform.position - middle, side) < 0f) side = -side;
-                    shadow.MoveTo(middle + side * 38f);
-                    rts.LookAt(middle, 70f, 60f);
-                    if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
+                    if (game.Phase == MissionPhase.Extract)
+                    {
+                        shadow.MoveTo(game.basePosition);
+                        rts.LookAt(shadow.transform.position, 70f, 60f);
+                        if (!extractShot)
+                        {
+                            extractShot = true;
+                            yield return Shot("12c_long_watch_extract");
+                        }
+                    }
+                    else
+                    {
+                        Vector3 middle = Vector3.zero;
+                        int alive = 0;
+                        foreach (var e in column)
+                            if (e != null && e.IsAlive) { middle += e.transform.position; alive++; }
+                        if (alive == 0) break;
+                        middle /= alive;
+                        Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized;
+                        if (Vector3.Dot(shadow.transform.position - middle, side) < 0f) side = -side;
+                        shadow.MoveTo(middle + side * 38f);
+                        rts.LookAt(middle, 70f, 60f);
+                        if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
+                    }
                     yield return new WaitForSecondsRealtime(0.5f);
                 }
-                log.WriteLine($"Long Watch: watched {game.ShadowProgress:F0}/{Missions.All[watch].shadowSeconds:F0} s, spotted {game.ShadowSpotted}, phase {game.Phase}, result {game.Result}");
+                log.WriteLine($"Long Watch (careful): watched {game.ShadowProgress:F0}/{Missions.All[watch].shadowSeconds:F0} s, intel {game.ShadowIntel}/3, " +
+                              $"detected {game.ShadowDetections}, phase {game.Phase}, result {game.Result} ({game.ResultReason})");
+
+                game.StartMission(watch);
+                game.CloseBriefing();
+                shadow = game.SpawnDrone(DroneType.Scout);
+                column = game.enemies.FindAll(e => e.isTarget);
+                lead = column.Count > 0 ? column[0] : null;
+                bool detectedShot = false;
+                for (float t = 0f; t < 60f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
+                {
+                    shadow.MoveTo(lead.transform.position);
+                    rts.LookAt(lead.transform.position, 70f, 60f);
+                    if (!detectedShot && game.ShadowDetections > 0)
+                    {
+                        detectedShot = true;
+                        yield return Shot("12d_long_watch_detected");
+                    }
+                    yield return new WaitForSecondsRealtime(0.5f);
+                }
+                log.WriteLine($"Long Watch (reckless): detected {game.ShadowDetections}, watched {game.ShadowProgress:F0} s, result {game.Result} ({game.ResultReason})");
+            }
+
+            // Last Delivery (Interdiction), played twice. First: a Scout looks at both tankers from close (which
+            // spooks the column onto the north road), then both Strike drones go for the loaded one and everyone
+            // flies home. Then nobody stops it, at four times speed, and the loaded tanker should get away.
+            int delivery = Missions.All.FindIndex(m => m.convoyBranch != null);
+            if (delivery >= 0)
+            {
+                game.StartMission(delivery);
+                game.CloseBriefing();
+                yield return new WaitForSecondsRealtime(1f);
+                yield return Shot("13a_last_delivery_start");
+                var eye = game.SpawnDrone(DroneType.Scout);
+                var tankers = game.enemies.FindAll(e => e.type == EnemyType.Tanker);
+                var loaded = game.enemies.Find(e => e.isTarget);
+                int loadedSlot = loaded != null ? tankers.IndexOf(loaded) : -1;
+                int looked = 0;
+                bool struck = false, divertShot = false;
+                for (float t = 0f; t < 110f && game.Result == MissionResult.None; t += 0.5f)
+                {
+                    if (eye != null && looked < tankers.Count)
+                    {
+                        var next = tankers[looked];
+                        if (next == null || next.Intel == Intel.Confirmed) looked++;
+                        else eye.MoveTo(next.transform.position);
+                    }
+                    else if (!struck && loaded != null)
+                    {
+                        struck = true;
+                        for (int i = 0; i < 2; i++)
+                        {
+                            var d = game.SpawnDrone(DroneType.Strike);
+                            if (d != null) d.Attack(loaded);
+                        }
+                        if (eye != null) eye.MoveTo(game.basePosition);
+                    }
+                    if (game.Phase == MissionPhase.Extract)
+                        foreach (var d in game.drones)
+                            if (d != null) d.MoveTo(game.basePosition);
+                    Vector3 look = loaded != null ? loaded.transform.position : game.basePosition;
+                    rts.LookAt(look, 90f, 30f);
+                    if (!divertShot && game.Diverted)
+                    {
+                        divertShot = true;
+                        yield return Shot("13b_last_delivery_diverted");
+                    }
+                    yield return new WaitForSecondsRealtime(0.5f);
+                }
+                log.WriteLine($"Last Delivery (look, then strike): loaded tanker was #{loadedSlot + 1} of {tankers.Count}, confirmed {looked}, diverted {game.Diverted}, " +
+                              $"result {game.Result} ({game.ResultReason}), drones used {game.DronesUsed}, {game.MissionTime:F0} s");
+                yield return Shot("13c_last_delivery_result");
+
+                game.StartMission(delivery);
+                game.CloseBriefing();
+                Time.timeScale = 4f;
+                for (float t = 0f; t < 45f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSecondsRealtime(0.5f);
+                Time.timeScale = 1f;
+                log.WriteLine($"Last Delivery (nobody stops it): result {game.Result} ({game.ResultReason}) at {game.MissionTime:F0} s");
+            }
+
+            // Silent Corridor (Suppression), played twice. First: a Strike drone fires on each AA gun (a missile hit
+            // pins one for 25 s), then the Nightjar goes in once both are pinned or dead, bombs the hardened depot and
+            // everyone flies home. Then the mistake: the Nightjar alone, straight in.
+            int corridor = Missions.All.FindIndex(m => m.nightjar);
+            if (corridor >= 0)
+            {
+                game.StartMission(corridor);
+                game.CloseBriefing();
+                var guns = game.enemies.FindAll(e => e.type == EnemyType.AAGun);
+                var depot = game.enemies.Find(e => e.isTarget);
+                foreach (var gun in guns)
+                {
+                    var d = game.SpawnDrone(DroneType.Strike);
+                    if (d != null) d.Attack(gun);
+                }
+                Drone nightjar = null;
+                bool pinnedShot = false, bombingShot = false;
+                int pinnedSeen = 0;
+                for (float t = 0f; t < 120f && game.Result == MissionResult.None; t += 0.5f)
+                {
+                    bool open = guns.TrueForAll(g => g == null || !g.IsAlive || g.Suppressed);
+                    int pinned = guns.FindAll(g => g != null && g.IsAlive && g.Suppressed).Count;
+                    pinnedSeen = Mathf.Max(pinnedSeen, pinned);
+                    if (!pinnedShot && pinned > 0)
+                    {
+                        pinnedShot = true;
+                        rts.LookAt(guns.Find(g => g != null && g.Suppressed).transform.position, 70f, 30f);
+                        yield return Shot("14a_corridor_pinned");
+                    }
+                    if (nightjar == null && (open || t > 30f) && depot != null)
+                    {
+                        nightjar = game.SpawnDrone(DroneType.Bomber);
+                        if (nightjar != null) nightjar.Attack(depot);
+                    }
+                    if (game.Phase == MissionPhase.Extract)
+                        foreach (var d in game.drones)
+                            if (d != null) d.MoveTo(game.basePosition);
+                    if (nightjar != null)
+                    {
+                        rts.LookAt(nightjar.transform.position, 80f, 30f);
+                        if (!bombingShot && depot != null && Vector3.Distance(nightjar.transform.position, depot.transform.position) < 20f)
+                        {
+                            bombingShot = true;
+                            yield return Shot("14b_corridor_bombing");
+                        }
+                    }
+                    yield return new WaitForSecondsRealtime(0.5f);
+                }
+                string depotState = depot == null ? "destroyed" : depot.hp.ToString("F0") + " hp";
+                log.WriteLine($"Silent Corridor (pin, then bomb): most guns pinned at once {pinnedSeen}, guns left {guns.FindAll(g => g != null && g.IsAlive).Count}, " +
+                              $"depot {depotState}, result {game.Result} ({game.ResultReason}), drones used {game.DronesUsed}, {game.MissionTime:F0} s");
+                yield return Shot("14c_corridor_result");
+
+                game.StartMission(corridor);
+                game.CloseBriefing();
+                depot = game.enemies.Find(e => e.isTarget);
+                nightjar = game.SpawnDrone(DroneType.Bomber);
+                if (nightjar != null && depot != null) nightjar.Attack(depot);
+                for (float t = 0f; t < 60f && game.Result == MissionResult.None; t += 0.5f)
+                {
+                    if (game.Phase == MissionPhase.Extract && nightjar != null) nightjar.MoveTo(game.basePosition);
+                    yield return new WaitForSecondsRealtime(0.5f);
+                }
+                string nightjarState = nightjar != null ? nightjar.hp.ToString("F0") + " hp" : "lost";
+                depotState = depot == null ? "destroyed" : depot.hp.ToString("F0") + " hp";
+                log.WriteLine($"Silent Corridor (Nightjar alone): nightjar {nightjarState}, depot {depotState}, result {game.Result} ({game.ResultReason})");
             }
 
             game.OpenMenu();
