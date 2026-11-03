@@ -118,8 +118,14 @@ namespace DroneSandbox
             var shadows = Get<HDShadowSettings>(profile);
             shadows.maxShadowDistance.Override(350f);
             shadows.cascadeShadowSplitCount.Override(4);
+            // Skylight in the shade: on a clear summer day the open sky lights shadows to about a quarter of full
+            // sun. The sky's own ambient left them near black under the trees, so it counts for more (sunlit
+            // ground barely changes, it's nearly all sun).
+            var indirect = Get<IndirectLightingController>(profile);
+            indirect.indirectDiffuseLightingMultiplier.Override(2f);
+            indirect.reflectionLightingMultiplier.Override(1.2f);
             var ao = Get<ScreenSpaceAmbientOcclusion>(profile);
-            ao.intensity.Override(1f);
+            ao.intensity.Override(0.8f);
             ao.radius.Override(1.5f);
             // Reflections traced on screen for anything about as glossy as wet concrete and up, so the lake (glossy
             // out to the far shore, see Water) mirrors the trees and hills across it, not just the sky.
@@ -134,10 +140,14 @@ namespace DroneSandbox
 
             // The grade: ACES, a little extra contrast, slightly muted colour so foliage doesn't glow, warm
             // highlights over cool shadows, gentle bloom and vignette (values from ChatGPT's review of the renders).
+            // Contrast and the cool tint in the shadows are gentle, and the shadows lifted a touch: ACES already
+            // crushes the darks, and with more the shade under trees went near black and teal from the game camera.
             Get<Tonemapping>(profile).mode.Override(TonemappingMode.ACES);
             var color = Get<ColorAdjustments>(profile);
-            color.contrast.Override(12f);
+            color.contrast.Override(5f);
             color.saturation.Override(-3f);
+            var tones = Get<ShadowsMidtonesHighlights>(profile);
+            tones.shadows.Override(new Vector4(1f, 1f, 1f, 0.12f));
             var bloom = Get<Bloom>(profile);
             bloom.intensity.Override(0.1f);
             bloom.threshold.Override(1.2f);
@@ -147,7 +157,7 @@ namespace DroneSandbox
             var whiteBalance = Get<WhiteBalance>(profile);
             whiteBalance.temperature.Override(0f); // the sky already warms low sun; more turned dawn brown
             var split = Get<SplitToning>(profile);
-            split.shadows.Override(new Color(0.42f, 0.55f, 0.6f));
+            split.shadows.Override(new Color(0.47f, 0.53f, 0.57f));
             split.highlights.Override(new Color(0.75f, 0.62f, 0.48f));
             split.balance.Override(-15f);
         }

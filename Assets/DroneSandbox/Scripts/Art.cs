@@ -111,15 +111,16 @@ namespace DroneSandbox
         }
 
         // Models with _LOD0/_LOD1/_LOD2 meshes get a LOD group from the importer. Trees (three levels): full detail
-        // while the model fills more than about a fifth of the screen's height, the lighter version down to a
-        // twentieth, then the flat billboard; gone when it's a speck. The photo scans (Tools/Blender/import_scans.py)
+        // while the model fills more than about a third of the screen's height (zoomed right in, or photo mode),
+        // the lighter version (half the triangles, the same crown seen from above) down to a twentieth, then the
+        // flat billboard; gone when it's a speck. The photo scans (Tools/Blender/import_scans.py)
         // have no billboard, so their last level has to last until they're a speck: rocks and shrubs (two levels)
         // switch to the decimated mesh below about a seventh of the screen, and small plants (one level) only drop
         // out when they're a few pixels tall.
         static void TuneLods(LODGroup group)
         {
             var lods = group.GetLODs();
-            float[] heights = lods.Length >= 3 ? new[] { 0.22f, 0.05f, 0.003f }
+            float[] heights = lods.Length >= 3 ? new[] { 0.35f, 0.05f, 0.003f }
                 : lods.Length == 2 ? new[] { 0.15f, 0.005f } : new[] { 0.008f };
             for (int i = 0; i < lods.Length && i < heights.Length; i++) lods[i].screenRelativeTransitionHeight = heights[i];
             group.SetLODs(lods);

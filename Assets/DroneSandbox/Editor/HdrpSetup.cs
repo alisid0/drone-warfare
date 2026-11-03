@@ -102,9 +102,11 @@ namespace DroneSandbox.EditorTools
         }
 
         // Cut out by the texture's alpha. Both sides drawn for cards; keepNormals leaves the normals as authored on
-        // the back (grass lit like the ground), otherwise they are mirrored.
+        // the back (grass lit like the ground), otherwise they are mirrored. Leaves and plants take no decals
+        // (scorch marks belong on the ground), which keeps them out of the decals' extra depth pass.
         public static void Cutout(Material m, float cutoff, bool doubleSided, bool keepNormals = false)
         {
+            m.SetFloat("_SupportDecals", 0f);
             m.SetFloat("_AlphaCutoffEnable", 1f);
             m.SetFloat("_AlphaCutoff", cutoff);
             m.SetFloat("_DoubleSidedEnable", doubleSided ? 1f : 0f);

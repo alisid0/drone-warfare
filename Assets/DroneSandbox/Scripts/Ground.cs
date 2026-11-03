@@ -441,8 +441,11 @@ namespace DroneSandbox
         {
             return new[]
             {
-                Layer("meadow", 7f, new Color(0.56f, 0.86f, 0.36f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
-                Layer("lush", 6f, new Color(0.72f, 0.98f, 0.50f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
+                // Both photos are brownish ground with grass through it; the tints make the meadow a sunlit summer
+                // green and the lush grass (in damp hollows, by woods and water) a deeper, bluer green, so from the
+                // game camera, where the texture is a blur, the two read as the light and dark of a real meadow.
+                Layer("meadow", 7f, new Color(0.44f, 0.80f, 0.34f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
+                Layer("lush", 6f, new Color(0.24f, 0.60f, 0.24f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
                 Layer("dirt", 5f, Color.white, new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
                 Layer("rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
             };
@@ -506,6 +509,10 @@ namespace DroneSandbox
                     // Muddy river banks.
                     float dRiver = river.Distance(x, z);
                     if (dRiver < hw + 4f) dirt = Mathf.Max(dirt, 0.9f * (1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw - 0.5f) / 3f)));
+                    // A pale fringe of stones and gravel at the water's edge, in patches, outlining the river from above.
+                    float edgeStones = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRiver - hw - 0.8f) / 1.6f);
+                    if (edgeStones > 0f)
+                        rock = Mathf.Max(rock, edgeStones * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 5f) * 1.8f - 0.45f));
                     // The lake: a stony shore just above the water, and a rocky bed you see through the shallows.
                     float lake = MapLayout.LakeDistance(x, z);
                     if (lake < 3f)
@@ -516,8 +523,12 @@ namespace DroneSandbox
                     }
                     // A few worn patches.
                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
-                    float variation = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.013f + 70f, z * 0.013f + 20f) * 0.7f
-                        + Mathf.PerlinNoise(x * 0.05f + 9f, z * 0.05f + 4f) * 0.3f - 0.45f) * 4f);
+                    // Light and dark grass in big drifts, smaller patches and a fine mottle, so from above a meadow
+                    // has the uneven colour of real grass, and deeper green in the damp along the river and the lake.
+                    float damp = Mathf.Max(1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw) / 16f), 1f - Mathf.SmoothStep(0f, 1f, lake / 14f));
+                    float patches = Mathf.PerlinNoise(x * 0.012f + 70f, z * 0.012f + 20f) * 0.55f
+                        + Mathf.PerlinNoise(x * 0.045f + 9f, z * 0.045f + 4f) * 0.3f + Mathf.PerlinNoise(x * 0.2f + 31f, z * 0.2f + 17f) * 0.15f;
+                    float variation = Mathf.Max(Mathf.SmoothStep(0f, 1f, (patches - 0.42f) * 3.5f), damp * 0.85f);
 
                     // Each layer covers the ones before it.
                     float[] w = new float[4];

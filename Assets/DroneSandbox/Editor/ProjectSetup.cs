@@ -28,9 +28,11 @@ namespace DroneSandbox.EditorTools
             PlayerSettings.defaultScreenHeight = 900;
             PlayerSettings.resizableWindow = true;
             PlayerSettings.runInBackground = true;
+            PlayerSettings.enableFrameTimingStats = true; // CPU and GPU times for the benchmark (Benchmark)
 
             HdrpSetup.UsePipeline();
             CreateBaseMaterials();
+            CreateFieldMaterial();
             CreateTerrainMaterial();
             CreatePostProcessingProfile();
             CreatePhotoFocusProfile();
@@ -70,6 +72,39 @@ namespace DroneSandbox.EditorTools
                 material.SetFloat("_EmissiveExposureWeight", 0f); // glows read the same in any light (see Art.Glow)
                 HdrpSetup.Finish(material);
             }
+        }
+
+        // The farm fields' material (Farmland): the crop's texture repeating every few metres, darkened and
+        // lightened by a detail map the size of the field that Farmland paints at runtime (tramlines, headlands,
+        // patchy growth). Only the detail map's brightness counts, not its normal or smoothness. The neutral map
+        // saved with it keeps HDRP's detail-map shader variant in player builds.
+        static void CreateFieldMaterial()
+        {
+            var shader = HdrpSetup.Lit;
+            if (shader == null) return;
+            string path = Root + "/Textures/DetailNeutral.png";
+            if (!File.Exists(path))
+            {
+                var neutral = new Texture2D(4, 4, TextureFormat.RGBA32, false, true);
+                var grey = new Color32[16];
+                for (int i = 0; i < grey.Length; i++) grey[i] = new Color32(128, 128, 128, 128);
+                neutral.SetPixels32(grey);
+                File.WriteAllBytes(path, neutral.EncodeToPNG());
+                Object.DestroyImmediate(neutral);
+                AssetDatabase.ImportAsset(path);
+            }
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer && importer.sRGBTexture)
+            {
+                importer.sRGBTexture = false;
+                importer.SaveAndReimport();
+            }
+            var material = HdrpSetup.LoadOrCreate(Root + "/Materials/FieldLit.mat", shader);
+            HdrpSetup.Surface(material, 0f, 0f);
+            material.SetTexture("_DetailMap", AssetDatabase.LoadAssetAtPath<Texture2D>(path));
+            material.SetFloat("_DetailAlbedoScale", 1f);
+            material.SetFloat("_DetailNormalScale", 0f);
+            material.SetFloat("_DetailSmoothnessScale", 0f);
+            HdrpSetup.Finish(material);
         }
 
         static void EnsureMaterialsFolder()
@@ -267,7 +302,7 @@ namespace DroneSandbox.EditorTools
             m.SetTexture("Texture2D_E1B0D043", texture);                        // Base Map
             m.SetFloat("Vector1_a5b8b09028ce49a39f4d090894c89e22", 0.4f);        // Alpha Clip Threshold
             m.SetFloat("Vector1_8651797e3e304e108dbd25f9d5a426ba", 0.08f);       // Smoothness Scale
-            m.SetFloat("_GroundFalloff", 0.55f);
+            m.SetFloat("_GroundFalloff", 0.3f);
             m.SetFloat("Wind_Intensity", sway);
             m.SetFloat("Wind_Speed", 6f);
             m.SetFloat("Wind_Wavelength", 14f);
@@ -280,7 +315,7 @@ namespace DroneSandbox.EditorTools
             m.SetFloat("Distance_Fade_End", 600f);
         }
 
-        // Blades of grass growing up from the bottom edge, dark at the root and lighter (some dry) at the tip.
+        // Blades of grass growing up from the bottom edge, darker at the root and lighter (some dry) at the tip.
         // Kind 1 (flowers): a few blades carry a white, yellow or purple flower head. Kind 2 (reeds): tall, thin,
         // nearly straight stems, some topped with a brown cattail.
         static byte[] BladesPng(int kind)
@@ -305,7 +340,9 @@ namespace DroneSandbox.EditorTools
                 float x0 = size * (0.05f + 0.9f * Rand()), height = size * (reeds ? 0.65f + 0.33f * Rand() : 0.4f + 0.55f * Rand());
                 float width = reeds ? 2.5f + 2f * Rand() : 3.5f + 4.5f * Rand();
                 float bend = (Rand() - 0.5f) * size * (reeds ? 0.08f : 0.3f), shade = 0.75f + 0.35f * Rand();
-                var root = new Color(0.09f, 0.15f, 0.05f);
+                // Reeds are dark at the foot; grass and flowers only a little, as from above you look down into
+                // the tussock and a dark heart reads as a hole in the meadow.
+                var root = reeds ? new Color(0.09f, 0.15f, 0.05f) : new Color(0.17f, 0.25f, 0.08f);
                 var tip = reeds
                     ? Color.Lerp(new Color(0.42f, 0.47f, 0.2f), new Color(0.62f, 0.55f, 0.32f), Rand() * 0.6f)
                     : Color.Lerp(new Color(0.34f, 0.47f, 0.13f), new Color(0.58f, 0.57f, 0.25f), Rand() < 0.2f ? 0.8f : Rand() * 0.3f);

@@ -71,6 +71,7 @@ namespace DroneSandbox
             rts = gameObject.AddComponent<RtsController>();
             var hud = gameObject.AddComponent<SandboxHud>();
             rts.Init(this, hud, cam, basePosition + new Vector3(12f, 0f, 12f));
+            gameObject.AddComponent<ShadowFit>().Init(rts);
             hud.Init(this, rts);
             gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
             OpenMenu();

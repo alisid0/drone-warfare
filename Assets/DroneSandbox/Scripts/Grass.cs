@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DroneSandbox
 {
     // Grass and wildflowers on the meadows, and reeds in the shallows, drawn by the terrain as instanced detail
-    // meshes: each clump is three crossed cards with a painted texture of blades (Resources/Materials/Grass,
+    // meshes: each clump is a ring of cards leaning outward with a painted texture of blades (Resources/Materials/Grass,
     // Flowers and Reeds, made by Drone Sandbox > Configure Project). Grass is thick in patches and thin in
     // others, and kept off roads, fields, water, steep rock and the bare ground of the bases.
     public static class Grass
@@ -18,13 +18,13 @@ namespace DroneSandbox
             var reedMaterial = Resources.Load<Material>("Materials/Reeds");
             if (terrain == null || grassMaterial == null || flowerMaterial == null || reedMaterial == null) return;
 
-            var mesh = ClumpMesh();
+            var tussock = ClumpMesh(40f);
             var data = terrain.terrainData;
             data.detailPrototypes = new[]
             {
-                Prototype(Holder("Grass Clump", mesh, grassMaterial, terrain.transform), 0.6f, 1.3f),
-                Prototype(Holder("Flower Clump", mesh, flowerMaterial, terrain.transform), 0.5f, 0.9f),
-                Prototype(Holder("Reed Clump", mesh, reedMaterial, terrain.transform), 2.2f, 3.4f),
+                Prototype(Holder("Grass Clump", tussock, grassMaterial, terrain.transform), 0.6f, 1.3f),
+                Prototype(Holder("Flower Clump", tussock, flowerMaterial, terrain.transform), 0.5f, 0.9f),
+                Prototype(Holder("Reed Clump", ClumpMesh(10f), reedMaterial, terrain.transform), 2.2f, 3.4f),
             };
             data.SetDetailScatterMode(DetailScatterMode.InstanceCountMode);
             data.SetDetailResolution(Resolution, 32);
@@ -96,24 +96,33 @@ namespace DroneSandbox
             return go;
         }
 
-        // Three cards crossed at 60 degrees, 1 m wide and 0.55 m tall. Normals all point up, so the grass is lit
-        // like the ground it grows from instead of going dark on the side facing away from the sun.
-        static Mesh ClumpMesh()
+        // A tussock: five cards standing round the middle and leaning out (grass 40 degrees, reeds nearly upright),
+        // 0.55 m wide and 0.55 m long, so from the game camera above you look onto the blades fanning out, not
+        // along thin crossed cards.
+        // Normals all point up, so the grass is lit like the ground it grows from instead of going dark on the side
+        // facing away from the sun.
+        static Mesh ClumpMesh(float leanDegrees)
         {
-            var vertices = new Vector3[12];
-            var uvs = new Vector2[12];
-            var sway = new Vector2[12]; // for the wind shader (WindFoliage): x a phase per card, y how far it moves
-            var normals = new Vector3[12];
-            var triangles = new int[18];
-            for (int k = 0; k < 3; k++)
+            const int cards = 5;
+            const float width = 0.55f, length = 0.55f, inner = 0.06f;
+            float lean = leanDegrees * Mathf.Deg2Rad;
+            var vertices = new Vector3[cards * 4];
+            var uvs = new Vector2[cards * 4];
+            var sway = new Vector2[cards * 4]; // for the wind shader (WindFoliage): x a phase per card, y how far it moves
+            var normals = new Vector3[cards * 4];
+            var triangles = new int[cards * 6];
+            for (int k = 0; k < cards; k++)
             {
-                float a = k * Mathf.PI / 3f;
-                var half = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.5f;
+                float a = k * 2f * Mathf.PI / cards;
+                var outward = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                var half = new Vector3(-outward.z, 0f, outward.x) * width * 0.5f;
+                var foot = outward * inner;
+                var top = outward * (inner + length * Mathf.Sin(lean)) + Vector3.up * length * Mathf.Cos(lean);
                 int v = k * 4;
-                vertices[v] = -half;
-                vertices[v + 1] = half;
-                vertices[v + 2] = half + Vector3.up * 0.55f;
-                vertices[v + 3] = -half + Vector3.up * 0.55f;
+                vertices[v] = foot - half;
+                vertices[v + 1] = foot + half;
+                vertices[v + 2] = top + half * 1.3f; // a little wider at the top, as the blades spread
+                vertices[v + 3] = top - half * 1.3f;
                 uvs[v] = new Vector2(0f, 0f);
                 uvs[v + 1] = new Vector2(1f, 0f);
                 uvs[v + 2] = new Vector2(1f, 1f);
@@ -121,11 +130,13 @@ namespace DroneSandbox
                 for (int i = 0; i < 4; i++)
                 {
                     normals[v + i] = Vector3.up;
-                    sway[v + i] = new Vector2(k * 0.37f, uvs[v + i].y); // roots stay put, tips sway
+                    sway[v + i] = new Vector2(k * 0.29f, uvs[v + i].y); // roots stay put, tips sway
                 }
                 int t = k * 6;
-                triangles[t] = v; triangles[t + 1] = v + 2; triangles[t + 2] = v + 1;
-                triangles[t + 3] = v; triangles[t + 4] = v + 3; triangles[t + 5] = v + 2;
+                // Wound so the side facing up and in, the one the camera sees from above, is the front: the
+                // shader lights a card's back with its normal flipped, which turned the grass black.
+                triangles[t] = v; triangles[t + 1] = v + 1; triangles[t + 2] = v + 2;
+                triangles[t + 3] = v; triangles[t + 4] = v + 2; triangles[t + 5] = v + 3;
             }
             var mesh = new Mesh { name = "Grass Clump", vertices = vertices, uv = uvs, uv2 = sway, normals = normals, triangles = triangles };
             mesh.RecalculateBounds();

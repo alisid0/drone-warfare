@@ -34,9 +34,12 @@ namespace DroneSandbox
             var river = dam
                 ? Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh(), PoolMesh())
                 : Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh());
-            river.refractionColor = new Color(0.12f, 0.36f, 0.3f);
-            river.scatteringColor = new Color(0.04f, 0.17f, 0.13f);
-            river.absorptionDistance = 2.5f;
+            // Clear, slightly teal water you can see the bed through at the edges, and ripples catching the sky:
+            // from the game camera, looking almost straight down, the darker green it had read as a grassy ditch.
+            river.refractionColor = new Color(0.16f, 0.40f, 0.40f);
+            river.scatteringColor = new Color(0.05f, 0.19f, 0.19f);
+            river.absorptionDistance = 3.5f;
+            river.ripplesWindSpeed = 12f;
             river.largeWindSpeed = dam ? 35f : 18f; // choppy enough below the dam to churn up foam, where the mask lets it
             river.largeChaos = 0.9f;
 
