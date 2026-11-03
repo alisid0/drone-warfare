@@ -30,6 +30,7 @@ namespace DroneSandbox
         Transform body;
         readonly List<Transform> rotors = new List<Transform>();
         readonly List<GameObject> bombModels = new List<GameObject>();
+        readonly List<Renderer> strobes = new List<Renderer>();
         bool returning;    // a bomber out of bombs, on its way home
         float rearmTimer;  // a bomber loading up over its pad
         Vector3 homePad;
@@ -113,7 +114,7 @@ namespace DroneSandbox
             bobOffset = Random.value * 10f;
 
             // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes.
-            var model = Art.TryModel("Drone_" + droneType, body, modelScale);
+            var model = Art.TryModel(droneType == DroneType.Bomber ? "Drone_Nightjar" : "Drone_" + droneType, body, modelScale);
             if (model != null)
             {
                 foreach (var t in model.GetComponentsInChildren<Transform>())
@@ -122,10 +123,41 @@ namespace DroneSandbox
                     if (t.name.StartsWith("Bomb_")) bombModels.Add(t.gameObject);
                 }
                 bombModels.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+                DressModel(model);
             }
             else
             {
                 BuildPrimitiveModel(droneType);
+            }
+        }
+
+        // The model's lights glow (red on the left arms, green on the right, a white strobe on top that blinks), and
+        // the disc over each propeller becomes the faint blur of its spinning blades.
+        void DressModel(GameObject model)
+        {
+            var blur = Resources.Load<Material>("Materials/FX/PropBlur");
+            foreach (var renderer in model.GetComponentsInChildren<Renderer>())
+            {
+                var materials = renderer.sharedMaterials;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    if (materials[i] == null) continue;
+                    switch (materials[i].name)
+                    {
+                        case "LedRed": materials[i] = Art.Shared(new Color(1f, 0.08f, 0.04f), true); break;
+                        case "LedGreen": materials[i] = Art.Shared(new Color(0.1f, 1f, 0.25f), true); break;
+                        case "Strobe":
+                            materials[i] = Art.Shared(Color.white, true);
+                            strobes.Add(renderer);
+                            break;
+                        case "PropBlur":
+                            materials[i] = blur;
+                            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                            renderer.enabled = blur != null;
+                            break;
+                    }
+                }
+                renderer.sharedMaterials = materials;
             }
         }
 
@@ -337,6 +369,9 @@ namespace DroneSandbox
             Vector3 local = transform.InverseTransformDirection(flatVelocity);
             body.localRotation = Quaternion.Euler(local.z / speed * 20f, 0f, -local.x / speed * 20f);
             foreach (var rotor in rotors) rotor.Rotate(body.up, 1800f * dt, Space.World);
+            float beat = Mathf.Repeat(Time.time + bobOffset, 1.3f); // the strobe double-flashes every 1.3 s
+            bool flash = beat < 0.05f || (beat > 0.16f && beat < 0.21f);
+            foreach (var strobe in strobes) strobe.enabled = flash;
         }
 
         // Cruise altitude is above the ground, taking the higher of here and the destination so the drone

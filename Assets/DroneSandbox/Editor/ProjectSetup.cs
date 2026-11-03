@@ -42,6 +42,8 @@ namespace DroneSandbox.EditorTools
             CreatePatchwork();
             CreateDecalMaterial();
             CreatePbrMaterials();
+            CreateBakedMaterials("Wrecks", 0.12f, 0.15f);
+            CreateBakedMaterials("Weathered", 0.3f, 0.2f);
             WeatheringSetup.CreateDamDecals();
             WeatheringSetup.CreateScorchDecal();
             CreateRainMaterial();
@@ -503,6 +505,79 @@ namespace DroneSandbox.EditorTools
                 material.SetTexture("_BaseMap", texture);
                 HdrpSetup.Finish(material, instancing: false);
             }
+            CreatePropBlur();
+        }
+
+        // The faint disc a spinning propeller makes (the Blur_N discs over the drones' props, see Drone.DressModel):
+        // a dark, see-through texture whose U runs from the hub to the tip, densest where the blades are broadest and
+        // with a fainter ring at the tips.
+        static void CreatePropBlur()
+        {
+            string path = Root + "/Textures/FX/PropBlur.png";
+            if (!File.Exists(path))
+            {
+                var texture = new Texture2D(256, 4, TextureFormat.RGBA32, false);
+                for (int x = 0; x < 256; x++)
+                {
+                    float u = x / 255f;
+                    float alpha = Mathf.SmoothStep(0f, 0.2f, Mathf.InverseLerp(0.08f, 0.25f, u)) * Mathf.Lerp(1f, 0.75f, Mathf.InverseLerp(0.3f, 0.85f, u));
+                    alpha += 0.1f * Mathf.Clamp01(1f - Mathf.Abs(u - 0.93f) / 0.04f);
+                    alpha *= Mathf.InverseLerp(1f, 0.97f, u);
+                    for (int y = 0; y < 4; y++) texture.SetPixel(x, y, new Color(0.05f, 0.05f, 0.055f, alpha));
+                }
+                File.WriteAllBytes(path, texture.EncodeToPNG());
+                Object.DestroyImmediate(texture);
+                AssetDatabase.ImportAsset(path);
+            }
+            var material = LoadOrCreateMaterial(Root + "/Materials/FX/PropBlur.mat", HdrpSetup.Lit);
+            HdrpSetup.Albedo(material, EffectTexture("PropBlur.png"), Color.white, Vector2.one);
+            HdrpSetup.Surface(material, 0.2f, 0f);
+            HdrpSetup.Transparent(material);
+            material.SetFloat("_EnableBlendModePreserveSpecularLighting", 0f); // or the whole disc catches the sun
+            HdrpSetup.Finish(material, instancing: false);
+        }
+
+        // The burnt-out wrecks (Tools/Blender/make_wrecks.py, Textures/Wrecks) and the weathered vehicles
+        // (make_weathered.py, Textures/Weathered) each carry one material, named after the model, with its own baked
+        // colour and normal maps, and the weathered ones a mask map (<name>_mask.png) for their metallic, occlusion
+        // and smoothness; without one the whole model gets the smoothness and metallic given here. Made in
+        // Materials/PBR so Art.TryModel swaps it in by name.
+        static void CreateBakedMaterials(string folder, float smoothness, float metallic)
+        {
+            folder = "Assets/DroneSandbox/Textures/" + folder;
+            if (!Directory.Exists(folder)) return;
+            var shader = HdrpSetup.Lit;
+            EnsureMaterialsFolder();
+            if (!AssetDatabase.IsValidFolder(Root + "/Materials/PBR")) AssetDatabase.CreateFolder(Root + "/Materials", "PBR");
+            foreach (string file in Directory.GetFiles(folder, "*_diff.jpg"))
+            {
+                string name = Path.GetFileNameWithoutExtension(file).Replace("_diff", "");
+                var albedo = BakedTexture(folder + "/" + name + "_diff.jpg", TextureImporterType.Default, true);
+                var normal = BakedTexture(folder + "/" + name + "_nor.jpg", TextureImporterType.NormalMap, false);
+                var mask = BakedTexture(folder + "/" + name + "_mask.png", TextureImporterType.Default, false);
+                var material = HdrpSetup.LoadOrCreate(Root + "/Materials/PBR/" + name + ".mat", shader);
+                HdrpSetup.Albedo(material, albedo, Color.white, Vector2.one);
+                HdrpSetup.Surface(material, smoothness, metallic);
+                if (normal != null) HdrpSetup.Normal(material, normal);
+                if (mask != null) HdrpSetup.Mask(material, mask);
+                HdrpSetup.Finish(material);
+            }
+        }
+
+        static Texture2D BakedTexture(string path, TextureImporterType type, bool colour)
+        {
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer)
+            {
+                if (importer.textureType != type || importer.anisoLevel != 8 || importer.sRGBTexture != colour)
+                {
+                    importer.textureType = type;
+                    importer.sRGBTexture = colour; // a mask map holds numbers, not colours
+                    importer.anisoLevel = 8;
+                    importer.maxTextureSize = 2048;
+                    importer.SaveAndReimport();
+                }
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         static Texture2D EffectTexture(string file)

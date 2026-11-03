@@ -129,10 +129,12 @@ namespace DroneSandbox
             hp = maxHp;
             if (enemyType == EnemyType.Command) return; // the HQ building in the world is its model
 
-            // Use the Blender model from Resources/Models if there is one; otherwise primitive shapes. The newer
+            // Use the Blender model from Resources/Models if there is one, muddied and dusty from the field
+            // (Tools/Blender/make_weathered.py) where it has been weathered; otherwise primitive shapes. The newer
             // vehicles (Tools/Blender/make_sectors.py) are built at full size; the game's vehicles are drawn at about
             // half, so they're scaled to match the tanks and trucks.
-            var model = Art.TryModel("Enemy_" + enemyType, transform, ModelScale(enemyType));
+            var model = Art.TryModel("Weathered_" + enemyType, transform, ModelScale(enemyType))
+                ?? Art.TryModel("Enemy_" + enemyType, transform, ModelScale(enemyType));
             if (model != null)
             {
                 foreach (var t in model.GetComponentsInChildren<Transform>())
@@ -159,7 +161,7 @@ namespace DroneSandbox
             if (IsMobile) waypoint = SandboxGame.Instance.RandomEnemyPoint();
         }
 
-        static float ModelScale(EnemyType t) =>
+        public static float ModelScale(EnemyType t) =>
             t == EnemyType.APC || t == EnemyType.Rocket || t == EnemyType.Tanker || t == EnemyType.Jammer ? 0.5f
             : t == EnemyType.Depot ? 0.6f : 1f;
 

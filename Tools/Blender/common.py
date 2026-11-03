@@ -5,7 +5,8 @@ Models face Blender's -Y, which becomes +Z (forward) in Unity after export.
 import math
 
 import bpy
-from mathutils import Vector
+from bpy_extras.io_utils import axis_conversion
+from mathutils import Matrix, Vector
 
 
 # ---------- scene helpers ----------
@@ -112,6 +113,27 @@ def export(root_obj, path):
         add_leaf_bones=False,
         path_mode="AUTO",
     )
+
+
+def export_model(root_obj, path):
+    """common.export, with objects two levels below the root counter-rotated for the export. With
+    bake_space_transform, Blender's FBX exporter writes such an object's local transform as
+    G T^-1 G^-1 T B G^-1 instead of G B G^-1 (T the parent's local matrix, B the object's, G the axis conversion),
+    which turns it 90 degrees about X; giving the object T^-1 G T B for the export cancels that out."""
+    G = axis_conversion(to_forward="-Z", to_up="Y").to_4x4()
+    saved = []
+    for o in root_obj.children_recursive:
+        if o.parent is not None and o.parent is not root_obj:
+            T, B = o.parent.matrix_local.copy(), o.matrix_local.copy()
+            saved.append((o, o.matrix_parent_inverse.copy(), o.matrix_basis.copy()))
+            o.matrix_parent_inverse = Matrix.Identity(4)
+            o.matrix_basis = T.inverted() @ G @ T @ B
+    bpy.context.view_layer.update()
+    export(root_obj, path)
+    for o, pinv, basis_ in saved:
+        o.matrix_parent_inverse = pinv
+        o.matrix_basis = basis_
+    bpy.context.view_layer.update()
 
 
 def hexa(name, corners, mat, parent, bevel=0.02):

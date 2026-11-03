@@ -88,6 +88,19 @@ namespace DroneSandbox.EditorTools
             m.SetFloat("_Metallic", metallic);
         }
 
+        // HDRP's mask map, used as it is: metallic in red, occlusion in green, smoothness in alpha (Surface's
+        // values no longer count).
+        public static void Mask(Material m, Texture texture)
+        {
+            m.SetTexture("_MaskMap", texture);
+            m.SetFloat("_MetallicRemapMin", 0f);
+            m.SetFloat("_MetallicRemapMax", 1f);
+            m.SetFloat("_SmoothnessRemapMin", 0f);
+            m.SetFloat("_SmoothnessRemapMax", 1f);
+            m.SetFloat("_AORemapMin", 0f);
+            m.SetFloat("_AORemapMax", 1f);
+        }
+
         // Cut out by the texture's alpha. Both sides drawn for cards; keepNormals leaves the normals as authored on
         // the back (grass lit like the ground), otherwise they are mirrored.
         public static void Cutout(Material m, float cutoff, bool doubleSided, bool keepNormals = false)

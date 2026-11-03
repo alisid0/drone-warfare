@@ -193,6 +193,7 @@ namespace DroneSandbox
 
             yield return BeautyShots();
             yield return ExplosionShots(game, rts);
+            yield return UnitShots(game, rts);
             yield return EmptyAndRearm(game, rts);
             yield return PlayMissions(game, rts);
             yield return SectorTour(game, rts);
@@ -307,15 +308,104 @@ namespace DroneSandbox
             log.WriteLine($"Explosions at {spot}: shots done, {FindObjectsByType<Effects>().Length} effects alive");
         }
 
-        // The nearest dry spot (going out in rings) with no tree within 25 m, so the camera sees the ground.
-        static Vector3 OpenGroundNear(Vector3 from)
+        // The wreck of every kind of vehicle in a line-up, once their fires are out, then each close up; and each drone
+        // close up in flight (lights, propeller blur) and all four from the RTS camera. The vehicles are wrecked
+        // straight away rather than killed, so nothing respawns here later.
+        IEnumerator UnitShots(SandboxGame game, RtsController rts)
+        {
+            Vector3 spot = Ground.OnGround(OpenGroundNear(game.basePosition, 70f)); // well clear of trees and their shadows
+            var kinds = new[] { EnemyType.Tank, EnemyType.APC, EnemyType.Truck, EnemyType.Tanker, EnemyType.Rocket,
+                                EnemyType.Jammer, EnemyType.AAGun, EnemyType.Radar, EnemyType.Artillery, EnemyType.Depot };
+            var spots = new Vector3[kinds.Length];
+            var parked = new EnemyUnit[kinds.Length];
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                spots[i] = Ground.OnGround(spot + new Vector3((i % 5 - 2) * 8f, 0f, (i / 5 - 0.5f) * 9f));
+                parked[i] = game.SpawnEnemy(kinds[i], spots[i], 30f + i * 25f);
+                parked[i].enabled = false; // parked for the camera: no driving off, no shooting
+            }
+            rts.LookAt(spot, 45f, 20f);
+            yield return new WaitForSeconds(1f);
+            yield return Shot("53_vehicles_all");
+            rts.enabled = false; // hold the camera by hand for the close-ups
+            var cam = Camera.main.transform;
+            Light sun = null; // the brightest directional light (the moon's is off by day)
+            foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
+                if (light.type == LightType.Directional && light.isActiveAndEnabled && (sun == null || light.intensity > sun.intensity)) sun = light;
+            Vector3 sunward = sun != null ? Vector3.ProjectOnPlane(-sun.transform.forward, Vector3.up).normalized : Vector3.back;
+            sunward = Quaternion.Euler(0f, 30f, 0f) * sunward; // a little off the sun's line, so the shading shows the shapes
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                var bounds = new Bounds(spots[i], Vector3.zero);
+                foreach (var r in parked[i].GetComponentsInChildren<Renderer>()) bounds.Encapsulate(r.bounds);
+                float reach = Mathf.Max(4f, bounds.extents.magnitude * 2.2f);
+                cam.position = bounds.center + sunward * reach + Vector3.up * reach * 0.6f; // low, from the sunny side, to see the mud
+                cam.LookAt(bounds.center);
+                yield return new WaitForEndOfFrame();
+                yield return Shot($"53_vehicle_{kinds[i]}");
+            }
+            rts.enabled = true;
+
+            foreach (var enemy in parked) // then the same vehicles as wrecks
+            {
+                Effects.Wreck(enemy);
+                game.enemies.Remove(enemy);
+                Destroy(enemy.gameObject);
+            }
+            rts.LookAt(spot, 45f, 20f);
+            yield return new WaitForSeconds(13f); // flames out, smoke gone
+            yield return Shot("54_wrecks_all");
+            rts.enabled = false;
+            for (int i = 0; i < kinds.Length; i++)
+            {
+                cam.position = spots[i] + Quaternion.Euler(0f, 35f, 0f) * new Vector3(0f, 10f, -4.5f); // steeply down, under the canopies' reach
+                cam.LookAt(spots[i] + Vector3.up * 0.5f);
+                yield return new WaitForEndOfFrame();
+                yield return Shot($"55_wreck_{kinds[i]}");
+            }
+            rts.enabled = true;
+
+            var types = new[] { DroneType.Scout, DroneType.Strike, DroneType.Kamikaze, DroneType.Bomber };
+            var flying = new List<Drone>();
+            foreach (var type in types)
+            {
+                var drone = game.SpawnDrone(type);
+                if (drone == null) continue;
+                drone.MoveTo(spot + new Vector3((flying.Count - 1.5f) * 6f, 0f, 0f));
+                flying.Add(drone);
+            }
+            yield return new WaitForSeconds(6f);
+            rts.LookAt(spot, 25f, 20f);
+            yield return new WaitForSeconds(0.3f);
+            yield return Shot("57_drones_rts");
+            rts.enabled = false;
+            foreach (var drone in flying)
+            {
+                float reach = drone.radius * 3.2f;
+                Vector3 at = drone.transform.position;
+                cam.position = at + Quaternion.Euler(0f, 150f, 0f) * new Vector3(0f, reach * 0.8f, reach * 0.8f); // from above, the field behind
+                cam.LookAt(at);
+                yield return new WaitForEndOfFrame();
+                yield return Shot($"56_drone_{drone.type}");
+            }
+            rts.enabled = true;
+            log.WriteLine($"Units: {kinds.Length} vehicles and wrecks, {flying.Count} drones shot");
+            foreach (var drone in flying)
+            {
+                game.drones.Remove(drone);
+                Destroy(drone.gameObject);
+            }
+        }
+
+        // The nearest dry spot (going out in rings) with no tree within clearance metres, so the camera sees the ground.
+        static Vector3 OpenGroundNear(Vector3 from, float clearance = 25f)
         {
             for (float reach = 30f; reach < 300f; reach += 15f)
                 for (float angle = 0f; angle < 360f; angle += 20f)
                 {
                     var p = new Vector2(from.x, from.z) + new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
                     bool dry = MapLayout.LakeDistance(p.x, p.y) > 10f && MapLayout.RiverField.Distance(p.x, p.y) > MapLayout.RiverHalfWidth + 8f;
-                    if (dry && !Undergrowth.UnderTrees(p, 25f)) return new Vector3(p.x, 0f, p.y);
+                    if (dry && !Undergrowth.UnderTrees(p, clearance)) return new Vector3(p.x, 0f, p.y);
                 }
             return from;
         }

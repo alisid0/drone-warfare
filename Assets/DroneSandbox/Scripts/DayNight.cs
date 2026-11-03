@@ -210,6 +210,7 @@ namespace DroneSandbox
             foreach (var r in unit.GetComponentsInChildren<Renderer>(true))
             {
                 if (cooled.ContainsKey(r)) continue;
+                if (r.sharedMaterial != null && r.sharedMaterial.name == "PropBlur") continue; // the blur of a drone's props
                 cooled[r] = r.sharedMaterials;
                 var materials = new Material[r.sharedMaterials.Length];
                 for (int i = 0; i < materials.Length; i++) materials[i] = hot;

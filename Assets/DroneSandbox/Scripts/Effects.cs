@@ -463,16 +463,17 @@ namespace DroneSandbox
             burned.Clear();
         }
 
-        // Burnt-out hull that burns, then smokes for a while, then sinks into the ground: the unit's own model,
-        // blackened and knocked askew, or a dark slab if it has none.
+        // Burnt-out hull that burns, then smokes for a while, then sinks into the ground: the vehicle's wreck model
+        // (Tools/Blender/make_wrecks.py: blown apart, crumpled and baked with soot, rust and ash), or else its own
+        // model blackened and knocked askew, or a dark slab if it has neither.
         public static void Wreck(EnemyUnit enemy)
         {
             Vector3 at = enemy.transform.position;
             var go = new GameObject("Wreck");
-            go.transform.SetPositionAndRotation(at, enemy.transform.rotation * Quaternion.Euler(Random.Range(-5f, 5f), 0f, Random.Range(-7f, 7f)));
-            var model = Art.TryModel("Enemy_" + enemy.type, go.transform);
-            Effects fx;
-            if (model != null)
+            go.transform.SetPositionAndRotation(at, enemy.transform.rotation * Quaternion.Euler(Random.Range(-3f, 3f), 0f, Random.Range(-4f, 4f)));
+            float scale = EnemyUnit.ModelScale(enemy.type);
+            var model = Art.TryModel("Wreck_" + enemy.type, go.transform, scale);
+            if (model == null && (model = Art.TryModel("Enemy_" + enemy.type, go.transform, scale)) != null)
             {
                 foreach (var renderer in model.GetComponentsInChildren<Renderer>())
                 {
@@ -482,6 +483,10 @@ namespace DroneSandbox
                 }
                 var turret = model.transform.Find("Turret") ?? FindDeep(model.transform, "Turret");
                 if (turret != null) turret.localRotation *= Quaternion.Euler(0f, Random.Range(-60f, 60f), 0f);
+            }
+            Effects fx;
+            if (model != null)
+            {
                 fx = go.AddComponent<Effects>();
                 fx.life = 28f;
             }
