@@ -22,8 +22,8 @@ namespace DroneSandbox
             var data = terrain.terrainData;
             data.detailPrototypes = new[]
             {
-                Prototype(Holder("Grass Clump", tussock, grassMaterial, terrain.transform), 0.6f, 1.3f),
-                Prototype(Holder("Flower Clump", tussock, flowerMaterial, terrain.transform), 0.5f, 0.9f),
+                Prototype(Holder("Grass Clump", tussock, grassMaterial, terrain.transform), 0.45f, 0.9f),
+                Prototype(Holder("Flower Clump", tussock, flowerMaterial, terrain.transform), 0.4f, 0.75f),
                 Prototype(Holder("Reed Clump", ClumpMesh(10f), reedMaterial, terrain.transform), 2.2f, 3.4f),
             };
             data.SetDetailScatterMode(DetailScatterMode.InstanceCountMode);
@@ -52,9 +52,10 @@ namespace DroneSandbox
                     if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;
                     if (MapLayout.NearFlatSite(p, -1f) || MapLayout.InField(p, 0.3f) || MapLayout.OnWorks(p, -2f)) continue;
 
-                    // Clumped: thick tussocks in some places, short sparse grass in others.
-                    float n = Mathf.PerlinNoise(x * 0.08f + 7f, z * 0.08f + 3f) * 0.7f + Mathf.PerlinNoise(x * 0.31f, z * 0.31f + 50f) * 0.3f;
-                    grass[zi, xi] = n < 0.3f ? 0 : n < 0.45f ? 1 : n < 0.6f ? 2 : 3;
+                    // Clumped in patches 6-18 m across with open ground between (about two cells in five bare), so
+                    // from above the meadow is calm, with tussocks where they gather rather than an even stipple.
+                    float n = Mathf.PerlinNoise(x * 0.085f + 7f, z * 0.085f + 3f) * 0.75f + Mathf.PerlinNoise(x * 0.31f, z * 0.31f + 50f) * 0.25f;
+                    grass[zi, xi] = n < 0.47f ? 0 : n < 0.6f ? 1 : 2;
                     float bloom = Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 11f);
                     if (bloom > 0.62f && Mathf.PerlinNoise(x * 0.9f, z * 0.9f) > 0.55f) flowers[zi, xi] = 1;
                 }

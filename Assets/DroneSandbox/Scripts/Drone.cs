@@ -12,6 +12,7 @@ namespace DroneSandbox
     public class Drone : Unit
     {
         public const int BomberLoad = 3;
+        public const int StrikeLoad = 4; // missiles a Strike drone carries before it flies home to reload
         const float RearmSeconds = 15f;
         const float BombHitMoving = 0.7f, BombHitStill = 0.95f; // odds a bomb lands on target
 
@@ -36,13 +37,16 @@ namespace DroneSandbox
         readonly List<Transform> rotors = new List<Transform>();
         readonly List<GameObject> bombModels = new List<GameObject>();
         readonly List<Renderer> strobes = new List<Renderer>();
-        bool returning;    // a bomber out of bombs, on its way home
+        bool returning;    // a bomber out of bombs (or a Strike drone out of missiles), on its way home
         float rearmTimer;  // a bomber loading up over its pad
         Vector3 homePad;
 
         public bool IsKamikaze => type == DroneType.Kamikaze;
         public bool IsBomber => type == DroneType.Bomber;
         public int BombsLeft { get; private set; }
+        public int MissilesLeft { get; private set; }
+        bool OutOfAmmo => (IsBomber && BombsLeft == 0) || (type == DroneType.Strike && MissilesLeft == 0);
+        float RearmTime => IsBomber ? RearmSeconds : 10f;
         public Unit AttackTarget => attackTarget;
         public Vector3? MoveTarget => moveTarget;
         public IReadOnlyList<Vector3> Waypoints => waypoints;
@@ -56,7 +60,7 @@ namespace DroneSandbox
             get
             {
                 if (IsJammed) return "JAMMED";
-                if (IsBomber && BombsLeft == 0) return returning ? "RETURNING" : "REARMING";
+                if (OutOfAmmo) return returning ? "RETURNING" : "REARMING";
                 if (UnderFire) return "UNDER FIRE";
                 if (attackTarget != null) return IsKamikaze ? "DIVING" : IsBomber ? "BOMBING" : "ATTACKING";
                 if (moveTarget.HasValue) return attackMove ? "ATTACK-MOVE" : "MOVING";
@@ -72,7 +76,7 @@ namespace DroneSandbox
             get
             {
                 if (IsJammed) return "Jammed: link lost";
-                if (IsBomber && BombsLeft == 0) return returning ? "Returning to rearm" : $"Rearming ({Mathf.CeilToInt(rearmTimer)} s)";
+                if (OutOfAmmo) return returning ? "Returning to rearm" : $"Rearming ({Mathf.CeilToInt(rearmTimer)} s)";
                 string fire = UnderFire ? "Under fire - " : "";
                 string queued = waypoints.Count > 0 ? $" (+{waypoints.Count} queued)" : "";
                 if (attackTarget != null) return fire + (IsKamikaze ? "Diving on " : IsBomber ? "Bombing " : "Attacking ") + attackTarget.unitName + queued;
@@ -104,14 +108,15 @@ namespace DroneSandbox
                 case DroneType.Scout:
                     unitName = "Scout";
                     maxHp = 40f; speed = 16f; altitude = 7f; radius = 0.8f;
-                    weaponRange = 11f; weaponDamage = 5f; fireInterval = 0.25f;
+                    weaponRange = 11f; weaponDamage = 3.5f; fireInterval = 0.25f; // a truck takes 4-7 s of fire; armour shrugs it off
                     modelScale = 1.6f;
                     break;
 
                 case DroneType.Strike:
                     unitName = "Strike";
                     maxHp = 70f; speed = 10f; altitude = 9f; radius = 1.1f;
-                    weaponRange = 20f; weaponDamage = 45f; fireInterval = 2.2f;
+                    weaponRange = 20f; weaponDamage = 75f; fireInterval = 2.2f; // one missile kills a light vehicle
+                    MissilesLeft = StrikeLoad;
                     modelScale = 1.4f;
                     break;
 
@@ -240,7 +245,7 @@ namespace DroneSandbox
         // ---- Orders ----
 
         // A bomber out of bombs ignores orders until it has rearmed.
-        bool BusyRearming => IsBomber && BombsLeft == 0;
+        bool BusyRearming => OutOfAmmo;
 
         // A move order. queue adds it after the moves already given (Shift); attackMove engages anything that
         // comes in range on the way (Ctrl), then carries on.
@@ -470,7 +475,7 @@ namespace DroneSandbox
                 if (flat.magnitude < 1f)
                 {
                     returning = false;
-                    rearmTimer = RearmSeconds;
+                    rearmTimer = RearmTime;
                 }
                 Fly(new Vector3(pad.x, CruiseHeight(pad), pad.z), false, dt);
                 return;
@@ -478,8 +483,12 @@ namespace DroneSandbox
             rearmTimer -= dt;
             Fly(pad + Vector3.up * 1.6f, false, dt);
             if (rearmTimer > 0f) return;
-            BombsLeft = BomberLoad;
-            foreach (var bomb in bombModels) bomb.SetActive(true);
+            if (IsBomber)
+            {
+                BombsLeft = BomberLoad;
+                foreach (var bomb in bombModels) bomb.SetActive(true);
+            }
+            else MissilesLeft = StrikeLoad;
         }
 
         void DropBomb()
@@ -490,6 +499,12 @@ namespace DroneSandbox
             Projectile.Bomb(transform.position + Vector3.down * 0.7f, attackTarget, team, weaponDamage, 4.5f, velocity, hitChance);
             Sound.At("whistle", transform.position, 0.8f, 0.03f);
             if (BombsLeft > 0) return;
+            GoRearm();
+        }
+
+        // Out of ammunition: drop everything and fly home to reload.
+        void GoRearm()
+        {
             returning = true;
             attackTarget = null;
             moveTarget = null;
@@ -513,6 +528,7 @@ namespace DroneSandbox
             {
                 Projectile.Missile(muzzle, attackTarget, team, weaponDamage, 3f, transform.forward);
                 Sound.At("missile", muzzle);
+                if (--MissilesLeft == 0) GoRearm();
             }
         }
 

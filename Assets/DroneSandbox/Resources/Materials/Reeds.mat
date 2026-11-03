@@ -43,6 +43,7 @@ Material:
   - TransparentDepthPostpass
   - TransparentBackface
   - RayTracingPrepass
+  - SHADOWCASTER
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -202,8 +203,8 @@ Material:
     m_Ints: []
     m_Floats:
     - Animation_Cutoff: 400
-    - Distance_Fade_End: 600
-    - Distance_Fade_Start: 500
+    - Distance_Fade_End: 110
+    - Distance_Fade_Start: 60
     - Vector1_593c5cea6c4a42e993ed03ced4685732: 0.5
     - Vector1_8651797e3e304e108dbd25f9d5a426ba: 0.08
     - Vector1_a5b8b09028ce49a39f4d090894c89e22: 0.4

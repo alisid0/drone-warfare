@@ -28,6 +28,7 @@ namespace DroneSandbox
         public List<Vector3> convoyRoute;  // where convoy units drive; a target reaching its end fails the mission
         public string escapeFailure = "A target got away.";
         public string key;                 // where its best stars are saved (the Asset Hunt missions use their number)
+        public float contactRadius = 14f;  // how roughly the briefing places the vehicles (metres)
 
         // The mission's own drones (the tech shop can add more; see SandboxGame.MissionStock).
         public int Stock(DroneType type)
@@ -67,30 +68,31 @@ namespace DroneSandbox
             var firstLight = new Mission
             {
                 name = "First Light",
-                briefing = "A villager reports three Dravin supply trucks parked by the south road toward Tolbeck: the grey ? marks " +
-                           "are rough positions. RECON: launch a Scout [1] and fly it over them to find them. STRIKE: send Kamikazes [3] " +
-                           "at each truck. An AA gun covers the direct route (red ring): Shift + right-click to fly around it. " +
-                           "EXTRACT: bring the Scouts home (B). Drones lost cost you stars.",
-                scouts = 2, strikes = 0, kamikazes = 4, par = 5, startHour = 5.7f,
+                briefing = "Villagers report Dravin supply trucks parked somewhere along the south road: the grey circles are all we know. " +
+                           "Find them [1 Scout], destroy them [3 Kamikaze], and bring the Scouts home. A known AA gun covers the direct route.",
+                scouts = 2, strikes = 0, kamikazes = 4, par = 5, startHour = 5.7f, contactRadius = 30f,
                 cameraFocus = new Vector3(-28f, 0f, -48f), cameraYaw = 70f, cameraDistance = 85f,
             };
             Add(firstLight, EnemyType.Truck, 14f, -35f, 30f, target: true);
             Add(firstLight, EnemyType.Truck, 18f, -41f, 45f, target: true);
-            Add(firstLight, EnemyType.Truck, 11f, -45f, 20f, target: true);
+            Add(firstLight, EnemyType.Truck, 24f, -80f, 190f, target: true); // a second stop further down the road
             Add(firstLight, EnemyType.AAGun, -20f, -47f, 120f);
             list.Add(firstLight);
 
             var openSky = new Mission
             {
                 name = "Open the Sky",
-                briefing = "A Dravin AA gun guards the crossroads, and a radar beside it stretches the gun's reach. " +
-                           "Destroy both. Hit the radar first, then Strike drones can outrange the AA gun.",
-                scouts = 1, strikes = 2, kamikazes = 3, par = 3, startHour = 12.5f,
+                briefing = "A Dravin AA gun guards the crossroads, a radar beside it stretches the gun's reach, and two tanks are " +
+                           "parked under their cover. Destroy all four. A Scout's gun can't hurt armour: kill the radar, then the " +
+                           "Strike drones outrange the gun - or risk Kamikazes through its fire.",
+                scouts = 2, strikes = 2, kamikazes = 3, par = 5, startHour = 12.5f,
                 cameraFocus = new Vector3(-35f, 0f, -35f), cameraYaw = 55f, cameraDistance = 80f,
             };
             Add(openSky, EnemyType.AAGun, -10f, -5f, 200f, target: true);
             Add(openSky, EnemyType.Radar, 2f, 6f, 0f, target: true);
             Add(openSky, EnemyType.Truck, -1f, 15f, 120f);
+            Add(openSky, EnemyType.Tank, 4f, -14f, 200f, target: true);
+            Add(openSky, EnemyType.Tank, -3f, -20f, 230f, target: true);
             list.Add(openSky);
 
             var hiddenGuns = new Mission

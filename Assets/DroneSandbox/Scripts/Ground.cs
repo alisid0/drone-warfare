@@ -529,6 +529,8 @@ namespace DroneSandbox
                     float patches = Mathf.PerlinNoise(x * 0.012f + 70f, z * 0.012f + 20f) * 0.55f
                         + Mathf.PerlinNoise(x * 0.045f + 9f, z * 0.045f + 4f) * 0.3f + Mathf.PerlinNoise(x * 0.2f + 31f, z * 0.2f + 17f) * 0.15f;
                     float variation = Mathf.Max(Mathf.SmoothStep(0f, 1f, (patches - 0.42f) * 3.5f), damp * 0.85f);
+                    // A verge of rank, darker grass round each field, where the plough doesn't reach.
+                    if (MapLayout.InField(new Vector2(x, z), 2.2f) && !MapLayout.InField(new Vector2(x, z), 0f)) variation = Mathf.Max(variation, 0.9f);
 
                     // Each layer covers the ones before it.
                     float[] w = new float[4];

@@ -291,12 +291,14 @@ namespace DroneSandbox.EditorTools
                     HdrpSetup.Surface(material, 0.08f, 0f);
                     HdrpSetup.Cutout(material, 0.4f, doubleSided: true, keepNormals: true);
                 }
+                // No shadows from the tufts: in a low sun, leaning cards shaded each other black.
+                material.SetShaderPassEnabled("ShadowCaster", false);
                 HdrpSetup.Finish(material);
             }
         }
 
         // The WindFoliage settings (the graph's own property names). The clumps are 0.55 m tall, so their tips get the
-        // full sway; reeds, taller and stiffer, sway less. No distance fade: the terrain stops drawing grass at 120 m.
+        // full sway; reeds, taller and stiffer, sway less. Each fades out between 60 and 110 m from the camera.
         static void WindFoliage(Material m, Texture texture, float sway)
         {
             m.SetTexture("Texture2D_E1B0D043", texture);                        // Base Map
@@ -311,8 +313,9 @@ namespace DroneSandbox.EditorTools
             m.SetFloat("Wind_Turbulence", 0.2f);
             m.SetFloat("Wind_Yaw", 200f);
             m.SetFloat("Animation_Cutoff", 400f);
-            m.SetFloat("Distance_Fade_Start", 500f);
-            m.SetFloat("Distance_Fade_End", 600f);
+            // Tufts fade into the ground with distance, so zoomed out the meadow reads as colour, not specks.
+            m.SetFloat("Distance_Fade_Start", 60f);
+            m.SetFloat("Distance_Fade_End", 110f);
         }
 
         // Blades of grass growing up from the bottom edge, darker at the root and lighter (some dry) at the tip.
@@ -342,10 +345,10 @@ namespace DroneSandbox.EditorTools
                 float bend = (Rand() - 0.5f) * size * (reeds ? 0.08f : 0.3f), shade = 0.75f + 0.35f * Rand();
                 // Reeds are dark at the foot; grass and flowers only a little, as from above you look down into
                 // the tussock and a dark heart reads as a hole in the meadow.
-                var root = reeds ? new Color(0.09f, 0.15f, 0.05f) : new Color(0.17f, 0.25f, 0.08f);
+                var root = reeds ? new Color(0.09f, 0.15f, 0.05f) : new Color(0.24f, 0.33f, 0.11f);
                 var tip = reeds
                     ? Color.Lerp(new Color(0.42f, 0.47f, 0.2f), new Color(0.62f, 0.55f, 0.32f), Rand() * 0.6f)
-                    : Color.Lerp(new Color(0.34f, 0.47f, 0.13f), new Color(0.58f, 0.57f, 0.25f), Rand() < 0.2f ? 0.8f : Rand() * 0.3f);
+                    : Color.Lerp(new Color(0.40f, 0.53f, 0.17f), new Color(0.62f, 0.60f, 0.29f), Rand() < 0.2f ? 0.8f : Rand() * 0.3f);
                 for (int y = 0; y < height; y++)
                 {
                     float t = y / height;
@@ -881,7 +884,74 @@ namespace DroneSandbox.EditorTools
                 HdrpSetup.Finish(material);
             }
             CreateLeafCardMaterials(shader, folder);
+            CreateCamoMaterials(shader, folder);
             CreateScanMaterials(shader, folder);
+        }
+
+        // Camouflage nets (the Blender models' CamoNet, CamoNetA and CamoNetB): a woven net in four muted tones in
+        // patches 0.3-0.9 m across, with scrim garnish knotted on and holes between, cut out by the alpha so the
+        // shape under it still shows through a little. One 2 m tile, a different tint for each net material.
+        static void CreateCamoMaterials(Shader shader, string folder)
+        {
+            string path = PbrTextures + "/camo_net.png";
+            if (!File.Exists(path))
+            {
+                File.WriteAllBytes(path, CamoNetPng());
+                AssetDatabase.ImportAsset(path);
+            }
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer && !importer.alphaIsTransparency)
+            {
+                importer.alphaIsTransparency = true;
+                importer.mipMapsPreserveCoverage = true;
+                importer.alphaTestReferenceValue = 0.4f;
+                importer.SaveAndReimport();
+            }
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            foreach (var (name, tint) in new[] { ("CamoNet", new Color(0.9f, 0.95f, 0.85f)), ("CamoNetA", new Color(0.85f, 0.9f, 0.8f)), ("CamoNetB", new Color(1f, 0.95f, 0.85f)) })
+            {
+                var material = HdrpSetup.LoadOrCreate(folder + "/" + name + ".mat", shader);
+                HdrpSetup.Albedo(material, texture, tint, Vector2.one / 2f);
+                HdrpSetup.Surface(material, 0.05f, 0f);
+                HdrpSetup.Cutout(material, 0.4f, doubleSided: true);
+                HdrpSetup.Finish(material);
+            }
+        }
+
+        static byte[] CamoNetPng()
+        {
+            const int size = 512; // 2 m
+            var tones = new[] { new Color(0.13f, 0.16f, 0.07f), new Color(0.29f, 0.33f, 0.15f), new Color(0.33f, 0.27f, 0.14f), new Color(0.47f, 0.44f, 0.28f) };
+            var pixels = new Color32[size * size];
+            float Tile(float u, float v, float scale, float seed)
+            {
+                // Tileable noise: blend the four wrapped copies so the 2 m tile repeats seamlessly.
+                float a = Mathf.PerlinNoise(u * scale + seed, v * scale + seed), b = Mathf.PerlinNoise((u - 1f) * scale + seed, v * scale + seed);
+                float c = Mathf.PerlinNoise(u * scale + seed, (v - 1f) * scale + seed), d = Mathf.PerlinNoise((u - 1f) * scale + seed, (v - 1f) * scale + seed);
+                return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
+            }
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (x + 0.5f) / size, v = (y + 0.5f) / size;
+                    // Patches 0.3-0.9 m: two scales of noise pick one of four tones.
+                    float n = Tile(u, v, 3f, 11f) * 0.65f + Tile(u, v, 7f, 37f) * 0.35f;
+                    var colour = tones[Mathf.Clamp((int)(n * 5f - 0.6f), 0, 3)];
+                    // The net: diagonal cords 10 cm apart, and garnish strips tied on in clumps.
+                    float cu = Mathf.Abs(Mathf.Repeat((u + v) * 20f, 1f) - 0.5f), cv = Mathf.Abs(Mathf.Repeat((u - v) * 20f, 1f) - 0.5f);
+                    bool cord = Mathf.Min(cu, cv) < 0.05f;
+                    bool garnish = Tile(u, v, 12f, 73f) * 0.7f + Tile(u, v, 30f, 5f) * 0.3f > 0.53f;
+                    float shade = 0.85f + 0.3f * Tile(u, v, 24f, 91f);
+                    float alpha = garnish ? 1f : cord ? 0.9f : 0f;
+                    pixels[y * size + x] = new Color(colour.r * shade, colour.g * shade, colour.b * shade, alpha);
+                }
+            }
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            byte[] png = texture.EncodeToPNG();
+            Object.DestroyImmediate(texture);
+            return png;
         }
 
         const float ScanCutoff = 0.5f; // Poly Haven's own alpha cutoff for its plant scans

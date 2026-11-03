@@ -51,11 +51,16 @@ namespace DroneSandbox
             if (showHelp && !helpPinned && (orderGiven || Time.unscaledTime - playStartedAt > 15f)) showHelp = false;
         }
 
+        float SymbolSize => Mathf.Lerp(22f, 32f, Strategic) * Scale;
+
         void DrawTactical()
         {
+            PlaceSymbols(SymbolSize);
             DrawIntentLines();
             DrawAcknowledgements();
             DrawDroneSymbols();
+            DrawThreats();
+            DrawExtraction();
         }
 
         // ---- Drones ----
@@ -64,10 +69,11 @@ namespace DroneSandbox
         {
             float s = Scale;
             float show = Mathf.InverseLerp(20f, 32f, rts.Distance); // the symbol fades in as the models get small
-            float size = Mathf.Lerp(22f, 32f, Strategic) * s;
+            float size = SymbolSize;
             foreach (var d in game.drones)
             {
-                if (d == null || !ToGui(d.AimPoint, out Vector2 c)) continue;
+                if (d == null || !ToGui(d.AimPoint, out Vector2 real)) continue;
+                Vector2 c = show > 0.01f && symbolAt.TryGetValue(d, out Vector2 placed) ? placed : real;
                 bool isSelected = rts.selected.Contains(d);
                 float half = PixelRadius(d.AimPoint, d.radius);
                 float hit = Mathf.Clamp01(1f - (Time.time - d.LastHitTime) / 0.6f);
@@ -80,7 +86,7 @@ namespace DroneSandbox
                     Symbol(c, Heading(d), size, DroneIcon(d.type), colour);
                     if (isSelected) Ring(c, size * 0.78f, new Color(1f, 1f, 1f, 0.85f * show));
                 }
-                if (isSelected && show < 0.99f) Brackets(c, half, new Color(Friendly.r, Friendly.g, Friendly.b, 1f - show));
+                if (isSelected && show < 0.99f) Brackets(real, half, new Color(Friendly.r, Friendly.g, Friendly.b, 1f - show));
                 float below = Mathf.Max(size * 0.5f * show, half) + 6f * s;
                 HealthBar(new Vector2(c.x, c.y + below), d.hp / d.maxHp, hit > 0f ? Amber : Teal);
                 // The word under it: for a few selected drones always, for a big group only when it's news.
@@ -119,38 +125,85 @@ namespace DroneSandbox
 
         // ---- Intent and acknowledgement ----
 
-        // For each selected drone: a dashed line marching toward its move point (ending in a small ring), or a
-        // line to the enemy it's attacking (ending in a diamond).
+        // The plan: for each drone attacking, a line to its target ending in a diamond; for drones on the move, one
+        // route per squad (drones heading for the same place with the same queue), from the squad's middle through
+        // numbered waypoints, marching toward where it's going, amber for an attack-move. Selected drones only,
+        // except in a tactical pause, when every drone's plan shows.
         void DrawIntentLines()
         {
             float s = Scale;
-            foreach (var d in rts.selected)
+            var who = game.Paused ? game.drones : rts.selected;
+            var squads = new Dictionary<Vector3Int, List<Drone>>();
+            foreach (var d in who)
             {
-                if (d == null || !ToGui(d.AimPoint, out Vector2 from)) continue;
+                if (d == null) continue;
+                Vector2 from = symbolAt.TryGetValue(d, out Vector2 p) ? p : Vector2.zero;
+                if (from == Vector2.zero && !ToGui(d.AimPoint, out from)) continue;
                 if (d.AttackTarget != null && d.AttackTarget.IsAlive)
                 {
                     if (!ToGui(d.AttackTarget.AimPoint, out Vector2 to)) continue;
                     var colour = new Color(DravinOrange.r, DravinOrange.g, DravinOrange.b, 0.75f);
                     Dashes(from, to, colour, 1.5f * s, 10f * s, 0f, 0f);
                     Diamond(to, 9f * s, colour);
+                    continue;
                 }
-                else if (d.MoveTarget.HasValue)
+                if (!d.MoveTarget.HasValue) continue;
+                Vector3 m = d.MoveTarget.Value;
+                var key = new Vector3Int(Mathf.RoundToInt(m.x / 10f), Mathf.RoundToInt(m.z / 10f), d.Waypoints.Count * 2 + (d.AttackMoving ? 1 : 0));
+                if (!squads.TryGetValue(key, out var squad)) squads[key] = squad = new List<Drone>();
+                squad.Add(d);
+            }
+            foreach (var squad in squads.Values)
+            {
+                Vector2 start = Vector2.zero;
+                int counted = 0;
+                foreach (var d in squad)
+                    if (symbolAt.TryGetValue(d, out Vector2 p)) { start += p; counted++; }
+                if (counted == 0) continue;
+                start /= counted;
+                var lead = squad[0];
+                Color colour = lead.AttackMoving ? Amber : Teal;
+                int legs = 1 + lead.Waypoints.Count;
+                Vector2 at = start;
+                for (int i = 0; i < legs; i++)
                 {
-                    // The route: on to the move point, then each queued waypoint. Amber for an attack-move.
-                    Color colour = d.AttackMoving ? Amber : Teal;
-                    colour.a = 0.8f;
-                    Vector2 at = from;
-                    int legs = 1 + d.Waypoints.Count;
-                    for (int i = 0; i < legs; i++)
-                    {
-                        Vector3 point = i == 0 ? d.MoveTarget.Value : d.Waypoints[i - 1];
-                        if (!ToGui(Ground.OnGround(point) + Vector3.up * 0.2f, out Vector2 to)) break;
-                        Dashes(at, to, colour, 1.5f * s, 7f * s, 5f * s, Time.unscaledTime * 30f * s);
-                        Ring(to, (i == legs - 1 ? 6f : 4f) * s, colour);
-                        at = to;
-                    }
+                    Vector3 point = Vector3.zero;
+                    foreach (var d in squad) point += i == 0 ? d.MoveTarget.Value : (i - 1 < d.Waypoints.Count ? d.Waypoints[i - 1] : d.MoveTarget.Value);
+                    point /= squad.Count;
+                    if (!ToGui(Ground.OnGround(point) + Vector3.up * 0.2f, out Vector2 to)) break;
+                    Route(at, to, colour);
+                    if (legs > 1) WaypointNumber(to, i + 1, colour);
+                    else Ring(to, 7f * s, colour);
+                    at = to;
                 }
             }
+        }
+
+        // One leg of a route: a 2 px marching dash with a dark edge, and a small arrow every 70 px.
+        void Route(Vector2 a, Vector2 b, Color colour)
+        {
+            float s = Scale;
+            float march = Time.unscaledTime * 30f * s;
+            Dashes(a, b, new Color(Ink.r, Ink.g, Ink.b, 0.6f), 4f * s, 8f * s, 4f * s, march);
+            Dashes(a, b, new Color(colour.r, colour.g, colour.b, 0.9f), 2f * s, 8f * s, 4f * s, march);
+            Vector2 v = b - a;
+            float length = v.magnitude;
+            if (length < 40f * s) return;
+            float angle = Mathf.Atan2(v.x, -v.y) * Mathf.Rad2Deg;
+            for (float x = 35f * s; x < length - 20f * s; x += 70f * s)
+                Symbol(a + v / length * x, angle, 11f * s, ArrowTexture(), colour);
+        }
+
+        // A queued waypoint: a diamond with its number.
+        void WaypointNumber(Vector2 c, int number, Color colour)
+        {
+            float s = Scale;
+            Diamond(c, 11f * s, new Color(Ink.r, Ink.g, Ink.b, 0.8f));
+            Diamond(c, 10f * s, colour);
+            var style = Tinted(small, colour);
+            style.alignment = TextAnchor.MiddleCenter;
+            style.fontStyle = FontStyle.Bold;
+            GUI.Label(new Rect(c.x - 10f * s, c.y - 9f * s, 20f * s, 18f * s), number.ToString(), style);
         }
 
         // A short word under each selected drone: what it's doing (MOVING, ATTACKING, REARMING, UNDER FIRE..).
@@ -182,10 +235,21 @@ namespace DroneSandbox
             Fill(new Rect(0f, Screen.height - edge, Screen.width, edge), dim);
             Fill(new Rect(0f, 0f, edge, Screen.height), dim);
             Fill(new Rect(Screen.width - edge, 0f, edge, Screen.height), dim);
-            var r = new Rect((Screen.width - 460f * s) / 2f, 58f * s, 460f * s, 30f * s);
+            var r = new Rect((Screen.width - 460f * s) / 2f, 140f * s, 460f * s, 30f * s); // below the event feed
             Fill(r, PanelColor);
             Outline(r, Amber, Mathf.Max(1f, s));
             GUI.Label(r, "<b>TACTICAL PAUSE</b>   give orders, Tab to resume", Tinted(centered, Amber));
+            int waypoints = 0, attacks = 0;
+            foreach (var d in game.drones)
+            {
+                if (d == null) continue;
+                if (d.AttackTarget != null) attacks++;
+                else if (d.MoveTarget.HasValue) waypoints += 1 + d.Waypoints.Count;
+            }
+            var summary = new Rect(r.x, r.yMax + 2f * s, r.width, 20f * s);
+            Fill(summary, PanelColor);
+            GUI.Label(summary, $"{game.drones.Count} drones  \u00b7  {waypoints} waypoints  \u00b7  {attacks} attacking  \u00b7  {rts.selected.Count} selected",
+                Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
         }
 
         void DrawAcknowledgements()
@@ -242,7 +306,7 @@ namespace DroneSandbox
                 float age = Time.time - e.LastSeenTime;
                 float fade = Mathf.Lerp(0.95f, 0.35f, age / Recon.GhostSeconds);
                 bool hovered = e == rts.HoveredEnemy;
-                Diamond(c, (hovered ? 12f : 9f) * s, new Color(Amber.r, Amber.g, Amber.b, fade));
+                Stamp(DashedDiamondTexture(), c, (hovered ? 12f : 9f) * s, new Color(Amber.r, Amber.g, Amber.b, fade)); // stale: dashed
                 var style = Tinted(small, new Color(Amber.r, Amber.g, Amber.b, fade));
                 style.alignment = TextAnchor.UpperCenter;
                 GUI.Label(new Rect(c.x - 60f * s, c.y + 10f * s, 120f * s, 16f * s),
@@ -271,19 +335,38 @@ namespace DroneSandbox
             }
         }
 
-        // Zoomed out, a small orange diamond on each enemy in sight (targets and the hovered one have brackets).
+        // Zoomed out, a marker on each enemy on the map (targets and the hovered one have brackets): a solid orange
+        // diamond edged white for one we can see right now, a hollow diamond with its class for a gun we've mapped
+        // but aren't watching.
         void EnemyMarker(EnemyUnit e, Vector2 c)
         {
             float strategic = Strategic;
             if (strategic <= 0.01f) return;
+            if (!e.Observed)
+            {
+                float r = Mathf.Lerp(7f, 10f, strategic) * Scale;
+                Diamond(c, r + 1f, new Color(Ink.r, Ink.g, Ink.b, 0.7f * strategic));
+                Diamond(c, r, new Color(DravinOrange.r, DravinOrange.g, DravinOrange.b, strategic));
+                var tag = Tinted(small, new Color(DravinOrange.r, DravinOrange.g, DravinOrange.b, strategic));
+                tag.alignment = TextAnchor.UpperCenter;
+                tag.fontSize = Mathf.RoundToInt(9f * Scale);
+                GUI.Label(new Rect(c.x - 30f * Scale, c.y + r, 60f * Scale, 14f * Scale), ClassTag(e.type), tag);
+                return;
+            }
             float size = Mathf.Lerp(8f, 12f, strategic) * Scale;
             var colour = new Color(DravinOrange.r, DravinOrange.g, DravinOrange.b, strategic);
             Matrix4x4 matrix = GUI.matrix;
             GUIUtility.RotateAroundPivot(45f, c);
-            Fill(new Rect(c.x - size / 2f - 1.5f, c.y - size / 2f - 1.5f, size + 3f, size + 3f), new Color(Ink.r, Ink.g, Ink.b, 0.8f * strategic));
+            Fill(new Rect(c.x - size / 2f - 1.5f, c.y - size / 2f - 1.5f, size + 3f, size + 3f), new Color(1f, 1f, 1f, 0.9f * strategic)); // live: edged white
             Fill(new Rect(c.x - size / 2f, c.y - size / 2f, size, size), colour);
             GUI.matrix = matrix;
         }
+
+        static string ClassTag(EnemyType t) => t switch
+        {
+            EnemyType.AAGun => "AA", EnemyType.Radar => "RDR", EnemyType.Artillery => "ART", EnemyType.Rocket => "RKT",
+            EnemyType.Jammer => "JAM", EnemyType.Depot => "DEP", EnemyType.Command => "CP", _ => "",
+        };
 
         // Brackets with a dark edge so they show on bright fields, never smaller than 28 px across, and pulsing
         // once a second for a few seconds after the enemy is first spotted.

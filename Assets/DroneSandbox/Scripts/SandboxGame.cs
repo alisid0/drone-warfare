@@ -204,7 +204,7 @@ namespace DroneSandbox
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
                 // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
-                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified);
+                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius);
                 if (u.target) TargetsTotal++;
             }
 
@@ -255,13 +255,33 @@ namespace DroneSandbox
             return home;
         }
 
-        // Tab: stop the world to plan, and start it again.
+        // Tab: stop the world to plan, and start it again. The world drains to a cool grey while it's stopped.
         public void TogglePause()
         {
             if (UiBlocking || Loading) return;
             Paused = !Paused;
             Time.timeScale = Paused ? 0f : 1f;
             AudioListener.pause = Paused;
+            if (pauseVolume == null)
+            {
+                var profile = ScriptableObject.CreateInstance<UnityEngine.Rendering.VolumeProfile>();
+                var grade = profile.Add<UnityEngine.Rendering.HighDefinition.ColorAdjustments>();
+                grade.saturation.Override(-45f);
+                grade.colorFilter.Override(new Color(0.9f, 0.96f, 1.05f));
+                pauseVolume = new GameObject("Pause Grade").AddComponent<UnityEngine.Rendering.Volume>();
+                pauseVolume.isGlobal = true;
+                pauseVolume.priority = 30f;
+                pauseVolume.sharedProfile = profile;
+            }
+        }
+
+        UnityEngine.Rendering.Volume pauseVolume;
+
+        void LateUpdate()
+        {
+            // The pause grade eases in and out over 0.15 s (in real time: the game clock is stopped).
+            if (pauseVolume != null)
+                pauseVolume.weight = Mathf.MoveTowards(pauseVolume.weight, Paused ? 1f : 0f, Time.unscaledDeltaTime / 0.15f);
         }
 
         public void RetryMission()
@@ -315,6 +335,7 @@ namespace DroneSandbox
             MissionTime = 0f;
             DronesUsed = TargetsTotal = TargetsDestroyed = PointsEarned = StarBonus = 0;
             Message = null;
+            Feed.Clear();
             Time.timeScale = 1f;
             Paused = false;
             AudioListener.pause = false;
@@ -434,7 +455,9 @@ namespace DroneSandbox
             int home = CountHome(out int flying);
             DronesHome = home;
             if (won) dronesLost += flying - home; // left behind over enemy country
-            Stars = !won ? 0 : DronesUsed <= Mission.par && dronesLost == 0 ? 3 : DronesUsed <= Mission.par + 2 && dronesLost <= 1 ? 2 : 1;
+            // A star each for winning, for efficiency (par or fewer drones launched, kamikazes included) and for
+            // bringing every drone that could come home back.
+            Stars = !won ? 0 : 1 + (DronesUsed <= Mission.par ? 1 : 0) + (dronesLost == 0 ? 1 : 0);
             StarBonus = Mathf.Max(0, Stars - BestStars(Mission.key)) * Tech.PointsPerNewStar; // only stars you didn't have
             if (StarBonus > 0)
             {
@@ -472,10 +495,16 @@ namespace DroneSandbox
             Time.timeScale = 0f;
         }
 
+        // The event feed: the newest few pieces of news, each fading after its time (see SandboxHud.DrawMessage).
+        public readonly List<(string text, float until)> Feed = new List<(string, float)>();
+
         public void ShowMessage(string text, float seconds = 2.5f)
         {
             Message = text;
             MessageUntil = Time.unscaledTime + seconds;
+            Feed.RemoveAll(f => f.text == text);
+            Feed.Insert(0, (text, Time.unscaledTime + Mathf.Max(seconds, 3.5f)));
+            if (Feed.Count > 4) Feed.RemoveAt(Feed.Count - 1);
         }
 
         // ---- Units ----

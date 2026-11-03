@@ -181,6 +181,7 @@ namespace DroneSandbox
         {
             float s = Scale;
             if (rts.Distance >= 55f) DrawPlaceNames();
+            DrawGroundZones();
 
             foreach (var e in game.enemies)
             {
@@ -213,6 +214,13 @@ namespace DroneSandbox
                 }
                 else EnemyMarker(e, c);
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
+                // An enemy that knows we're here: an amber "!" over it.
+                if (e.Alerted && !e.isTarget)
+                {
+                    var bang = Tinted(centered, Amber);
+                    bang.fontSize = Mathf.RoundToInt(16f * s);
+                    GUI.Label(new Rect(c.x - 10f * s, c.y - half - 30f * s, 20f * s, 20f * s), "<b>!</b>", bang);
+                }
             }
 
             DrawTactical();
@@ -381,9 +389,13 @@ namespace DroneSandbox
             if (sel.Count == 1)
             {
                 var d = sel[0];
-                string bombs = d.IsBomber ? $"     Bombs {d.BombsLeft}/{Drone.BomberLoad}" : "";
+                string bombs = d.IsBomber ? $"     Bombs {d.BombsLeft}/{Drone.BomberLoad}"
+                    : d.type == DroneType.Strike ? $"     Missiles {d.MissilesLeft}/{Drone.StrikeLoad}" : "";
                 Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP{bombs}", label);
-                Line(d.Status, label);
+                // Hull as a bar under the name, and what it's doing, red when it's in trouble.
+                Fill(new Rect(x, y - 4f * s, r.width - 20f * s, 3f * s), new Color(0f, 0f, 0f, 0.5f));
+                Fill(new Rect(x, y - 4f * s, (r.width - 20f * s) * Mathf.Clamp01(d.hp / d.maxHp), 3f * s), d.UnderFire ? Amber : Teal);
+                Line(d.Status, Tinted(label, d.UnderFire || d.IsJammed ? Hostile : new Color(0.85f, 0.95f, 1f)));
                 Line(d.IsKamikaze ? "Right-click an enemy to dive on it."
                     : d.IsBomber ? "Right-click an enemy to bomb it. Rearms at base."
                     : "Fires at enemies in range when idle.", small);
@@ -392,7 +404,15 @@ namespace DroneSandbox
             {
                 var counts = new int[LaunchNames.Length];
                 foreach (var d in sel) counts[(int)d.type]++;
-                Line($"<b>{sel.Count} drones selected</b>", label);
+                int underFire = 0, rearming = 0;
+                foreach (var d in sel)
+                {
+                    if (d.UnderFire) underFire++;
+                    if (d.StatusTag == "REARMING" || d.StatusTag == "RETURNING") rearming++;
+                }
+                string trouble = (underFire > 0 ? $"     <color=#FF5040><b>{underFire} under fire</b></color>" : "")
+                               + (rearming > 0 ? $"     {rearming} rearming" : "");
+                Line($"<b>{sel.Count} drones selected</b>{trouble}", label);
                 Line($"Scout {counts[0]}     Strike {counts[1]}     Kamikaze {counts[2]}" + (counts[3] > 0 ? $"     Nightjar {counts[3]}" : ""), label);
                 Line("Right-click an enemy to attack together.", small);
             }
@@ -433,13 +453,29 @@ namespace DroneSandbox
         }
 
         // Short news at the top of the screen: a target spotted or destroyed, no drones of a type left.
+        // The event feed: the newest news on top, older lines smaller and fading, coloured by what they mean
+        // (orders and phases teal, enemy activity orange, losses red, the rest amber).
         void DrawMessage()
         {
-            if (string.IsNullOrEmpty(game.Message) || Time.unscaledTime > game.MessageUntil) return;
-            float s = Scale;
-            var r = new Rect((Screen.width - 420f * s) / 2f, 16f * s, 420f * s, 34f * s);
-            Fill(r, PanelColor);
-            GUI.Label(r, $"<b>{game.Message}</b>", targetLabel);
+            float s = Scale, now = Time.unscaledTime, y = 16f * s;
+            game.Feed.RemoveAll(f => now > f.until);
+            for (int i = 0; i < game.Feed.Count; i++)
+            {
+                var (text, until) = game.Feed[i];
+                float alpha = Mathf.Clamp01((until - now) / 0.6f) * (i == 0 ? 1f : 0.8f);
+                string lower = text.ToLowerInvariant();
+                Color colour = lower.Contains("lost") || lower.Contains("down") || lower.Contains("left behind") ? Hostile
+                    : lower.Contains("alerted") || lower.Contains("spotted") || lower.Contains("identified") || lower.Contains("jammed") ? DravinOrange
+                    : lower.StartsWith("recon") || lower.StartsWith("strike") || lower.StartsWith("extract") || lower.StartsWith("returning") || lower.StartsWith("following") ? Teal
+                    : TargetColor;
+                float h = (i == 0 ? 30f : 22f) * s, w = (i == 0 ? 560f : 480f) * s;
+                var r = new Rect((Screen.width - w) / 2f, y, w, h);
+                Fill(r, new Color(PanelColor.r, PanelColor.g, PanelColor.b, PanelColor.a * alpha));
+                Fill(new Rect(r.x, r.y, 3f * s, r.height), new Color(colour.r, colour.g, colour.b, alpha));
+                var style = Tinted(i == 0 ? centered : new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, new Color(colour.r, colour.g, colour.b, alpha));
+                GUI.Label(r, i == 0 ? $"<b>{text}</b>" : text, style);
+                y += h + 3f * s;
+            }
         }
 
         // ---- Menu, briefing, results ----
@@ -588,11 +624,24 @@ namespace DroneSandbox
             GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
-            DrawStars(new Rect(r.x + (r.width - 180f * s) / 2f, r.y + 100f * s, 180f * s, 52f * s), game.Stars);
+            var starRow = new Rect(r.x + (r.width - 330f * s) / 2f, r.y + 96f * s, 330f * s, 46f * s);
+            DrawStars(starRow, game.Stars);
+            // What each star is for, under each star.
+            string[] criteria = { "WON", $"{game.DronesUsed}/{game.Mission.par} DRONES", "NONE LOST" };
+            bool[] met = { won, won && game.DronesUsed <= game.Mission.par, won && game.dronesLost == 0 };
+            float starSize = Mathf.Min(starRow.height, starRow.width / 3f), starGap = (starRow.width - 3f * starSize) / 2f;
+            for (int i = 0; i < 3; i++)
+            {
+                float middle = starRow.x + i * (starSize + starGap) + starSize / 2f;
+                var cell = new Rect(middle - 60f * s, starRow.yMax, 120f * s, 16f * s);
+                GUI.Label(cell, criteria[i], Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold },
+                    met[i] ? TargetColor : new Color(1f, 1f, 1f, 0.35f)));
+            }
             GUI.Label(new Rect(r.x, r.y + 160f * s, r.width, 22f * s),
-                $"Drones used: <b>{game.DronesUsed}</b> (par {game.Mission.par})     Lost: <b>{game.dronesLost}</b>     Home: <b>{game.DronesHome}</b>     Time: {Clock(game.MissionTime)}", centered);
+                $"Launched <b>{game.DronesUsed}</b> (par {game.Mission.par})  \u00b7  expended <b>{game.dronesExpended}</b>  \u00b7  shot down or left <b>{game.dronesLost}</b>  \u00b7  " +
+                $"home <b>{game.DronesHome}</b>  \u00b7  {Clock(game.MissionTime)}", centered);
             GUI.Label(new Rect(r.x, r.y + 178f * s, r.width, 18f * s),
-                "Three stars: par or fewer drones, none lost.", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
+                "One star for the win, one for using par or fewer drones, one for losing none.", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
             string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
             GUI.Label(new Rect(r.x, r.y + 202f * s, r.width, 22f * s),
                 $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
@@ -633,7 +682,7 @@ namespace DroneSandbox
         {
             float s = Scale;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.55f));
-            Rect r = Centered(1080f, 760f);
+            Rect r = Centered(1080f, 830f);
             Fill(r, ModalColor);
             GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
             GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s),
@@ -651,13 +700,10 @@ namespace DroneSandbox
             {
                 var c = new Vector2(mapRect.x + h.mapPosition.x * mapRect.width, mapRect.yMax - h.mapPosition.y * mapRect.height);
                 bool done = Theatre.Done(h);
-                float pulse = 1f + 0.12f * Mathf.Sin(Time.unscaledTime * 3f + h.seed);
-                float radius = (10f + 12f * h.heat) * s * (done ? 0.7f : pulse);
-                var glow = done ? new Color(0.35f, 1f, 0.6f, 0.75f) : Color.Lerp(new Color(1f, 0.8f, 0.2f, 0.85f), new Color(1f, 0.25f, 0.15f, 0.95f), h.heat);
-                Dot(c, radius * 1.8f, new Color(glow.r, glow.g, glow.b, 0.18f));
-                Dot(c, radius, glow);
-                if ((mouse - c).magnitude < radius + 4f * s) hovered = h;
-                if (h == chosen) Brackets(c, radius + 6f * s, Color.white);
+                float radius = (12f + 6f * h.heat) * s;
+                bool over = (mouse - c).magnitude < radius + 4f * s;
+                if (over) hovered = h;
+                HotspotBadge(c, h, done, h == chosen, over);
             }
             if (hovered != null && Event.current.type == EventType.MouseDown && Event.current.button == 0)
             {
@@ -678,7 +724,11 @@ namespace DroneSandbox
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 44f * s, card.width - 300f * s, 22f * s),
                     $"<b>{Situations.Name(spot.situation)}</b>     {spot.daylight}, {spot.weather.ToString().ToLowerInvariant()}     km {km:0} of the front     " +
                     $"activity {Mathf.RoundToInt(spot.heat * 100f)}%" + (Theatre.Done(spot) ? "     <b>WON</b>" : ""), label);
-                GUI.Label(new Rect(card.x + 16f * s, card.y + 68f * s, card.width - 300f * s, 40f * s), type.blurb, smallWrap);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 68f * s, card.width - 300f * s, 22f * s),
+                    $"<b>Threat:</b> {ThreatOf(spot.situation)}     <b>Intel:</b> {IntelConfidence(spot)}%     " +
+                    $"<b>Reward:</b> about {Mathf.RoundToInt((60f + 140f * spot.heat) / 10f) * 10} pts     " +
+                    $"<b>Difficulty:</b> {(spot.heat < 0.35f ? "low" : spot.heat < 0.7f ? "medium" : "high")}", label);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 40f * s), type.blurb, smallWrap);
                 if (chosen != null)
                 {
                     var fly = new Rect(card.xMax - 250f * s, card.y + 22f * s, 230f * s, 50f * s);

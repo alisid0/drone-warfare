@@ -354,6 +354,16 @@ namespace DroneSandbox
         }
 
         // A bullet striking metal.
+        // Smoke from a damaged vehicle: grey wisps at half health, thick and dark near the end (severity 0-1).
+        public static void DamageSmoke(Vector3 at, float severity)
+        {
+            if (!Ready()) return;
+            float grey = Mathf.Lerp(0.7f, 0.22f, severity);
+            Emit(smoke, at + Random.insideUnitSphere * 0.3f, Vector3.up * Mathf.Lerp(0.6f, 1.2f, severity) + Random.insideUnitSphere * 0.2f,
+                Random.Range(0.9f, 1.3f) * Mathf.Lerp(1f, 1.8f, severity), Random.Range(1.8f, 2.6f),
+                Shade(new Color(grey, grey, grey, Mathf.Lerp(0.35f, 0.7f, severity))));
+        }
+
         public static void Spark(Vector3 at)
         {
             if (!Ready())

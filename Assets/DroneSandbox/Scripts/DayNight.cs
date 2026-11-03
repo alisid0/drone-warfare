@@ -39,7 +39,7 @@ namespace DroneSandbox
         Light sun;
         Volume nightVolume, thermalVolume;
         ColorAdjustments thermalColour;
-        Material hot;
+        Material hot, warm; // thermal: engines running, and idle kit
         readonly Dictionary<Renderer, Material[]> cooled = new Dictionary<Renderer, Material[]>();
         float heatTimer;
 
@@ -106,6 +106,8 @@ namespace DroneSandbox
 
             hot = Art.NewMaterial(new Color(0.95f, 0.95f, 0.95f), glow: true);
             Art.Glow(hot, new Color(0.75f, 0.75f, 0.75f));
+            warm = Art.NewMaterial(new Color(0.6f, 0.6f, 0.6f), glow: true);
+            Art.Glow(warm, new Color(0.3f, 0.3f, 0.3f));
             Apply();
         }
 
@@ -192,8 +194,9 @@ namespace DroneSandbox
 
             bool dark = IsDark;
             nightLights.RemoveAll(l => l == null);
-            foreach (var light in nightLights) light.enabled = dark;
-            if (windowMaterial != null) Art.Glow(windowMaterial, dark ? WindowGlow * 0.9f : Color.black);
+            // A thermal camera sees heat, not light: lamps and lit windows don't show in it.
+            foreach (var light in nightLights) light.enabled = dark && !Thermal;
+            if (windowMaterial != null) Art.Glow(windowMaterial, dark && !Thermal ? WindowGlow * 0.9f : Color.black);
         }
 
         // ---- Thermal ----
@@ -203,19 +206,20 @@ namespace DroneSandbox
         {
             var game = SandboxGame.Instance;
             if (game == null) return;
-            foreach (var e in game.enemies) if (e != null) HeatUp(e.gameObject);
-            foreach (var d in game.drones) if (d != null) HeatUp(d.gameObject);
+            // Engines running (driving, firing, crews on alert) glow hot; parked and idle kit only warm.
+            foreach (var e in game.enemies) if (e != null) HeatUp(e.gameObject, e.IsMoving || e.Engaging || e.Alerted ? hot : warm);
+            foreach (var d in game.drones) if (d != null) HeatUp(d.gameObject, hot);
         }
 
-        void HeatUp(GameObject unit)
+        void HeatUp(GameObject unit, Material heat)
         {
             foreach (var r in unit.GetComponentsInChildren<Renderer>(true))
             {
-                if (cooled.ContainsKey(r)) continue;
                 if (r.sharedMaterial != null && r.sharedMaterial.name == "PropBlur") continue; // the blur of a drone's props
-                cooled[r] = r.sharedMaterials;
+                if (!cooled.ContainsKey(r)) cooled[r] = r.sharedMaterials;
+                if (r.sharedMaterial == heat) continue;
                 var materials = new Material[r.sharedMaterials.Length];
-                for (int i = 0; i < materials.Length; i++) materials[i] = hot;
+                for (int i = 0; i < materials.Length; i++) materials[i] = heat;
                 r.sharedMaterials = materials;
             }
         }

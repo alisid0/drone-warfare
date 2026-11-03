@@ -58,8 +58,21 @@ namespace DroneSandbox
         Vector3 trouble;          // where the last threat was
         float acquiring;          // AA: how long it has been laying its guns on the current drone
         float acquireBegan, alertBegan;
+
+        // What an AA gun is doing, for the HUD's threat warnings.
+        public Unit TrackedDrone { get; private set; }
+        public float AcquireProgress { get; private set; } // 0-1 while laying its guns, 1 once firing
+        public float LastShotTime { get; private set; } = -100f;
+        public bool Engaging => Time.time - LastShotTime < 0.8f;
         Vector3? fleeTo;          // a parked vehicle driving off to somewhere quieter
         bool investigating;       // a patrol going to look where the trouble was
+
+        // How much of a gun round's damage gets through: armour shrugs off a Scout's machine gun, explosives don't care.
+        public float BulletFactor => type switch
+        {
+            EnemyType.Tank => 0.25f, EnemyType.APC => 0.4f, EnemyType.Command => 0.2f,
+            EnemyType.AAGun => 0.6f, EnemyType.Depot => 0.6f, _ => 1f,
+        };
 
         public bool IsMobile => type == EnemyType.Tank || type == EnemyType.Truck || type == EnemyType.APC || type == EnemyType.Tanker;
 
@@ -337,10 +350,23 @@ namespace DroneSandbox
             return pivot;
         }
 
+        float smokeTimer;
+
         void Update()
         {
             if (!IsAlive) return;
             float dt = Time.deltaTime;
+            // Damage shows: smoke from half health down, thicker as it gets worse (only where we can see it).
+            if (hp < maxHp * 0.5f && drawn && type != EnemyType.Command)
+            {
+                smokeTimer -= dt;
+                if (smokeTimer <= 0f)
+                {
+                    float severity = 1f - hp / (maxHp * 0.5f);
+                    smokeTimer = Mathf.Lerp(0.35f, 0.1f, severity);
+                    Effects.DamageSmoke(AimPoint + Vector3.up * 0.5f, severity);
+                }
+            }
             switch (type)
             {
                 case EnemyType.Tank:
@@ -718,14 +744,20 @@ namespace DroneSandbox
             {
                 SpinTurret(20f * dt); // idle scan
                 acquiring = 0f;
+                TrackedDrone = null;
+                AcquireProgress = 0f;
                 return;
             }
+            if (acquiring == 0f || target != TrackedDrone) Sound.Alert("warning", 3f); // a gun has started laying on a drone
+            TrackedDrone = target;
             // Laying the guns on a drone takes the crew a moment: 1.6 s if it takes them by surprise, 0.5 s if
             // they were already on alert or a radar is feeding them.
             if (acquiring == 0f) acquireBegan = Time.time;
             acquiring += dt;
             bool warned = SandboxGame.Instance.RadarCovers(transform.position) || (Alerted && alertBegan < acquireBegan - 0.5f);
-            if (acquiring < (warned ? 0.5f : 1.6f)) return;
+            float needed = warned ? 0.5f : 1.6f;
+            AcquireProgress = Mathf.Clamp01(acquiring / needed);
+            if (acquiring < needed) return;
             if (!Alerted) Alert(target.transform.position);
             if (cooldown <= 0f)
             {
@@ -735,7 +767,7 @@ namespace DroneSandbox
                 Vector3 muzzle = turret != null ? turret.position + TurretFacing * muzzleLocal : AimPoint;
                 Projectile.Bullet(muzzle, target, team, damage, 0.6f, new Color(1f, 0.45f, 0.2f));
                 Sound.At("cannon", muzzle, 0.7f);
-                Sound.Alert("warning", 5f); // AA has a drone
+                LastShotTime = Time.time;
             }
         }
     }

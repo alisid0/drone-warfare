@@ -117,7 +117,7 @@ namespace DroneSandbox
             }
             else if (target != null && target.IsAlive && damage > 0f)
             {
-                target.TakeDamage(damage);
+                target.TakeDamage(target is EnemyUnit armoured ? damage * armoured.BulletFactor : damage);
                 Effects.Spark(transform.position);
                 if (target is EnemyUnit) Sound.At("ricochet", transform.position, 0.35f, 0.15f);
             }
