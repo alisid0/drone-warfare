@@ -161,6 +161,24 @@ namespace DroneSandbox
             }
         }
 
+        // Gives every part of a model wearing the photo material `from` the photo material `to` instead.
+        public static void Swap(GameObject go, string from, string to)
+        {
+            if (go == null || from == to || photoMaterials == null || !photoMaterials.TryGetValue(from, out var a) || !photoMaterials.TryGetValue(to, out var b)) return;
+            foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < materials.Length; i++)
+                    if (materials[i] == a)
+                    {
+                        materials[i] = b;
+                        changed = true;
+                    }
+                if (changed) renderer.sharedMaterials = materials;
+            }
+        }
+
         // Destroys something both in Play mode and in the editor's map preview (which can't wait for Destroy).
         public static void Discard(Object o)
         {

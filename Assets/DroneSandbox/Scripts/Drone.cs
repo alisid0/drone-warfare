@@ -457,8 +457,14 @@ namespace DroneSandbox
 
         // Cruise altitude is above the ground, taking the higher of here and the destination so the drone
         // climbs before crossing a hill rather than after.
-        float CruiseHeight(Vector3 destination) =>
-            Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)) + altitude;
+        // Its cruise altitude over the ground, and at least 2.5 m over any tree tops below it or ahead (Canopy).
+        float CruiseHeight(Vector3 destination)
+        {
+            float overGround = Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)) + altitude;
+            Vector3 ahead = transform.position + Vector3.ClampMagnitude(new Vector3(velocity.x, 0f, velocity.z) * 1.2f, 12f);
+            float trees = Mathf.Max(Canopy.TopNear(transform.position, 5f), Canopy.TopNear(ahead, 5f));
+            return Mathf.Max(overGround, trees + 2.5f);
+        }
 
         // Pushes drones apart so a group doesn't stack in one spot.
         Vector3 Separation()

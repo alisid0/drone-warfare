@@ -119,11 +119,27 @@ namespace DroneSandbox
                         // Doors (the model's +Z) face the road.
                         Vector2 facing = -across * side;
                         float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -4f, 4f);
-                        Place(model, new Vector3(p.x, 0f, p.y), yaw, 1f, 0.35f, root);
+                        var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, 1f, 0.35f, root);
+                        if (model != "Scenery_Church") Repaint(house, v, p);
                         Garden(root, p, along, across * side, rng);
                     }
                 }
             }
+        }
+
+        static readonly string[] Roofs = { "RoofTile", "RoofTileDark", "RoofTileWarm", "RoofSlate" };
+        static readonly string[] Walls = { "PlasterWhite", "PlasterCream", "PlasterOchre", "PlasterPink", "PlasterGrey" };
+
+        // Each village leans to its own roofs and walls, and each house varies on that, so a street isn't the same
+        // house over and over. Picked by the village and the house's position (not the map's random numbers, which
+        // would move everything built after).
+        static void Repaint(GameObject house, int village, Vector2 at)
+        {
+            int h = ((Mathf.FloorToInt(at.x * 7.3f) * 73856093) ^ (Mathf.FloorToInt(at.y * 7.3f) * 19349663)) & 0x7fffffff;
+            int roof = (village + (h % 3 == 0 ? h / 7 : 0)) % Roofs.Length;
+            int wall = (village * 2 + (h % 2 == 0 ? h / 11 : 0)) % Walls.Length;
+            Art.Swap(house, "RoofTile", Roofs[roof]);
+            Art.Swap(house, "PlasterWhite", Walls[wall]);
         }
 
         // A fence behind the house and a fruit tree or two.

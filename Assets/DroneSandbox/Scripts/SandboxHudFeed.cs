@@ -65,6 +65,26 @@ namespace DroneSandbox
             string time = DayNight.Instance != null ? DayNight.Instance.Clock : "";
             GUI.Label(new Rect(r.x, r.y - 18f * s, r.width - 6f * s, 16f * s), time + (DayNight.Instance != null && DayNight.Instance.Thermal ? "  WHT" : "  EO"), clock);
 
+            // Known enemies the drone can see get brackets and their contact number in the picture, the same number
+            // as on the map.
+            var cam = f.FeedCamera;
+            if (cam != null)
+            {
+                foreach (var e in game.enemies)
+                {
+                    if (e == null || !e.Drawn || !e.Known || e.ContactId == null) continue;
+                    Vector3 v = cam.WorldToViewportPoint(e.AimPoint);
+                    if (v.z <= 0f || v.x < 0.03f || v.x > 0.97f || v.y < 0.06f || v.y > 0.97f) continue;
+                    var p = new Vector2(r.x + v.x * r.width, r.y + (1f - v.y) * r.height);
+                    float half = Mathf.Clamp(e.radius * 120f / Mathf.Max(4f, v.z), 6f, 30f) * s;
+                    Color colour = e.ExposedDecoy ? new Color(0.75f, 0.78f, 0.8f) : e.LooksLikeTarget ? TargetColor : DravinOrange;
+                    Brackets(p, half, colour, Mathf.Max(1f, s));
+                    var tag = Tinted(small, colour);
+                    tag.fontSize = Mathf.RoundToInt(9f * s);
+                    GUI.Label(new Rect(p.x - half, p.y - half - 13f * s, 120f * s, 12f * s), $"<b>{e.ContactId}</b> {(e.ExposedDecoy ? "DECOY" : e.unitName.ToUpperInvariant())}", tag);
+                }
+            }
+
             // A crosshair, and the corners of the frame.
             Vector2 c = r.center;
             var line = new Color(1f, 1f, 1f, 0.7f);

@@ -52,6 +52,49 @@ namespace DroneSandbox
             GUI.Label(new Rect(r.x + 8f * s, r.y + 4f * s, r.width, r.height), text, Tinted(small, new Color(0.7f, 1f, 0.75f)));
         }
 
+        // The debrief map beside the results: the battlefield from above with each drone's path (coloured by type),
+        // the base, enemies destroyed (orange crosses) and drones lost (red dots).
+        void DrawDebriefMap(Rect panel)
+        {
+            float s = Scale;
+            Fill(panel, ModalColor);
+            GUI.Label(new Rect(panel.x, panel.y + 8f * s, panel.width, 20f * s), "<b>DEBRIEF</b>", Tinted(centered, Teal));
+            var map = new Rect(panel.x + 12f * s, panel.y + 34f * s, panel.width - 24f * s, panel.width - 24f * s);
+            Fill(map, new Color(0.12f, 0.17f, 0.12f, 1f));
+            Outline(map, new Color(1f, 1f, 1f, 0.15f), 1f);
+            float half = SandboxGame.MapHalfSize + 20f;
+            Vector2 ToMap(Vector2 w) => new Vector2(map.x + (w.x + half) / (2f * half) * map.width, map.yMax - (w.y + half) / (2f * half) * map.height);
+            Color[] typeColours = { Teal, new Color(0.45f, 0.75f, 1f), DravinOrange, new Color(0.85f, 0.85f, 0.95f) };
+            var last = new Dictionary<int, Vector2>();
+            foreach (var (drone, type, at) in game.Tracks)
+            {
+                Vector2 p = ToMap(at);
+                if (last.TryGetValue(drone, out Vector2 prev)) Dashes(prev, p, typeColours[(int)type], 1.5f * s, 0f, 0f, 0f);
+                last[drone] = p;
+            }
+            Vector3 home = game.basePosition;
+            Vector2 b = ToMap(new Vector2(home.x, home.z));
+            Stamp(BadgeTexture(), b, 7f * s, Teal);
+            foreach (var (at, enemy) in game.Events)
+            {
+                Vector2 p = ToMap(at);
+                if (enemy)
+                {
+                    Matrix4x4 m = GUI.matrix;
+                    GUIUtility.RotateAroundPivot(45f, p);
+                    Fill(new Rect(p.x - 5f * s, p.y - 1f * s, 10f * s, 2f * s), DravinOrange);
+                    Fill(new Rect(p.x - 1f * s, p.y - 5f * s, 2f * s, 10f * s), DravinOrange);
+                    GUI.matrix = m;
+                }
+                else Dot(p, 4f * s, Hostile);
+            }
+            var key = Tinted(small, small.normal.textColor);
+            key.fontSize = Mathf.RoundToInt(10f * s);
+            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 6f * s, panel.width, 16f * s),
+                "<color=#49DFCF>Scout</color>  <color=#73BFFF>Strike</color>  <color=#FF7848>Kamikaze</color>  <color=#D9D9F2>Nightjar</color>", key);
+            GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 22f * s, panel.width, 16f * s), "x  enemy destroyed     ●  drone lost", key);
+        }
+
         // The one alert that beats everything: an AA gun shooting at one of our drones. Returns the strip's height.
         float DrawCriticalAlert()
         {

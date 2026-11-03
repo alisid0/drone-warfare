@@ -75,6 +75,7 @@ namespace DroneSandbox
             Light sun = FindOrCreateSun();
             Atmosphere.Setup(cam, sun);
             world = World.Build(transform, preview: false);
+            Canopy.Build(world);
             gameObject.AddComponent<DayNight>().Init(sun);
 
             rts = gameObject.AddComponent<RtsController>();
@@ -132,6 +133,7 @@ namespace DroneSandbox
             Farmland.Release();
             MapLayout.Use(plan);
             world = World.Build(transform, preview: false);
+            Canopy.Build(world);
         }
 
         // Flies into a theatre hotspot: builds its sector (a moment's pause while the land is laid out), then
@@ -340,6 +342,10 @@ namespace DroneSandbox
             DronesUsed = TargetsTotal = TargetsDestroyed = PointsEarned = StarBonus = 0;
             Message = null;
             Feed.Clear();
+            Tracks.Clear();
+            Events.Clear();
+            trackIds.Clear();
+            EnemyUnit.ResetContactIds();
             Time.timeScale = 1f;
             Paused = false;
             AudioListener.pause = false;
@@ -376,6 +382,7 @@ namespace DroneSandbox
             }
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
             MissionTime += Time.deltaTime;
+            RecordTracks();
             SpotHidden();
             if (Phase == MissionPhase.Recon && TargetsLocated())
             {
@@ -506,6 +513,26 @@ namespace DroneSandbox
             Time.timeScale = 0f;
         }
 
+        // The mission's story for the debrief map: where each drone flew (sampled every second), and where enemies
+        // died and drones were lost.
+        public readonly List<(int drone, DroneType type, Vector2 at)> Tracks = new List<(int, DroneType, Vector2)>();
+        public readonly List<(Vector2 at, bool enemy)> Events = new List<(Vector2, bool)>();
+        float trackTimer;
+        readonly Dictionary<Drone, int> trackIds = new Dictionary<Drone, int>();
+
+        void RecordTracks()
+        {
+            trackTimer -= Time.deltaTime;
+            if (trackTimer > 0f) return;
+            trackTimer = 1f;
+            foreach (var d in drones)
+            {
+                if (d == null) continue;
+                if (!trackIds.TryGetValue(d, out int id)) trackIds[d] = id = trackIds.Count;
+                Tracks.Add((id, d.type, new Vector2(d.transform.position.x, d.transform.position.z)));
+            }
+        }
+
         // The event feed: the newest few pieces of news, each fading after its time (see SandboxHud.DrawMessage).
         public readonly List<(string text, float until)> Feed = new List<(string, float)>();
 
@@ -558,12 +585,14 @@ namespace DroneSandbox
                 drones.Remove(drone);
                 dronesLost++;
                 Sound.At("drone down", drone.transform.position);
+                Events.Add((new Vector2(drone.transform.position.x, drone.transform.position.z), false));
                 DroneFeed.Instance?.SignalLost(drone);
             }
             else if (unit is EnemyUnit enemy)
             {
                 enemies.Remove(enemy);
                 enemiesDestroyed++;
+                Events.Add((new Vector2(enemy.transform.position.x, enemy.transform.position.z), true));
                 if (enemy.type != EnemyType.Command) Effects.Wreck(enemy);
                 Aftermath(enemy);
                 if (enemy.type == EnemyType.Radar) ShowMessage("Radar down - the guns it fed aim slower now", 3.5f);

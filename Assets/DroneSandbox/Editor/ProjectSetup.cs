@@ -810,6 +810,14 @@ namespace DroneSandbox.EditorTools
             ("PlasterGrey", "plaster_grey", new Color(0.85f, 0.85f, 0.85f), 3f, 0.08f, 0f),
             ("Stone", "stone_wall", new Color(1.1f, 1.05f, 1.0f), 2.5f, 0.1f, 0f),
             ("RoofTile", "roof_tiles", Color.white, 2.5f, 0.2f, 0f),
+            // Variants the villages mix (World.Repaint): weathered dark tiles, warm new ones, grey slate; plaster in
+            // cream, ochre and a faded pink.
+            ("RoofTileDark", "roof_tiles", new Color(0.62f, 0.55f, 0.52f), 2.5f, 0.2f, 0f),
+            ("RoofTileWarm", "roof_tiles", new Color(1.08f, 0.9f, 0.72f), 2.5f, 0.2f, 0f),
+            ("RoofSlate", "roof_tiles", new Color(0.42f, 0.46f, 0.52f), 2.5f, 0.3f, 0f),
+            ("PlasterCream", "plaster_white", new Color(1.3f, 1.2f, 0.98f), 3f, 0.08f, 0f),
+            ("PlasterOchre", "plaster_white", new Color(1.25f, 1.02f, 0.66f), 3f, 0.08f, 0f),
+            ("PlasterPink", "plaster_white", new Color(1.3f, 1.1f, 1.02f), 3f, 0.08f, 0f),
             ("RoofMetal", "corrugated", new Color(1.0f, 1.03f, 1.08f), 2f, 0.4f, 0.3f),
             ("RoofBarn", "worn_corrugated", new Color(0.8f, 0.78f, 0.75f), 2.5f, 0.3f, 0.3f),
             ("Brick", "brick", Color.white, 1.5f, 0.1f, 0f),

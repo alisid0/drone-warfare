@@ -218,7 +218,7 @@ namespace DroneSandbox
                 if (hovered)
                 {
                     TargetBrackets(e, c, half, Hostile);
-                    GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), e.unitName, centered);
+                    GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), (e.ContactId != null ? e.ContactId + "  " : "") + e.unitName, centered);
                 }
                 else if (e.LooksLikeTarget)
                 {
@@ -637,6 +637,7 @@ namespace DroneSandbox
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
             Rect r = Centered(520f, 350f);
             Fill(r, ModalColor);
+            DrawDebriefMap(new Rect(r.xMax + 10f * s, r.y, 260f * s, r.height));
             GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);

@@ -22,6 +22,7 @@ namespace DroneSandbox
 
         Camera feed;
         RtsController rts;
+        public Camera FeedCamera => feed;
 
         public static DroneFeed Create(GameObject host, RtsController controller)
         {

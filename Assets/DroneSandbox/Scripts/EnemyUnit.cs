@@ -441,6 +441,7 @@ namespace DroneSandbox
         public void Brief(Intel level, float radius = 12f)
         {
             Intel = level;
+            NumberContact();
             LastSeenPosition = transform.position;
             LastSeenTime = Time.time;
             if (level == Intel.Contact)
@@ -483,6 +484,7 @@ namespace DroneSandbox
                 }
             }
             Observed = seen;
+            NumberContact();
             ApplyVisibility();
         }
 
@@ -527,6 +529,16 @@ namespace DroneSandbox
             : Intel >= Intel.Identified ? LastSeenPosition + Vector3.up * aimHeight : ContactPosition;
 
         public bool Known => !Hidden && Intel >= Intel.Contact;
+
+        // A contact number (C-01, C-02...) given the first time it's reported, the same in every view.
+        public string ContactId { get; private set; }
+        static int nextContact = 1;
+        public static void ResetContactIds() => nextContact = 1;
+
+        void NumberContact()
+        {
+            if (ContactId == null && Intel >= Intel.Contact) ContactId = $"C-{nextContact++:00}";
+        }
 
         // A decoy passes for the real thing until something has had a good look at it (Confirmed).
         public bool LooksLikeTarget => isTarget || (isDecoy && Intel < Intel.Confirmed);
