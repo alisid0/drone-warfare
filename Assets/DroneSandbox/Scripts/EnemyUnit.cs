@@ -464,7 +464,10 @@ namespace DroneSandbox
             {
                 watchedFor += dt;
                 if (Intel < Intel.Identified) SandboxGame.Instance.OnIdentified(this);
-                Intel = close || watchedFor > 2f ? Intel.Confirmed : (Intel == Intel.Confirmed ? Intel.Confirmed : Intel.Identified);
+                bool wasConfirmed = Intel == Intel.Confirmed;
+                // Confirmed up close, or after 1.2 s of steady watching.
+                Intel = close || watchedFor > 1.2f || wasConfirmed ? Intel.Confirmed : Intel.Identified;
+                if (!wasConfirmed && Intel == Intel.Confirmed && isDecoy) SandboxGame.Instance.OnDecoyExposed(this);
                 LastSeenPosition = transform.position;
                 LastSeenTime = Time.time;
             }
@@ -524,6 +527,10 @@ namespace DroneSandbox
             : Intel >= Intel.Identified ? LastSeenPosition + Vector3.up * aimHeight : ContactPosition;
 
         public bool Known => !Hidden && Intel >= Intel.Contact;
+
+        // A decoy passes for the real thing until something has had a good look at it (Confirmed).
+        public bool LooksLikeTarget => isTarget || (isDecoy && Intel < Intel.Confirmed);
+        public bool ExposedDecoy => isDecoy && Intel == Intel.Confirmed;
 
         // ---- Reactions ----
 
@@ -628,18 +635,51 @@ namespace DroneSandbox
                 SandboxGame.Instance.OnEnemyEscaped(this);
                 return;
             }
-            Vector3 toPoint = route[routeIndex] - transform.position;
+            // On alert a convoy spreads out: each vehicle drifts a few metres off the road line, its own way.
+            Vector3 point = route[routeIndex];
+            if (Alerted && routeIndex + 1 < route.Count)
+            {
+                Vector3 along = route[routeIndex + 1] - point;
+                along.y = 0f;
+                point += Vector3.Cross(Vector3.up, along.normalized) * SpreadOffset;
+            }
+            Vector3 toPoint = point - transform.position;
             toPoint.y = 0f;
-            if (toPoint.magnitude < 2f)
+            if (toPoint.magnitude < 2.5f)
             {
                 routeIndex++;
                 return;
             }
             float wanted = Quaternion.LookRotation(toPoint).eulerAngles.y;
             heading = Mathf.MoveTowardsAngle(heading, wanted, 120f * dt);
-            float dash = Alerted ? 1.6f : 1f; // a convoy under attack puts its foot down
+            float dash = Alerted ? 1.25f + 0.2f * Mathf.Abs(SpreadOffset) / 4f : 1f; // a convoy under attack puts its foot down
             transform.position += Quaternion.Euler(0f, heading, 0f) * Vector3.forward * moveSpeed * dash * dt;
             SettleOnGround(8f * dt);
+            if (Alerted) KickUpDust(dt);
+        }
+
+        // Each vehicle's own way of spreading out (-4 to 4 m), rolled the first time it's needed (Random can't be
+        // called from a field initialiser, which runs in the constructor).
+        float SpreadOffset
+        {
+            get
+            {
+                if (float.IsNaN(spreadOffset)) spreadOffset = Random.Range(-4f, 4f);
+                return spreadOffset;
+            }
+        }
+        float spreadOffset = float.NaN;
+
+        float dustTimer;
+
+        // Dust thrown up behind a vehicle driving hard (only drawn where we can see it).
+        void KickUpDust(float dt)
+        {
+            if (!drawn) return;
+            dustTimer -= dt;
+            if (dustTimer > 0f) return;
+            dustTimer = 0.12f;
+            Effects.Dust(transform.position - transform.forward * radius);
         }
 
         // A parked vehicle that's been spotted or shot at drives off to park somewhere else.
@@ -657,6 +697,7 @@ namespace DroneSandbox
             if (Mathf.Abs(Mathf.DeltaAngle(heading, wanted)) < 50f)
                 transform.position += Quaternion.Euler(0f, heading, 0f) * Vector3.forward * moveSpeed * 1.3f * dt;
             SettleOnGround(8f * dt);
+            KickUpDust(dt);
         }
 
         // Fires a round now and then: a flash and smoke at the muzzle and the barrel kicking back. The flash

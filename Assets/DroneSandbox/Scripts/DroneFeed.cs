@@ -10,7 +10,8 @@ namespace DroneSandbox
     // effects, so it costs little.
     public class DroneFeed : MonoBehaviour
     {
-        public const int Width = 384, Height = 216;
+        public const int Width = 320, Height = 180;          // the window at 1600 x 900
+        const int RenderWidth = 480, RenderHeight = 270;     // the picture, a little sharper than shown
         public static DroneFeed Instance { get; private set; }
 
         public bool Visible = true;            // V toggles
@@ -32,7 +33,7 @@ namespace DroneSandbox
 
         void Start()
         {
-            Picture = new RenderTexture(Width, Height, 24) { name = "Drone Feed" };
+            Picture = new RenderTexture(RenderWidth, RenderHeight, 24) { name = "Drone Feed" };
             var go = new GameObject("Drone Feed Camera");
             feed = go.AddComponent<Camera>();
             feed.fieldOfView = 48f;
@@ -42,6 +43,9 @@ namespace DroneSandbox
             feed.enabled = false;
             var data = go.AddComponent<HDAdditionalCameraData>();
             data.antialiasing = HDAdditionalCameraData.AntialiasingMode.FastApproximateAntialiasing;
+            // It renders every other frame: without this HDRP drops and rebuilds the camera's buffers each time it
+            // skips one, and the churn ran the GPU out of memory.
+            data.hasPersistentHistory = true;
             data.customRenderingSettings = true;
             foreach (var field in new[] { FrameSettingsField.VolumetricClouds, FrameSettingsField.Volumetrics, FrameSettingsField.SSR,
                          FrameSettingsField.SSAO, FrameSettingsField.ContactShadows, FrameSettingsField.SSGI, FrameSettingsField.Water,
@@ -64,14 +68,26 @@ namespace DroneSandbox
             feed.enabled = on && Time.frameCount % 2 == 0; // the picture keeps between renders
             if (!on) return;
 
-            // Looking ahead and down from just under the drone, the way it's facing (a Kamikaze looks along its dive).
+            // Each type carries its camera its own way: a Scout's stabilised gimbal looks well down, and leans toward
+            // what it's attacking; a Strike drone looks ahead and down along its missiles; a Kamikaze's nose camera
+            // rides the dive; the Nightjar looks straight down its bomb bay. The gimbal eases over about 0.18 s.
             Transform t = Source.transform;
             Vector3 eye = t.position + Vector3.down * 0.4f + t.forward * 0.6f;
-            Vector3 look = Source.IsKamikaze && Source.AttackTarget != null
-                ? (Source.AttackTarget.AimPoint - eye).normalized
-                : (Quaternion.AngleAxis(38f, t.right) * t.forward).normalized;
-            feed.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(look, Vector3.up));
+            float down = Source.type == DroneType.Scout ? 58f : Source.type == DroneType.Bomber ? 75f : 35f;
+            Vector3 look = (Quaternion.AngleAxis(down, t.right) * t.forward).normalized;
+            if (Source.AttackTarget != null && Source.AttackTarget.IsAlive)
+            {
+                Vector3 toTarget = (Source.AttackTarget.AimPoint - eye).normalized;
+                look = Source.IsKamikaze ? toTarget : Vector3.Slerp(look, toTarget, 0.7f).normalized;
+            }
+            feed.fieldOfView = Source.type == DroneType.Scout ? 75f : Source.type == DroneType.Kamikaze ? 85f : Source.type == DroneType.Strike ? 60f : 70f;
+            Quaternion want = Quaternion.LookRotation(look, Vector3.up);
+            float ease = Source != lastSource ? 1f : 1f - Mathf.Exp(-Time.unscaledDeltaTime / 0.18f);
+            feed.transform.SetPositionAndRotation(eye, Quaternion.Slerp(feed.transform.rotation, want, ease));
+            lastSource = Source;
         }
+
+        Drone lastSource;
 
         // The drone we were watching is gone (shot down or detonated): show static for a moment.
         public void SignalLost(Drone drone)

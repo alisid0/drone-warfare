@@ -52,8 +52,8 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BaseColorMap:
-        m_Texture: {fileID: 2800000, guid: 12ce27c4b1ed7e94bba129ec05501ee2, type: 3}
-        m_Scale: {x: 0.5, y: 0.5}
+        m_Texture: {fileID: 2800000, guid: a05f484f3d3fc8842bf140ef5d27662b, type: 3}
+        m_Scale: {x: 0.6666667, y: 0.6666667}
         m_Offset: {x: 0, y: 0}
     - _BaseMap:
         m_Texture: {fileID: 2800000, guid: 12ce27c4b1ed7e94bba129ec05501ee2, type: 3}
@@ -112,8 +112,8 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: 12ce27c4b1ed7e94bba129ec05501ee2, type: 3}
-        m_Scale: {x: 0.5, y: 0.5}
+        m_Texture: {fileID: 2800000, guid: a05f484f3d3fc8842bf140ef5d27662b, type: 3}
+        m_Scale: {x: 0.6666667, y: 0.6666667}
         m_Offset: {x: 0, y: 0}
     - _MaskMap:
         m_Texture: {fileID: 0}
@@ -124,7 +124,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NormalMap:
-        m_Texture: {fileID: 2800000, guid: d2989de52cf2db04bb89c378ced5fe9c, type: 3}
+        m_Texture: {fileID: 2800000, guid: 6f875c65248e9524086f1889e0a28d99, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NormalMapOS:
@@ -257,7 +257,7 @@ Material:
     - _IridescenceThickness: 1
     - _LinkDetailsWithBase: 1
     - _MaterialID: 1
-    - _Metallic: 0.6
+    - _Metallic: 0.25
     - _MetallicRemapMax: 0.6
     - _MetallicRemapMin: 0
     - _NormalMapSpace: 0
@@ -281,7 +281,7 @@ Material:
     - _RefractionModel: 0
     - _ScreenSpaceReflections: 1
     - _ScreenSpaceReflectionsContributeTransparent: 1
-    - _Smoothness: 0.5
+    - _Smoothness: 0.35
     - _SmoothnessRemapMax: 1
     - _SmoothnessRemapMin: 0
     - _SmoothnessTextureChannel: 0
@@ -327,8 +327,8 @@ Material:
     - _ZTestTransparent: 4
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.35, g: 0.37, b: 0.4, a: 1}
-    - _Color: {r: 0.34999996, g: 0.36999997, b: 0.39999998, a: 1}
+    - _BaseColor: {r: 0.62, g: 0.85, b: 0.74, a: 1}
+    - _Color: {r: 0.62, g: 0.85, b: 0.74, a: 1}
     - _DiffusionProfileAsset: {r: 0, g: 0, b: 0, a: 0}
     - _DoubleSidedConstants: {r: 1, g: 1, b: -1, a: 0}
     - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}

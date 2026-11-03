@@ -68,14 +68,18 @@ namespace DroneSandbox
             var firstLight = new Mission
             {
                 name = "First Light",
-                briefing = "Villagers report Dravin supply trucks parked somewhere along the south road: the grey circles are all we know. " +
-                           "Find them [1 Scout], destroy them [3 Kamikaze], and bring the Scouts home. A known AA gun covers the direct route.",
+                briefing = "Four reports of Dravin supply trucks parked along the south and east roads, and at least one is an inflatable " +
+                           "decoy. Get a Scout [1] over each grey circle and watch a moment to be sure, then spend Kamikazes [3] only on " +
+                           "real trucks. A known AA gun covers the direct route. Bring the Scouts home.",
                 scouts = 2, strikes = 0, kamikazes = 4, par = 5, startHour = 5.7f, contactRadius = 30f,
                 cameraFocus = new Vector3(-28f, 0f, -48f), cameraYaw = 70f, cameraDistance = 85f,
             };
-            Add(firstLight, EnemyType.Truck, 14f, -35f, 30f, target: true);
-            Add(firstLight, EnemyType.Truck, 18f, -41f, 45f, target: true);
-            Add(firstLight, EnemyType.Truck, 24f, -80f, 190f, target: true); // a second stop further down the road
+            // Three sites well apart (north by the crossroads, far down the south road, out on the east road) and a
+            // decoy south-west of them.
+            Add(firstLight, EnemyType.Truck, 12f, -36f, 30f, target: true);
+            Add(firstLight, EnemyType.Truck, 24f, -84f, 190f, target: true);
+            Add(firstLight, EnemyType.Truck, 62f, -44f, 240f, target: true);
+            Add(firstLight, EnemyType.Truck, -4f, -90f, 160f, decoy: true);
             Add(firstLight, EnemyType.AAGun, -20f, -47f, 120f);
             list.Add(firstLight);
 
@@ -146,9 +150,9 @@ namespace DroneSandbox
             return list;
         }
 
-        static void Add(Mission m, EnemyType type, float x, float z, float yaw, bool target = false, bool hidden = false)
+        static void Add(Mission m, EnemyType type, float x, float z, float yaw, bool target = false, bool hidden = false, bool decoy = false)
         {
-            m.units.Add(new MissionUnit { type = type, position = new Vector3(x, 0f, z), yaw = yaw, target = target, hidden = hidden });
+            m.units.Add(new MissionUnit { type = type, position = new Vector3(x, 0f, z), yaw = yaw, target = target, hidden = hidden, decoy = decoy });
         }
 
         // The stretch of a road between the points nearest `from` and `to`, in driving order, on the ground.

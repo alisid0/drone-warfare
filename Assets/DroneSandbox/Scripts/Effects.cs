@@ -354,6 +354,14 @@ namespace DroneSandbox
         }
 
         // A bullet striking metal.
+        // A puff of dust from the ground (a vehicle driving hard on a dirt road or across a field).
+        public static void Dust(Vector3 at)
+        {
+            if (!Ready()) return;
+            Emit(smoke, at + Vector3.up * 0.4f + Random.insideUnitSphere * 0.4f, Vector3.up * 0.5f + Random.insideUnitSphere * 0.4f,
+                Random.Range(1.2f, 1.8f), Random.Range(1.4f, 2.2f), Shade(new Color(0.62f, 0.54f, 0.42f, 0.4f)));
+        }
+
         // Smoke from a damaged vehicle: grey wisps at half health, thick and dark near the end (severity 0-1).
         public static void DamageSmoke(Vector3 at, float severity)
         {

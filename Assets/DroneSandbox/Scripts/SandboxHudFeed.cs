@@ -22,7 +22,7 @@ namespace DroneSandbox
             {
                 var f = DroneFeed.Instance;
                 return f != null && f.Visible && game.Mode != GameMode.Menu && !PhotoMode.Active
-                       && (f.Source != null || Time.unscaledTime - f.LostAt < 1.2f);
+                       && (f.Source != null || Time.unscaledTime - f.LostAt < 0.85f);
             }
         }
 
@@ -33,7 +33,14 @@ namespace DroneSandbox
             float s = Scale;
             Rect r = FeedPanel();
             Fill(new Rect(r.x - 3f * s, r.y - 20f * s, r.width + 6f * s, r.height + 23f * s), new Color(Ink.r, Ink.g, Ink.b, 0.92f));
-            bool lost = Time.unscaledTime - f.LostAt < 1.2f;
+            // The last picture holds for a moment, then the static.
+            float sinceLost = Time.unscaledTime - f.LostAt;
+            bool lost = sinceLost >= 0.15f && sinceLost < 0.85f;
+            if (sinceLost < 0.15f && f.Picture != null)
+            {
+                GUI.DrawTexture(r, f.Picture, ScaleMode.StretchToFill, false);
+                return;
+            }
             var title = Tinted(small, Teal);
             title.fontStyle = FontStyle.Bold;
             if (lost)

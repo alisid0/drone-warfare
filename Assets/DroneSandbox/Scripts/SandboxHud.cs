@@ -148,6 +148,7 @@ namespace DroneSandbox
             GUI.enabled = true;
             DrawMessage();
             DrawPauseBanner();
+            DrawTelemetry();
             if (Event.current.type == EventType.Repaint) DrawFeed();
 
             if (game.BriefingOpen) DrawBriefing();
@@ -219,11 +220,13 @@ namespace DroneSandbox
                     TargetBrackets(e, c, half, Hostile);
                     GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), e.unitName, centered);
                 }
-                else if (e.isTarget)
+                else if (e.LooksLikeTarget)
                 {
                     TargetBrackets(e, c, half + 4f * s, TargetColor);
-                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), "<b>TARGET</b>", targetLabel);
+                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), e.isTarget && e.Intel == Intel.Confirmed ? "<b>TARGET</b>" : "<b>TARGET?</b>", targetLabel);
                 }
+                else if (e.ExposedDecoy)
+                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 22f * s, 120f * s, 18f * s), "<b>DECOY</b>", Tinted(centered, new Color(0.75f, 0.78f, 0.8f)));
                 else EnemyMarker(e, c);
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
                 // An enemy that knows we're here: an amber "!" over it.
@@ -469,7 +472,8 @@ namespace DroneSandbox
         // (orders and phases teal, enemy activity orange, losses red, the rest amber).
         void DrawMessage()
         {
-            float s = Scale, now = Time.unscaledTime, y = 16f * s;
+            float s = Scale, now = Time.unscaledTime;
+            float y = 16f * s + (PhotoMode.Active ? 0f : DrawCriticalAlert()); // a drone under fire comes first
             game.Feed.RemoveAll(f => now > f.until);
             for (int i = 0; i < game.Feed.Count; i++)
             {
@@ -698,7 +702,8 @@ namespace DroneSandbox
             Fill(r, ModalColor);
             GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
             GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s),
-                $"The {Theatre.FrontKilometres:0} km Norvane-Dravin front     <b>{Theatre.Wins}</b> sectors won     <b>{Tech.Points}</b> points",
+                $"The {Theatre.FrontKilometres:0} km Norvane-Dravin front     <b>{Theatre.Wins}</b> sectors won     <b>{Tech.Points}</b> points     " +
+                $"campaign: intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  supply +{Theatre.Stacks(Theatre.Bonus.Supply)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}",
                 Tinted(centered, TargetColor));
 
             var mapRect = new Rect(r.x + 24f * s, r.y + 86f * s, r.width - 48f * s, (r.width - 48f * s) * 560f / 1024f);
@@ -740,7 +745,10 @@ namespace DroneSandbox
                     $"<b>Threat:</b> {ThreatOf(spot.situation)}     <b>Intel:</b> {IntelConfidence(spot)}%     " +
                     $"<b>Reward:</b> about {Mathf.RoundToInt((60f + 140f * spot.heat) / 10f) * 10} pts     " +
                     $"<b>Difficulty:</b> {(spot.heat < 0.35f ? "low" : spot.heat < 0.7f ? "medium" : "high")}", label);
-                GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 40f * s), type.blurb, smallWrap);
+                var bonus = Theatre.BonusOf(spot.situation);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 22f * s),
+                    $"<b>On win:</b> {Theatre.BonusText(bonus)}" + (Theatre.BonusMaxed(bonus) ? "  (already at most)" : ""), Tinted(label, Teal));
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 114f * s, card.width - 300f * s, 30f * s), type.blurb, smallWrap);
                 if (chosen != null)
                 {
                     var fly = new Rect(card.xMax - 250f * s, card.y + 22f * s, 230f * s, 50f * s);

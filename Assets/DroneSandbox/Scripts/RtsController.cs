@@ -118,6 +118,20 @@ namespace DroneSandbox
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Cam.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             Cam.transform.rotation = rotation;
+            // A big kill nudges the view a few pixels for a moment.
+            float shake = Mathf.Clamp01((impulseUntil - Time.unscaledTime) / 0.13f) * impulse;
+            if (shake > 0f)
+                Cam.transform.position += (Cam.transform.right * Mathf.Sin(Time.unscaledTime * 90f) + Cam.transform.up * Mathf.Cos(Time.unscaledTime * 70f))
+                                          * shake * distance * 0.0012f;
+        }
+
+        float impulse, impulseUntil;
+
+        // A short nudge of the view (strength about 1 for a tank, more for an ammunition dump).
+        public void Impulse(float strength)
+        {
+            impulse = Mathf.Max(strength, Time.unscaledTime < impulseUntil ? impulse : 0f);
+            impulseUntil = Time.unscaledTime + 0.13f;
         }
 
         // ---- Keyboard ----
@@ -134,6 +148,7 @@ namespace DroneSandbox
                 foreach (var d in selected) d.Stop();
             if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
             if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
+            if (GameInput.Pressed(GameKey.Telemetry)) hud.ToggleTelemetry();
             if (GameInput.Pressed(GameKey.Feed) && DroneFeed.Instance != null) DroneFeed.Instance.Visible = !DroneFeed.Instance.Visible;
             if (GameInput.Pressed(GameKey.Recall))
             {

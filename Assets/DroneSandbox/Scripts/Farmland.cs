@@ -20,6 +20,14 @@ namespace DroneSandbox
         static readonly Dictionary<Crop, Texture2D> textures = new Dictionary<Crop, Texture2D>();
         static Texture2D gravel;
         static Material fieldTemplate;
+        static readonly List<Object> made = new List<Object>(); // each field's own material and detail map, to free
+
+        // Frees the per-field materials and detail maps of the last farmland built (a new sector replaces it).
+        public static void Release()
+        {
+            foreach (var o in made) if (o != null) Object.Destroy(o);
+            made.Clear();
+        }
 
         public static void Build(Transform parent, System.Random rng)
         {
@@ -86,6 +94,7 @@ namespace DroneSandbox
             var tint = new Color(shade, shade, shade * (0.94f + (float)rng.NextDouble() * 0.08f));
             if (fieldTemplate == null) fieldTemplate = Resources.Load<Material>("Materials/FieldLit");
             var material = fieldTemplate != null ? new Material(fieldTemplate) { color = tint } : Art.NewMaterial(tint);
+            if (Application.isPlaying) made.Add(material);
             material.mainTexture = CropTexture(plot.crop);
             material.SetFloat("_Smoothness", 0f);
             if (fieldTemplate != null)
@@ -128,6 +137,7 @@ namespace DroneSandbox
             };
             tex.SetPixelData(bytes, 0);
             tex.Apply(true, true);
+            if (Application.isPlaying) made.Add(tex);
             return tex;
         }
 

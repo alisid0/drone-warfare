@@ -189,6 +189,11 @@ namespace DroneSandbox
             rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
             yield return new WaitForSeconds(1f);
             yield return Shot("07_overview");
+            var overlay = game.GetComponent<SandboxHud>();
+            overlay.ToggleTelemetry();
+            yield return new WaitForSecondsRealtime(2.2f);
+            yield return Shot("07c_telemetry");
+            overlay.ToggleTelemetry();
 
             log.WriteLine($"Sandbox done at {Time.time:F1}s. Destroyed: {game.enemiesDestroyed}, lost: {game.dronesLost}, " +
                           $"expended: {game.dronesExpended}, drones left: {game.drones.Count}, " +
@@ -597,13 +602,13 @@ namespace DroneSandbox
             var targets = game.enemies.FindAll(e => e.isTarget);
             log.WriteLine($"Mission 1 phase at start: {game.Phase}, target intel {(targets.Count > 0 ? targets[0].Intel.ToString() : "-")}");
             var recon = game.SpawnDrone(DroneType.Scout);
-            if (recon != null && targets.Count > 1)
+            if (recon != null)
             {
-                recon.MoveTo(new Vector3(-30f, 0f, -80f)); // south of the AA gun's ring
-                recon.MoveTo(targets[1].ContactPosition + new Vector3(-12f, 0f, -6f), true);
+                recon.MoveTo(new Vector3(-30f, 0f, -85f)); // south of the AA gun's ring
+                foreach (var site in game.enemies.FindAll(e => e.isTarget || e.isDecoy)) recon.MoveTo(site.ContactPosition, true);
             }
             rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 75f, 70f);
-            for (float t = 0f; t < 30f && game.Phase == MissionPhase.Recon && game.Result == MissionResult.None; t += 0.5f)
+            for (float t = 0f; t < 60f && game.Phase == MissionPhase.Recon && game.Result == MissionResult.None; t += 0.5f)
                 yield return new WaitForSecondsRealtime(0.5f);
             log.WriteLine($"Mission 1 recon: phase {game.Phase} after {game.MissionTime:F1}s");
             yield return Shot("08e_first_light_strike");
@@ -965,7 +970,10 @@ namespace DroneSandbox
             var texture = ScreenCapture.CaptureScreenshotAsTexture();
             File.WriteAllBytes(Path.Combine(outDir, name + ".png"), texture.EncodeToPNG());
             Destroy(texture);
-            log.WriteLine($"[{Time.time:F1}] screenshot {name}");
+            // Memory as we go, to catch a leak: texture memory, and how many textures, render textures and materials exist.
+            log.WriteLine($"[{Time.time:F1}] screenshot {name}   tex {Texture.currentTextureMemory / 1048576} MB, " +
+                          $"{Resources.FindObjectsOfTypeAll<Texture2D>().Length} tex2d, {Resources.FindObjectsOfTypeAll<RenderTexture>().Length} rt, " +
+                          $"{Resources.FindObjectsOfTypeAll<Material>().Length} mat");
         }
     }
 }

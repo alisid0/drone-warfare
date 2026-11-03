@@ -311,7 +311,7 @@ namespace DroneSandbox
                 style.alignment = TextAnchor.UpperCenter;
                 GUI.Label(new Rect(c.x - 60f * s, c.y + 10f * s, 120f * s, 16f * s),
                     (hovered ? e.unitName + ", " : "") + $"seen {Mathf.FloorToInt(age)} s ago", style);
-                if (e.isTarget) GUI.Label(new Rect(c.x - 60f * s, c.y - 30f * s, 120f * s, 18f * s), "<b>TARGET</b>", targetLabel);
+                if (e.LooksLikeTarget) GUI.Label(new Rect(c.x - 60f * s, c.y - 30f * s, 120f * s, 18f * s), "<b>TARGET?</b>", targetLabel);
             }
             else if (e.Intel == Intel.Contact)
             {
@@ -329,7 +329,7 @@ namespace DroneSandbox
                 if (!ToGui(centre + Vector3.up * 0.5f, out Vector2 c)) return;
                 Dot(c, 10f * s, new Color(Ink.r, Ink.g, Ink.b, 0.7f));
                 GUI.Label(new Rect(c.x - 10f * s, c.y - 10f * s, 20f * s, 20f * s), "<b>?</b>", Tinted(centered, grey));
-                if (e.isTarget) GUI.Label(new Rect(c.x - 60f * s, c.y - 30f * s, 120f * s, 18f * s), "<b>TARGET?</b>", targetLabel);
+                if (e.LooksLikeTarget) GUI.Label(new Rect(c.x - 60f * s, c.y - 30f * s, 120f * s, 18f * s), "<b>TARGET?</b>", targetLabel);
                 else if (e == rts.HoveredEnemy)
                     GUI.Label(new Rect(c.x - 60f * s, c.y + 12f * s, 120f * s, 16f * s), "unidentified contact", Tinted(small, grey));
             }

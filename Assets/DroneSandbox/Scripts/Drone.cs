@@ -33,6 +33,7 @@ namespace DroneSandbox
         float bobOffset;
         AudioSource motor;
         float motorPitch;
+        float lastYaw, bank;
         Transform body;
         readonly List<Transform> rotors = new List<Transform>();
         readonly List<GameObject> bombModels = new List<GameObject>();
@@ -46,7 +47,7 @@ namespace DroneSandbox
         public int BombsLeft { get; private set; }
         public int MissilesLeft { get; private set; }
         bool OutOfAmmo => (IsBomber && BombsLeft == 0) || (type == DroneType.Strike && MissilesLeft == 0);
-        float RearmTime => IsBomber ? RearmSeconds : 10f;
+        float RearmTime => (IsBomber ? RearmSeconds : 10f) * Theatre.RearmFactor; // the campaign's forward strips shorten it
         public Unit AttackTarget => attackTarget;
         public Vector3? MoveTarget => moveTarget;
         public IReadOnlyList<Vector3> Waypoints => waypoints;
@@ -371,7 +372,9 @@ namespace DroneSandbox
                     else
                     {
                         if (distance > weaponRange * 0.9f) goal = new Vector3(targetPos.x, CruiseHeight(targetPos) + bob, targetPos.z);
-                        if (distance <= weaponRange && fireCooldown <= 0f)
+                        // A Strike drone turns to line its missiles up before it fires.
+                        bool lined = type != DroneType.Strike || Vector3.Angle(transform.forward, flat) < 25f;
+                        if (distance <= weaponRange && fireCooldown <= 0f && lined)
                         {
                             Fire();
                             fireCooldown = fireInterval;
@@ -409,7 +412,9 @@ namespace DroneSandbox
         void Fly(Vector3 goal, bool diving, float dt)
         {
             Vector3 toGoal = goal - transform.position;
-            Vector3 desired = diving ? toGoal.normalized * speed : Vector3.ClampMagnitude(toGoal * 2f, speed);
+            // A Kamikaze picks up speed through the last 40 m of its dive.
+            float dive = diving ? Mathf.Lerp(1.6f, 1f, Mathf.Clamp01(toGoal.magnitude / 40f)) : 1f;
+            Vector3 desired = diving ? toGoal.normalized * speed * dive : Vector3.ClampMagnitude(toGoal * 2f, speed);
             if (!diving) desired += Separation() * 4f;
             velocity = Vector3.MoveTowards(velocity, desired, speed * 2.5f * dt);
             transform.position += velocity * dt;
@@ -433,9 +438,16 @@ namespace DroneSandbox
             if (facing.sqrMagnitude > 0.01f)
                 transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(facing), 360f * dt);
 
-            // Lean into the direction of travel like a real multirotor, and spin the props.
+            // Lean into the direction of travel like a real multirotor, bank into turns (light, nimble types more),
+            // nose down in a dive, and spin the props.
             Vector3 local = transform.InverseTransformDirection(flatVelocity);
-            body.localRotation = Quaternion.Euler(local.z / speed * 20f, 0f, -local.x / speed * 20f);
+            float yawNow = transform.eulerAngles.y;
+            float turnRate = dt > 0f ? Mathf.DeltaAngle(lastYaw, yawNow) / dt : 0f;
+            lastYaw = yawNow;
+            float maxBank = IsKamikaze ? 24f : type == DroneType.Scout ? 14f : IsBomber ? 6f : 9f;
+            bank = Mathf.Lerp(bank, Mathf.Clamp(-turnRate * 0.12f, -maxBank, maxBank), 1f - Mathf.Exp(-dt / 0.25f));
+            float pitchDown = diving ? 25f : 0f;
+            body.localRotation = Quaternion.Euler(local.z / speed * 20f + pitchDown, 0f, -local.x / speed * 20f + bank);
             foreach (var rotor in rotors) rotor.Rotate(body.up, 1800f * dt, Space.World);
             if (motor != null) motor.pitch = motorPitch * (0.92f + 0.22f * Mathf.Clamp01(velocity.magnitude / speed)) * (diving ? 1.12f : 1f);
             float beat = Mathf.Repeat(Time.time + bobOffset, 1.3f); // the strobe double-flashes every 1.3 s

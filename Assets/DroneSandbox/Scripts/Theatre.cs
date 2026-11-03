@@ -106,10 +106,46 @@ namespace DroneSandbox
 
         public static bool Done(Hotspot h) => PlayerPrefs.GetInt(h.Key + ".won", 0) > 0;
 
-        // A win cools the hotspot, pushes the front and brings the next round of fighting.
+        // ---- What winning buys (campaign bonuses, saved) ----
+
+        public enum Bonus { Intel, Supply, Rearm }
+
+        // What a sector's fight gives you for the rest of the war: beating air defences, jammers or decoys sharpens
+        // the reports (tighter contact circles); hitting logistics or columns frees up a Kamikaze for every
+        // mission; armour, artillery and airfield sectors give a forward strip (faster rearming).
+        public static Bonus BonusOf(Situation s)
+        {
+            switch (s)
+            {
+                case Situation.AAScreen: case Situation.AirDefenceBelt: case Situation.RadarStation: case Situation.JammingNode:
+                case Situation.DroneLaunchSite: case Situation.DecoyField: case Situation.ObservationPost:
+                    return Bonus.Intel;
+                case Situation.ArmouredColumn: case Situation.TankLaager: case Situation.DugInTanks: case Situation.Breakthrough:
+                case Situation.HiddenArtillery: case Situation.MortarLine: case Situation.RocketBattery: case Situation.AirfieldStrike:
+                    return Bonus.Rearm;
+                default:
+                    return Bonus.Supply;
+            }
+        }
+
+        static readonly int[] MaxStacks = { 3, 2, 2 };
+
+        public static int Stacks(Bonus b) => PlayerPrefs.GetInt("campaign." + b, 0);
+        public static float IntelFactor => 1f - 0.15f * Stacks(Bonus.Intel);   // contact circles in briefings
+        public static int SupplyBonus => Stacks(Bonus.Supply);                 // extra Kamikazes per mission
+        public static float RearmFactor => 1f - 0.15f * Stacks(Bonus.Rearm);   // Strike and Nightjar reload time
+
+        public static string BonusText(Bonus b) => b == Bonus.Intel ? "sharper reports (contact circles 15% tighter)"
+            : b == Bonus.Supply ? "+1 Kamikaze in every mission" : "a forward strip (rearming 15% faster)";
+
+        public static bool BonusMaxed(Bonus b) => Stacks(b) >= MaxStacks[(int)b];
+
+        // A win cools the hotspot, pushes the front, banks the sector's bonus and brings the next round of fighting.
         public static void Won(Hotspot h)
         {
             if (!SandboxGame.SaveProgress) return;
+            var bonus = BonusOf(h.situation);
+            PlayerPrefs.SetInt("campaign." + bonus, Mathf.Min(MaxStacks[(int)bonus], Stacks(bonus) + 1));
             PlayerPrefs.SetInt(h.Key + ".won", 1);
             PlayerPrefs.SetInt("theatre.wins", Wins + 1);
             // Every third win starts a new round: the hotspots move.

@@ -799,6 +799,8 @@ namespace DroneSandbox.EditorTools
             ("WoodLight", "wood", new Color(1.1f, 1.0f, 0.9f), 2f, 0.1f, 0f),
             ("RoofFelt", "asphalt", new Color(0.7f, 0.7f, 0.7f), 3f, 0.15f, 0f),
             ("Bark", "bark", new Color(0.8f, 0.8f, 0.8f), 1.5f, 0.05f, 0f),
+            // The church spire: weathered copper gone green (as a near-black metal it read as a hole from above).
+            ("Spire", "green_metal", new Color(0.62f, 0.85f, 0.74f), 1.5f, 0.35f, 0.25f),
             // Bark of the trees from make_trees.py (UVs run round and along the branches, in metres).
             ("BarkOak", "oak_bark", new Color(0.95f, 0.92f, 0.9f), 1.6f, 0.08f, 0f),
             ("BarkBirch", "birch_bark", Color.white, 1.6f, 0.15f, 0f),
@@ -810,7 +812,6 @@ namespace DroneSandbox.EditorTools
             ("RoofTile", "roof_tiles", Color.white, 2.5f, 0.2f, 0f),
             ("RoofMetal", "corrugated", new Color(1.0f, 1.03f, 1.08f), 2f, 0.4f, 0.3f),
             ("RoofBarn", "worn_corrugated", new Color(0.8f, 0.78f, 0.75f), 2.5f, 0.3f, 0.3f),
-            ("Spire", "corrugated", new Color(0.35f, 0.37f, 0.4f), 2f, 0.5f, 0.6f),
             ("Brick", "brick", Color.white, 1.5f, 0.1f, 0f),
             ("DoorWood", "rough_wood", new Color(0.45f, 0.33f, 0.25f), 1.5f, 0.1f, 0f),
             ("WeatheredPlanks", "plank_siding", new Color(1.1f, 1.05f, 1.0f), 2.5f, 0.08f, 0f),
