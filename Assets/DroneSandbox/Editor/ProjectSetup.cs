@@ -43,7 +43,9 @@ namespace DroneSandbox.EditorTools
             CreateDecalMaterial();
             CreatePbrMaterials();
             WeatheringSetup.CreateDamDecals();
+            WeatheringSetup.CreateScorchDecal();
             CreateRainMaterial();
+            CreateEffectMaterials();
             AssetDatabase.SaveAssets();
             SetUpMainScene();
 
@@ -476,6 +478,46 @@ namespace DroneSandbox.EditorTools
             material.SetColor("_UnlitColor", new Color(0.78f, 0.82f, 0.88f, 0.45f));
             HdrpSetup.Transparent(material);
             HdrpSetup.Finish(material, instancing: false);
+        }
+
+        // Explosions, smoke and fire (Effects): Unity's Flipbook Blending particle shader from the Shader Graph
+        // samples, copied into Shaders/Particles as ParticleSmoke (unlit, alpha-blended) and ParticleFire (unlit,
+        // additive). Smoke and fireballs share the puff atlas painted by Tools/make_smoke_puffs.py; flames on wrecks
+        // use the flame flipbook from the Visual Effect Graph samples; sparks use the soft dot.
+        static void CreateEffectMaterials()
+        {
+            var smokeShader = Shader.Find("Shader Graphs/ParticleSmoke");
+            var fireShader = Shader.Find("Shader Graphs/ParticleFire");
+            if (smokeShader == null || fireShader == null)
+            {
+                Debug.LogError("Drone Sandbox: the particle shaders (Shaders/Particles) are missing.");
+                return;
+            }
+            if (!AssetDatabase.IsValidFolder(Root + "/Materials/FX")) AssetDatabase.CreateFolder(Root + "/Materials", "FX");
+            var puffs = EffectTexture("SmokePuffs.png");
+            var flame = EffectTexture("Flame03_Temp_16x5.png");
+            var dot = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Textures/SoftDot.png");
+            foreach (var (name, shader, texture) in new[] { ("Smoke", smokeShader, puffs), ("Fire", fireShader, puffs), ("Flame", fireShader, flame), ("Spark", fireShader, dot) })
+            {
+                var material = LoadOrCreateMaterial(Root + "/Materials/FX/" + name + ".mat", shader);
+                material.SetTexture("_BaseMap", texture);
+                HdrpSetup.Finish(material, instancing: false);
+            }
+        }
+
+        static Texture2D EffectTexture(string file)
+        {
+            string path = Root + "/Textures/FX/" + file;
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer)
+            {
+                importer.textureType = TextureImporterType.Default;
+                importer.alphaIsTransparency = true;
+                importer.wrapMode = TextureWrapMode.Clamp;
+                importer.mipmapEnabled = true;
+                importer.maxTextureSize = 2048;
+                importer.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         // The distant farmland's texture (Backdrop.Patchwork), made once here rather than at every start.

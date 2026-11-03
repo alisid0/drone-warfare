@@ -8,26 +8,29 @@ namespace DroneSandbox
 {
     // Scripted smoke test. Start the game with  -autotest <folder>  and it plays a short battle by itself,
     // saves screenshots plus a log of errors and stats into that folder, then quits.
-    // Without the flag this does nothing.
+    // With  -demo <folder>  it instead plays one mission like a player and records it frame by frame (Demo).
+    // Without either flag this does nothing.
     public class AutoTest : MonoBehaviour
     {
         string outDir;
         StreamWriter log;
         int errors;
+        bool demo;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Launch()
         {
             string[] args = Environment.GetCommandLineArgs();
-            int i = Array.IndexOf(args, "-autotest");
-            if (i < 0 || i + 1 >= args.Length) return;
-            new GameObject("Auto Test").AddComponent<AutoTest>().Begin(args[i + 1]);
+            int i = Array.IndexOf(args, "-autotest"), d = Array.IndexOf(args, "-demo");
+            if (d >= 0 && d + 1 < args.Length) new GameObject("Auto Test").AddComponent<AutoTest>().Begin(args[d + 1], true);
+            else if (i >= 0 && i + 1 < args.Length) new GameObject("Auto Test").AddComponent<AutoTest>().Begin(args[i + 1], false);
         }
 
-        void Begin(string folder)
+        void Begin(string folder, bool recordDemo)
         {
             SandboxGame.SaveProgress = false; // test runs don't touch the player's stars, points or purchases
             Tech.UseTestWallet();
+            demo = recordDemo;
             outDir = folder;
             Directory.CreateDirectory(outDir);
             log = new StreamWriter(Path.Combine(outDir, "autotest.log")) { AutoFlush = true };
@@ -54,6 +57,14 @@ namespace DroneSandbox
             yield return new WaitForSeconds(1.5f);
             var game = SandboxGame.Instance;
             var rts = game.GetComponent<RtsController>();
+            if (demo)
+            {
+                yield return Demo(game, rts);
+                log.WriteLine($"Demo done: {recorded} frames, {game.Result} ({game.ResultReason}), drones used {game.DronesUsed}. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
             yield return Shot("00_menu");
             game.StartSandbox();
             yield return new WaitForSeconds(0.5f);
@@ -181,6 +192,7 @@ namespace DroneSandbox
             dayNight.SetTime(10f, 1f);
 
             yield return BeautyShots();
+            yield return ExplosionShots(game, rts);
             yield return EmptyAndRearm(game, rts);
             yield return PlayMissions(game, rts);
             yield return SectorTour(game, rts);
@@ -257,6 +269,55 @@ namespace DroneSandbox
             photo.Exit();
             dayNight.SetTime(10f, 1f);
             log.WriteLine($"Photo mode: {shots.Length} shots, dam at {dam}, lake level {lake}, river at the dam {river:F1}");
+        }
+
+        // Explosions from the game camera zoomed right in, on open ground by the base: a blast frame by frame (made
+        // into a GIF outside the game), a tank blown up and left burning, and a blast at night for its flash.
+        IEnumerator ExplosionShots(SandboxGame game, RtsController rts)
+        {
+            var dayNight = DayNight.Instance;
+            Vector3 spot = Ground.OnGround(OpenGroundNear(game.basePosition));
+            dayNight.SetTime(10f, 0f);
+            rts.LookAt(spot, 24f, 30f);
+            yield return new WaitForSeconds(0.5f);
+            Effects.Explosion(spot + Vector3.up, 5f);
+            for (int frame = 0; frame < 30; frame++)
+            {
+                yield return Shot($"50_clip_blast_{frame:00}");
+                yield return new WaitForSeconds(0.1f);
+            }
+
+            var tank = game.SpawnEnemy(EnemyType.Tank, spot + new Vector3(6f, 0f, -4f), 30f);
+            yield return new WaitForSeconds(0.3f);
+            tank.TakeDamage(10000f);
+            yield return new WaitForSeconds(1.2f);
+            yield return Shot("51_wreck_burning");
+            yield return new WaitForSeconds(4f);
+            yield return Shot("52_wreck_smoke");
+
+            dayNight.SetTime(23f, 0f);
+            yield return new WaitForSeconds(1f);
+            Effects.Explosion(spot + new Vector3(-6f, 1f, 5f), 5f);
+            foreach (float wait in new[] { 0.05f, 0.25f, 0.8f })
+            {
+                yield return new WaitForSeconds(wait);
+                yield return Shot($"53_blast_night_{wait:0.00}");
+            }
+            dayNight.SetTime(10f, 1f);
+            log.WriteLine($"Explosions at {spot}: shots done, {FindObjectsByType<Effects>().Length} effects alive");
+        }
+
+        // The nearest dry spot (going out in rings) with no tree within 25 m, so the camera sees the ground.
+        static Vector3 OpenGroundNear(Vector3 from)
+        {
+            for (float reach = 30f; reach < 300f; reach += 15f)
+                for (float angle = 0f; angle < 360f; angle += 20f)
+                {
+                    var p = new Vector2(from.x, from.z) + new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
+                    bool dry = MapLayout.LakeDistance(p.x, p.y) > 10f && MapLayout.RiverField.Distance(p.x, p.y) > MapLayout.RiverHalfWidth + 8f;
+                    if (dry && !Undergrowth.UnderTrees(p, 25f)) return new Vector3(p.x, 0f, p.y);
+                }
+            return from;
         }
 
         // A tour of generated sectors: the theatre map, then a dozen kinds of sector, each built, photographed from
@@ -515,6 +576,211 @@ namespace DroneSandbox
 
             game.OpenMenu();
             yield return new WaitForSecondsRealtime(1f);
+        }
+
+        // ---- Gameplay recording (-demo) ----
+
+        // Plays one generated mission the way a player would, from the menu and the theatre map through the briefing
+        // to the result: launches drones in waves, sends them at the column, and follows the fight with the camera.
+        // Every frame is saved (Record) at a steady 30 frames per second of game time, however slowly the machine
+        // draws them, to be made into a video outside the game.
+        const int DemoFps = 30;
+        bool recording;
+        int recorded;
+        Vector3 camFocus;
+        float camDistance, camYaw;
+
+        IEnumerator Demo(SandboxGame game, RtsController rts)
+        {
+            Tech.Earn(1000);
+            foreach (var item in Tech.Items) Tech.Buy(item); // the whole arsenal, the Nightjar included
+            var hud = game.GetComponent<SandboxHud>();
+            Time.captureFramerate = DemoFps;
+            recording = true;
+            StartCoroutine(Record());
+
+            // The main menu, then the theatre map.
+            yield return Hold(3f);
+            hud.TheatreOpen = true;
+            yield return Hold(4f);
+            hud.TheatreOpen = false;
+
+            // Quenfield, a farmland river valley: an armoured column is driving for the bridge.
+            var hotspot = new Hotspot { kind = SectorKind.RiverValley, seed = 1000, situation = Situation.BridgeCrossing, daylight = Daylight.Day, weather = Weather.Clear };
+            hotspot.sectorName = hotspot.Plan().name;
+            game.PlayHotspot(hotspot);
+            while (game.Loading) yield return null;
+            yield return Hold(5f); // reading the briefing
+            game.CloseBriefing();
+            hud.showHelp = false;
+
+            var targets = game.enemies.FindAll(e => e.isTarget);
+            var aa = game.enemies.Find(e => e.type == EnemyType.AAGun);
+            camFocus = Ground.OnGround(game.Mission.cameraFocus);
+            camDistance = game.Mission.cameraDistance;
+            camYaw = game.Mission.cameraYaw;
+            Vector3 Lead()
+            {
+                var t = targets.Find(e => e != null && e.IsAlive);
+                return t != null ? t.transform.position : camFocus;
+            }
+            void Order(Drone drone, Unit target)
+            {
+                rts.selected.Clear();
+                rts.selected.Add(drone);
+                drone.Attack(target);
+                Effects.Marker(target.transform.position, Art.EnemyRed);
+            }
+
+            // The first wave, as a player pressing 1-4 and right-clicking: a Scout over the column, Strikes on the
+            // AA gun, Kamikazes and the Nightjar on the vehicles.
+            var firstWave = new (float at, DroneType type, int target)[]
+            {
+                (2f, DroneType.Scout, -1), (2.6f, DroneType.Strike, -2), (3.2f, DroneType.Strike, -2),
+                (4.5f, DroneType.Kamikaze, 0), (5.1f, DroneType.Kamikaze, 1), (8f, DroneType.Bomber, 2),
+            };
+            int launched = 0;
+            float clock = 0f, nextCheck = 14f, linger = 0f;
+            Drone subject = null;
+            bool following = false;
+            while (game.Result == MissionResult.None && clock < 150f)
+            {
+                while (launched < firstWave.Length && clock >= firstWave[launched].at)
+                {
+                    var step = firstWave[launched++];
+                    var drone = game.SpawnDrone(step.type);
+                    if (drone == null) continue;
+                    if (step.target == -1)
+                    {
+                        rts.selected.Clear();
+                        rts.selected.Add(drone);
+                        drone.MoveTo(Lead());
+                        Effects.Marker(Lead(), new Color(0.35f, 1f, 0.6f));
+                    }
+                    else
+                    {
+                        Unit target = step.target == -2 && aa != null && aa.IsAlive ? aa : AliveAt(targets, step.target);
+                        if (target != null) Order(drone, target);
+                    }
+                }
+                // Then every few seconds: idle drones join in, and a fresh drone goes for any vehicle nobody is after.
+                if (clock >= nextCheck)
+                {
+                    nextCheck += 3f;
+                    foreach (var d in game.drones)
+                        if (d != null && d.IsAlive && d.AttackTarget == null && d.type != DroneType.Scout)
+                        {
+                            var t = AliveAt(targets, 0);
+                            if (t != null) d.Attack(t);
+                        }
+                    var free = targets.Find(e => e != null && e.IsAlive && !game.drones.Exists(d => d != null && d.AttackTarget == e));
+                    var type = game.StockLeft(DroneType.Kamikaze) > 0 ? DroneType.Kamikaze : DroneType.Strike;
+                    if (free != null && game.StockLeft(type) > 0)
+                    {
+                        var fresh = game.SpawnDrone(type);
+                        if (fresh != null) Order(fresh, free);
+                    }
+                }
+
+                // The camera rides with the drone closest to its target, frames drone and target together as it
+                // closes in, and stays on the blast a moment when it hits.
+                if (linger > 0f) linger -= 1f / DemoFps;
+                else if (following && !Busy(subject))
+                {
+                    following = false;
+                    linger = 2.5f;
+                }
+                else
+                {
+                    subject = Subject(game, subject);
+                    following = subject != null;
+                    if (following)
+                    {
+                        Vector3 a = subject.transform.position, b = subject.AttackTarget.transform.position;
+                        float gap = Vector3.Distance(a, b);
+                        if (gap > 90f) Aim(a + (b - a).normalized * 25f, 50f);
+                        else Aim(Vector3.Lerp(b, a, 0.35f), Mathf.Clamp(gap * 0.6f + 28f, 30f, 70f));
+                    }
+                    else Aim(Lead(), 55f);
+                }
+                Glide(rts, 2f);
+                clock += 1f / DemoFps;
+                yield return null;
+            }
+
+            // The result panel.
+            for (int f = 0; f < 6 * DemoFps; f++)
+            {
+                Glide(rts, 2f);
+                yield return null;
+            }
+            recording = false;
+            Time.captureFramerate = 0;
+        }
+
+        Vector3 shotFocus;
+        float shotDistance = 55f;
+
+        void Aim(Vector3 focus, float distance)
+        {
+            shotFocus = focus;
+            shotDistance = distance;
+        }
+
+        // Eases the camera toward the shot Aim chose, turning slowly round it. A shot far across the map is a cut
+        // instead, rather than a long smeared whip pan.
+        void Glide(RtsController rts, float turnPerSecond)
+        {
+            if (shotFocus == Vector3.zero) shotFocus = camFocus;
+            float k = 1f - Mathf.Exp(-1.8f / DemoFps);
+            camFocus = Vector3.Distance(camFocus, shotFocus) > 120f ? shotFocus : Vector3.Lerp(camFocus, shotFocus, k);
+            camDistance = Mathf.Lerp(camDistance, shotDistance, k);
+            camYaw += turnPerSecond / DemoFps;
+            rts.LookAt(camFocus, camDistance, camYaw);
+        }
+
+        static bool Busy(Drone d) => d != null && d.IsAlive && d.AttackTarget != null;
+
+        // The drone closest to its target, keeping the one already followed unless another is a good deal closer.
+        static Drone Subject(SandboxGame game, Drone current)
+        {
+            float Gap(Drone d) => Vector3.Distance(d.transform.position, d.AttackTarget.transform.position);
+            Drone best = null;
+            float bestGap = float.MaxValue;
+            foreach (var d in game.drones)
+                if (Busy(d) && Gap(d) < bestGap)
+                {
+                    best = d;
+                    bestGap = Gap(d);
+                }
+            return Busy(current) && Gap(current) < bestGap + 40f ? current : best;
+        }
+
+        // The n-th of the targets still alive (counting round).
+        static EnemyUnit AliveAt(List<EnemyUnit> targets, int n)
+        {
+            var alive = targets.FindAll(e => e != null && e.IsAlive);
+            return alive.Count == 0 ? null : alive[n % alive.Count];
+        }
+
+        // Waits this many seconds of video, counted in frames, so it also runs while a panel has the game paused.
+        static IEnumerator Hold(float seconds)
+        {
+            for (int i = Mathf.RoundToInt(seconds * DemoFps); i > 0; i--) yield return null;
+        }
+
+        IEnumerator Record()
+        {
+            string dir = Path.Combine(outDir, "frames");
+            Directory.CreateDirectory(dir);
+            while (recording)
+            {
+                yield return new WaitForEndOfFrame();
+                var texture = ScreenCapture.CaptureScreenshotAsTexture();
+                File.WriteAllBytes(Path.Combine(dir, $"f{recorded:00000}.jpg"), texture.EncodeToJPG(90));
+                Destroy(texture);
+                recorded++;
+            }
         }
 
         static EnemyUnit NearestVisible(Vector3 from)

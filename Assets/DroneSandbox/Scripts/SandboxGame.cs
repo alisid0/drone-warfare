@@ -247,7 +247,7 @@ namespace DroneSandbox
             enemies.Clear();
             foreach (var p in Object.FindObjectsByType<Projectile>()) Destroy(p.gameObject);
             foreach (var fx in Object.FindObjectsByType<Effects>()) Destroy(fx.gameObject);
-            Effects.Unburn();
+            Effects.Clear();
             DayNight.Instance?.SetThermal(false);
             rts.selected.Clear();
             enemiesDestroyed = dronesLost = dronesExpended = 0;

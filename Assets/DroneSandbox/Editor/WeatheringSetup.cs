@@ -5,9 +5,10 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox.EditorTools
 {
-    // The decals that weather the dam (placed by DamWeathering): generated textures, colour with the coverage in
-    // alpha, and HDRP decal materials that darken and tint the concrete and change how glossy it is (moss stays
-    // matt, damp and algae shine). Saved in Resources so player builds keep the decal shader.
+    // The decals that weather the dam (placed by DamWeathering), and the scorch marks explosions leave (Effects):
+    // generated textures, colour with the coverage in alpha, and HDRP decal materials that darken and tint the
+    // surface and change how glossy it is (moss stays matt, damp and algae shine). Saved in Resources so player
+    // builds keep the decal shader.
     public static class WeatheringSetup
     {
         const string Root = "Assets/DroneSandbox/Resources";
@@ -33,6 +34,14 @@ namespace DroneSandbox.EditorTools
                 HDMaterial.ValidateMaterial(water);
                 EditorUtility.SetDirty(water);
             }
+        }
+
+        // The scorch mark an explosion leaves on the ground (Effects.Explosion), made the same way.
+        public static void CreateScorchDecal()
+        {
+            var shader = Shader.Find("HDRP/Decal");
+            if (shader == null) return;
+            Make(shader, "DecalScorch", Scorch, 0.05f);
         }
 
         static void Make(Shader shader, string name, System.Func<float, float, Color> paint, float smoothness)
@@ -121,6 +130,19 @@ namespace DroneSandbox.EditorTools
             float cover = Mathf.SmoothStep(0.25f, 0.7f, bands * 0.5f + patches * 0.5f);
             var colour = Color.Lerp(new Color(0.15f, 0.19f, 0.1f), new Color(0.33f, 0.34f, 0.2f), fine);
             colour.a = (0.35f + 0.55f * cover) * SideFade(u, v);
+            return colour;
+        }
+
+        // Burnt ground: sooty black in the middle, thinning out to a ragged rim with streaks thrown outwards.
+        static Color Scorch(float u, float v)
+        {
+            float x = u * 2f - 1f, y = v * 2f - 1f, r = Mathf.Sqrt(x * x + y * y), angle = Mathf.Atan2(y, x);
+            float rays = Mathf.PerlinNoise(angle * 2.6f + 13f, 0.5f) * 0.6f + Mathf.PerlinNoise(angle * 9f + 3f, 4.5f) * 0.4f;
+            float reach = 0.42f + rays * 0.45f + (Noise(u, v, 6f, 29f) - 0.5f) * 0.2f;
+            float soot = 1f - Mathf.SmoothStep(0f, 1f, r / reach);
+            float patchy = Noise(u, v, 18f, 61f) * 0.6f + Noise(u, v, 60f, 7f) * 0.4f;
+            var colour = Color.Lerp(new Color(0.03f, 0.028f, 0.025f), new Color(0.16f, 0.13f, 0.1f), Mathf.Clamp01(r / reach + (patchy - 0.5f) * 0.6f));
+            colour.a = Mathf.Clamp01(soot * 1.6f) * (0.65f + 0.35f * patchy) * Mathf.SmoothStep(1f, 0.9f, r);
             return colour;
         }
 
