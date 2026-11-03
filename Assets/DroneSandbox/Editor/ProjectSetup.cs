@@ -316,6 +316,7 @@ namespace DroneSandbox.EditorTools
             // Tufts fade into the ground with distance, so zoomed out the meadow reads as colour, not specks.
             m.SetFloat("Distance_Fade_Start", 60f);
             m.SetFloat("Distance_Fade_End", 110f);
+            m.SetColor("Fade_Color", new Color(0.3f, 0.38f, 0.14f, 0f)); // fade toward meadow green, not the graph's black
         }
 
         // Blades of grass growing up from the bottom edge, darker at the root and lighter (some dry) at the tip.

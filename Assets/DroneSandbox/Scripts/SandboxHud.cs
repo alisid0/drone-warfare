@@ -31,6 +31,7 @@ namespace DroneSandbox
             "Tab  -  tactical pause     F  -  centre on selection",
             "B  -  bring selected (or all) drones home",
             "Double-click a drone  -  follow it with the camera",
+            "V  -  show or hide the drone's camera feed",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
             "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
@@ -103,6 +104,7 @@ namespace DroneSandbox
                 || StatsPanel().Contains(p)
                 || MenuButton().Contains(p)
                 || (showHelp && HelpPanel().Contains(p))
+                || (FeedShowing && FeedPanel().Contains(p))
                 || (rts != null && rts.selected.Count > 0 && SelectionPanel().Contains(p));
         }
 
@@ -146,6 +148,7 @@ namespace DroneSandbox
             GUI.enabled = true;
             DrawMessage();
             DrawPauseBanner();
+            if (Event.current.type == EventType.Repaint) DrawFeed();
 
             if (game.BriefingOpen) DrawBriefing();
             else if (game.Result != MissionResult.None && Time.unscaledTime >= game.ResultsAt) DrawResults();
@@ -165,6 +168,15 @@ namespace DroneSandbox
             smallWrap = new GUIStyle(small) { wordWrap = true };
             centered = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(14f * s), richText = true };
+            // Flat command-console buttons: dark slate, a teal edge and lighter on hover, teal when pressed.
+            button.normal.background = Flat(new Color(0.09f, 0.14f, 0.17f), new Color(0.2f, 0.3f, 0.34f));
+            button.hover.background = Flat(new Color(0.12f, 0.2f, 0.24f), Teal);
+            button.active.background = Flat(new Color(0.1f, 0.32f, 0.33f), Teal);
+            button.onNormal.background = button.normal.background;
+            button.normal.textColor = new Color(0.85f, 0.95f, 1f);
+            button.hover.textColor = Color.white;
+            button.active.textColor = Color.white;
+            button.border = new RectOffset(2, 2, 2, 2);
             leftButton = new GUIStyle(button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(Mathf.RoundToInt(16f * s), 8, 4, 4) };
             big = new GUIStyle(label) { fontSize = Mathf.RoundToInt(34f * s), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             heading = new GUIStyle(label) { fontSize = Mathf.RoundToInt(24f * s), fontStyle = FontStyle.Bold };
@@ -493,7 +505,7 @@ namespace DroneSandbox
             GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 22f * s),
-                "Destroy enemy targets with a limited stock of drones. Fewer drones, more stars.",
+                "Find them. Strike them. Bring your drones home. Every drone you spend or lose costs a star.",
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(13f * s) }, small.normal.textColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 120f * s, r.width - 60f * s, 40f * s),
                 $"{Capitalised(Factions.Region)}: you fly for the {Factions.Player} against the {Factions.Enemy}. " +
@@ -838,6 +850,19 @@ namespace DroneSandbox
         static string Clock(float seconds) => $"{(int)seconds / 60}:{(int)seconds % 60:00}";
 
         static string Capitalised(string text) => string.IsNullOrEmpty(text) ? text : char.ToUpperInvariant(text[0]) + text.Substring(1);
+
+        // A 6 x 6 button background: a fill with a one-pixel edge (the style's border keeps the edge thin when stretched).
+        static Texture2D Flat(Color fill, Color edge)
+        {
+            var t = new Texture2D(6, 6, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            var pixels = new Color[36];
+            for (int y = 0; y < 6; y++)
+                for (int x = 0; x < 6; x++)
+                    pixels[y * 6 + x] = x == 0 || y == 0 || x == 5 || y == 5 ? edge : fill;
+            t.SetPixels(pixels);
+            t.Apply();
+            return t;
+        }
 
         static GUIStyle Tinted(GUIStyle style, Color color)
         {

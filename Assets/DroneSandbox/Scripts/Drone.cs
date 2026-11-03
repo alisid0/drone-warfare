@@ -535,6 +535,7 @@ namespace DroneSandbox
         void Detonate()
         {
             hp = 0f;
+            DroneFeed.Instance?.SignalLost(this);
             Combat.Blast(transform.position, 5f, weaponDamage, team);
             Effects.Explosion(transform.position, 5f);
             SandboxGame.Instance.OnDroneExpended(this);

@@ -66,6 +66,8 @@ namespace DroneSandbox
                 yield break;
             }
             yield return Shot("00_menu");
+            Sound.ExportReel(Path.Combine(outDir, "sound_reel.wav"));
+            log.WriteLine("Sound reel written");
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
@@ -606,12 +608,16 @@ namespace DroneSandbox
             log.WriteLine($"Mission 1 recon: phase {game.Phase} after {game.MissionTime:F1}s");
             yield return Shot("08e_first_light_strike");
 
-            // Strike: a Kamikaze at each truck.
+            // Strike: a Kamikaze at each truck, the first one's camera feed on screen as it dives.
+            rts.selected.Clear();
             foreach (var target in targets)
             {
                 var drone = game.SpawnDrone(DroneType.Kamikaze);
                 if (drone != null && target != null) drone.Attack(target);
+                if (drone != null && rts.selected.Count == 0) rts.selected.Add(drone);
             }
+            yield return new WaitForSecondsRealtime(2.5f);
+            yield return Shot("08g_kamikaze_feed");
             for (float t = 0f; t < 30f && game.Phase != MissionPhase.Extract && game.Result == MissionResult.None; t += 0.5f)
                 yield return new WaitForSecondsRealtime(0.5f);
             yield return Shot("08f_first_light_extract");

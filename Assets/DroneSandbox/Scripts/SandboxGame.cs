@@ -85,6 +85,7 @@ namespace DroneSandbox
             gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
             Sound.Create(gameObject, cam, rts);
             gameObject.AddComponent<Recon>();
+            DroneFeed.Create(gameObject, rts);
             OpenMenu();
         }
 
@@ -547,6 +548,7 @@ namespace DroneSandbox
                 drones.Remove(drone);
                 dronesLost++;
                 Sound.At("drone down", drone.transform.position);
+                DroneFeed.Instance?.SignalLost(drone);
             }
             else if (unit is EnemyUnit enemy)
             {

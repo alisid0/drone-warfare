@@ -134,6 +134,7 @@ namespace DroneSandbox
                 foreach (var d in selected) d.Stop();
             if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
             if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
+            if (GameInput.Pressed(GameKey.Feed) && DroneFeed.Instance != null) DroneFeed.Instance.Visible = !DroneFeed.Instance.Visible;
             if (GameInput.Pressed(GameKey.Recall))
             {
                 game.Recall(selected);

@@ -193,6 +193,51 @@ namespace DroneSandbox
             return true;
         }
 
+        // Every sound in the game one after another, with a short gap, as a 16-bit mono WAV file: a reel to listen
+        // to outside the game (the auto-test writes one). Loops play a few seconds each.
+        public static void ExportReel(string path)
+        {
+            if (Instance == null) return;
+            string[] order =
+            {
+                "select", "move", "attack", "invalid", "click", "launch", "contact", "warning", "alarm", "objective",
+                "gunshot", "cannon", "missile", "whistle", "ricochet", "explosion", "big explosion", "drone down",
+                "motor Scout", "motor Strike", "motor Kamikaze", "motor Bomber", "success", "failure",
+            };
+            var samples = new List<float>();
+            void Append(AudioClip clip, float maxSeconds)
+            {
+                var data = new float[clip.samples * clip.channels];
+                clip.GetData(data, 0);
+                int n = Mathf.Min(data.Length, (int)(maxSeconds * clip.frequency));
+                for (int i = 0; i < n; i++) samples.Add(data[i]);
+                samples.AddRange(new float[(int)(0.45f * clip.frequency)]);
+            }
+            foreach (var name in order)
+                foreach (var clip in Instance.clips[name]) Append(clip, name.StartsWith("motor") ? 2f : 6f);
+            Append(Instance.wind.clip, 5f);
+            Append(Instance.birds.clip, 6f);
+            Append(Instance.crickets.clip, 4f);
+
+            using (var w = new System.IO.BinaryWriter(System.IO.File.Create(path)))
+            {
+                int rate = Synth.Rate, bytes = samples.Count * 2;
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                w.Write(36 + bytes);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+                w.Write(16);
+                w.Write((short)1);
+                w.Write((short)1);
+                w.Write(rate);
+                w.Write(rate * 2);
+                w.Write((short)2);
+                w.Write((short)16);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                w.Write(bytes);
+                foreach (float v in samples) w.Write((short)Mathf.RoundToInt(Mathf.Clamp(v, -1f, 1f) * 32000f));
+            }
+        }
+
         AudioClip Pick(string name)
         {
             var variants = clips[name];
