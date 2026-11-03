@@ -126,7 +126,10 @@ namespace DroneSandbox
             var current = MapLayout.Plan;
             if (current.kind == plan.kind && current.seed == plan.seed && world != null) return;
             ClearUnits();
+            var oldTerrain = Ground.Current != null ? Ground.Current.terrainData : null;
             if (world != null) DestroyImmediate(world.gameObject);
+            if (oldTerrain != null) Destroy(oldTerrain); // heights, splat and grass maps aren't freed with the GameObject
+            Farmland.Release();
             MapLayout.Use(plan);
             world = World.Build(transform, preview: false);
         }
@@ -205,7 +208,7 @@ namespace DroneSandbox
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
                 // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
-                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius);
+                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius * Theatre.IntelFactor);
                 if (u.target) TargetsTotal++;
             }
 
@@ -302,7 +305,7 @@ namespace DroneSandbox
         public static int MissionStock(Mission mission, DroneType type)
         {
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) ? 1 : 0;
-            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0);
+            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + (type == DroneType.Kamikaze ? Theatre.SupplyBonus : 0);
         }
 
         // The Nightjar's launch button shows in free play, and in missions once it's bought.
@@ -433,6 +436,13 @@ namespace DroneSandbox
             Sound.Alert("alarm", 6f);
         }
 
+        // A long look shows a "vehicle" for what it is.
+        public void OnDecoyExposed(EnemyUnit enemy)
+        {
+            ShowMessage($"Decoy: that {enemy.unitName.ToLowerInvariant()} is inflatable - don't waste a drone on it", 4f);
+            Sound.Alert("contact", 0.5f);
+        }
+
         public void OnSpotted(EnemyUnit enemy)
         {
             ShowMessage(enemy.unitName + " spotted");
@@ -505,7 +515,7 @@ namespace DroneSandbox
             MessageUntil = Time.unscaledTime + seconds;
             Feed.RemoveAll(f => f.text == text);
             Feed.Insert(0, (text, Time.unscaledTime + Mathf.Max(seconds, 3.5f)));
-            if (Feed.Count > 4) Feed.RemoveAt(Feed.Count - 1);
+            if (Feed.Count > 3) Feed.RemoveAt(Feed.Count - 1); // the newest line big, two older small: no more
         }
 
         // ---- Units ----
@@ -555,6 +565,8 @@ namespace DroneSandbox
                 enemies.Remove(enemy);
                 enemiesDestroyed++;
                 if (enemy.type != EnemyType.Command) Effects.Wreck(enemy);
+                Aftermath(enemy);
+                if (enemy.type == EnemyType.Radar) ShowMessage("Radar down - the guns it fed aim slower now", 3.5f);
                 if (Mode == GameMode.Sandbox)
                 {
                     // Fixed defences come back at the same spot; vehicles anywhere in enemy territory.
@@ -579,6 +591,29 @@ namespace DroneSandbox
                     }
                 }
             }
+        }
+
+        // Each kind goes its own way: armour cooks off with a couple of late blasts, a radar showers sparks, fuel and
+        // ammunition go up big; heavy kills in view nudge the camera.
+        void Aftermath(EnemyUnit enemy)
+        {
+            Vector3 at = enemy.AimPoint;
+            bool heavy = enemy.type == EnemyType.Tank || enemy.type == EnemyType.APC || enemy.type == EnemyType.AAGun || enemy.type == EnemyType.Rocket;
+            bool huge = enemy.type == EnemyType.Depot || enemy.type == EnemyType.Tanker || enemy.type == EnemyType.Command;
+            if (heavy) StartCoroutine(CookOff(at));
+            if (enemy.type == EnemyType.Radar || enemy.type == EnemyType.Jammer)
+                for (int i = 0; i < 6; i++) Effects.Spark(at + Vector3.up * (1f + i * 0.4f) + Random.insideUnitSphere * 0.6f);
+            Vector3 screen = rts.Cam.WorldToViewportPoint(at);
+            bool inView = screen.z > 0f && screen.x > 0f && screen.x < 1f && screen.y > 0f && screen.y < 1f;
+            if (inView && (heavy || huge)) rts.Impulse(huge ? 2f : 1f);
+        }
+
+        IEnumerator CookOff(Vector3 at)
+        {
+            yield return new WaitForSeconds(Random.Range(0.5f, 0.8f));
+            Effects.Explosion(at + Random.insideUnitSphere * 0.8f, 1.6f);
+            yield return new WaitForSeconds(Random.Range(0.6f, 1.1f));
+            Effects.Explosion(at + Vector3.up * 0.5f + Random.insideUnitSphere * 0.8f, 1.2f);
         }
 
         public void OnDroneExpended(Drone drone)
