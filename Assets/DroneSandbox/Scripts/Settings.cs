@@ -2,16 +2,31 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // The player's comfort settings, kept between sessions: how big the interface is, camera shake, bright
-    // explosion flashes, alert sounds and the overall volume. Read from PlayerPrefs on first use.
+    // The player's comfort settings, kept between sessions: graphics quality, how big the interface is, camera
+    // shake, bright explosion flashes, alert sounds and the overall volume. Read from PlayerPrefs on first use.
     public static class Settings
     {
         public static readonly float[] UiScales = { 0.8f, 0.9f, 1f, 1.2f, 1.4f };
         public static readonly float[] Volumes = { 0f, 0.25f, 0.5f, 0.75f, 1f };
+        public static readonly string[] QualityNames = { "Low", "Medium", "High" };
 
         static bool loaded, persist = true;
         static float uiScale = 1f, volume = 1f;
         static bool shake = true, flashes = true, alertSounds = true;
+        static int quality = 2;
+
+        // 0 low, 1 medium, 2 high (see Atmosphere.ApplyQuality).
+        public static int Quality
+        {
+            get { Load(); return quality; }
+            set
+            {
+                Load();
+                quality = Mathf.Clamp(value, 0, QualityNames.Length - 1);
+                Save();
+                if (Camera.main != null) Atmosphere.ApplyQuality(Camera.main);
+            }
+        }
 
         public static float UiScale { get { Load(); return uiScale; } set { Load(); uiScale = value; Save(); } }
         public static float Volume { get { Load(); return volume; } set { Load(); volume = Mathf.Clamp01(value); AudioListener.volume = volume; Save(); } }
@@ -28,6 +43,7 @@ namespace DroneSandbox
             shake = PlayerPrefs.GetInt("settings.shake", 1) == 1;
             flashes = PlayerPrefs.GetInt("settings.flashes", 1) == 1;
             alertSounds = PlayerPrefs.GetInt("settings.alertSounds", 1) == 1;
+            quality = Mathf.Clamp(PlayerPrefs.GetInt("settings.quality", 2), 0, QualityNames.Length - 1);
             AudioListener.volume = volume;
         }
 
@@ -39,6 +55,7 @@ namespace DroneSandbox
             PlayerPrefs.SetInt("settings.shake", shake ? 1 : 0);
             PlayerPrefs.SetInt("settings.flashes", flashes ? 1 : 0);
             PlayerPrefs.SetInt("settings.alertSounds", alertSounds ? 1 : 0);
+            PlayerPrefs.SetInt("settings.quality", quality);
             PlayerPrefs.Save();
         }
 
@@ -51,6 +68,7 @@ namespace DroneSandbox
             uiScale = 1f;
             volume = 1f;
             shake = flashes = alertSounds = true;
+            quality = 2;
             AudioListener.volume = 1f;
         }
     }

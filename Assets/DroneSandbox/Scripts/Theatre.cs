@@ -16,21 +16,26 @@ namespace DroneSandbox
         public Vector2 mapPosition; // on the theatre map, 0-1 across and up
         public string sectorName;
 
+        public bool final;          // the campaign's last operation
         public SectorPlan Plan() => SectorGenerator.Generate(kind, seed);
         public string Key => $"hotspot.{kind}.{seed}";
     }
 
     // The theatre of war: the whole fictional front, about 1,200 km of the Norvane-Dravin border, drawn as a 2D
     // map. Hotspots glow along the front line where the enemy is active; each one opens a sector built from its
-    // seed. The campaign has a seed of its own (made the first time) and a round that goes up with every win:
-    // the front line moves your way, and a new set of hotspots flares up. Saved in PlayerPrefs.
+    // seed. The campaign has a seed of its own (made the first time) and a round that goes up every third win:
+    // the front line moves your way, and a new set of hotspots flares up. A lost fight pushes the front back a
+    // little. Win WinsForFinal sectors and the final operation opens: a strike on the Dravin front command; win
+    // that and the campaign is won. Saved through Progress.
     public static class Theatre
     {
         public const int HotspotCount = 11;
         public const float FrontKilometres = 1200f;
+        public const int WinsForFinal = 12;
 
         static List<Hotspot> hotspots;
         static int builtRound = -1;
+        static bool builtFinal;
         static Texture2D map;
         static int seed;
 
@@ -40,25 +45,28 @@ namespace DroneSandbox
             get
             {
                 if (seed != 0) return seed;
-                seed = PlayerPrefs.GetInt("theatre.seed", 0);
+                seed = Progress.Get("theatre.seed");
                 if (seed == 0)
                 {
                     seed = Random.Range(1, 1000000);
-                    if (SandboxGame.SaveProgress)
-                    {
-                        PlayerPrefs.SetInt("theatre.seed", seed);
-                        PlayerPrefs.Save();
-                    }
+                    Progress.Set("theatre.seed", seed);
+                    Progress.Save();
                 }
                 return seed;
             }
         }
 
-        public static int Round => PlayerPrefs.GetInt("theatre.round", 0);
-        public static int Wins => PlayerPrefs.GetInt("theatre.wins", 0);
+        public static int Round => Progress.Get("theatre.round");
+        public static int Wins => Progress.Get("theatre.wins");
+        public static int Losses => Progress.Get("theatre.losses");
+        public static int DronesLost => Progress.Get("theatre.dronesLost");
+        public static int Fights => Progress.Get("theatre.fights");
+        public static bool FinalOpen => Wins >= WinsForFinal && !Victory;
+        public static bool Victory => Progress.Get("theatre.victory") == 1;
 
-        // How far the front has moved your way, 0 at the start.
-        public static float Advance => Mathf.Min(0.12f, Wins * 0.006f);
+        // How far the front has moved your way: 0 at the start, the full 0.12 (the Dravin lines) once the final
+        // operation opens. A loss gives back half a win's ground.
+        public static float Advance => Mathf.Clamp((Wins - 0.5f * Losses) * 0.12f / WinsForFinal, -0.04f, 0.12f);
 
         // The front line's height on the map (0-1) at x (0-1).
         public static float Front(float x)
@@ -71,7 +79,7 @@ namespace DroneSandbox
         {
             get
             {
-                if (hotspots == null || builtRound != Round) Build();
+                if (hotspots == null || builtRound != Round || builtFinal != FinalOpen) Build();
                 return hotspots;
             }
         }
@@ -102,9 +110,26 @@ namespace DroneSandbox
                 spot.sectorName = SectorGenerator.Generate(kind, seed).name;
                 hotspots.Add(spot);
             }
+            builtFinal = FinalOpen;
+            if (builtFinal) hotspots.Add(Final());
         }
 
-        public static bool Done(Hotspot h) => PlayerPrefs.GetInt(h.Key + ".won", 0) > 0;
+        // The last operation: the Dravin front command, dug in on the border line a little behind their front, between
+        // the middle hotspots, struck at dusk.
+        static Hotspot Final()
+        {
+            int finalSeed = Seed % 900000 + 4242;
+            var spot = new Hotspot
+            {
+                kind = SectorKind.BorderLine, seed = finalSeed, situation = Situation.CommandPost,
+                daylight = Daylight.Dusk, weather = Weather.Clear, heat = 1f, final = true,
+                mapPosition = new Vector2(0.5f + 0.5f / HotspotCount, Front(0.5f + 0.5f / HotspotCount) + 0.09f),
+            };
+            spot.sectorName = SectorGenerator.Generate(spot.kind, spot.seed).name;
+            return spot;
+        }
+
+        public static bool Done(Hotspot h) => Victory || Progress.Get(h.Key + ".won") > 0; // the war won, all of it is
 
         // ---- What winning buys (campaign bonuses, saved) ----
 
@@ -130,7 +155,7 @@ namespace DroneSandbox
 
         static readonly int[] MaxStacks = { 3, 2, 2 };
 
-        public static int Stacks(Bonus b) => PlayerPrefs.GetInt("campaign." + b, 0);
+        public static int Stacks(Bonus b) => Progress.Get("campaign." + b);
         public static float IntelFactor => 1f - 0.15f * Stacks(Bonus.Intel);   // contact circles in briefings
         public static int SupplyBonus => Stacks(Bonus.Supply);                 // extra Kamikazes per mission
         public static float RearmFactor => 1f - 0.15f * Stacks(Bonus.Rearm);   // Strike and Nightjar reload time
@@ -140,17 +165,54 @@ namespace DroneSandbox
 
         public static bool BonusMaxed(Bonus b) => Stacks(b) >= MaxStacks[(int)b];
 
-        // A win cools the hotspot, pushes the front, banks the sector's bonus and brings the next round of fighting.
-        public static void Won(Hotspot h)
+        // A win cools the hotspot, pushes the front, banks the sector's bonus and brings the next round of fighting;
+        // the final operation won wins the campaign.
+        public static void Won(Hotspot h, int dronesLost)
         {
-            if (!SandboxGame.SaveProgress) return;
+            Record(dronesLost);
+            if (h.final)
+            {
+                Progress.Set("theatre.victory", 1);
+                Progress.Save();
+                return;
+            }
+            if (Done(h)) return; // replayed after winning it: nothing more to gain
             var bonus = BonusOf(h.situation);
-            PlayerPrefs.SetInt("campaign." + bonus, Mathf.Min(MaxStacks[(int)bonus], Stacks(bonus) + 1));
-            PlayerPrefs.SetInt(h.Key + ".won", 1);
-            PlayerPrefs.SetInt("theatre.wins", Wins + 1);
+            Progress.Set("campaign." + bonus, Mathf.Min(MaxStacks[(int)bonus], Stacks(bonus) + 1));
+            Progress.Set(h.Key + ".won", 1);
+            Progress.Set("theatre.wins", Wins + 1);
             // Every third win starts a new round: the hotspots move.
-            if ((Wins) % 3 == 0) PlayerPrefs.SetInt("theatre.round", Round + 1);
-            PlayerPrefs.Save();
+            if (Wins % 3 == 0) Progress.Set("theatre.round", Round + 1);
+            Progress.Save();
+        }
+
+        // A lost fight gives the Dravin back a little ground (not below where the war started, give or take).
+        public static void Lost(Hotspot h, int dronesLost)
+        {
+            Record(dronesLost);
+            if (!h.final && !Done(h)) Progress.Set("theatre.losses", Losses + 1);
+            Progress.Save();
+        }
+
+        static void Record(int dronesLost)
+        {
+            Progress.Set("theatre.fights", Fights + 1);
+            Progress.Set("theatre.dronesLost", DronesLost + dronesLost);
+        }
+
+        // Starts the war over: a new front (a new seed), no sectors won, no campaign bonuses. Tech-shop purchases
+        // and mission stars are kept.
+        public static void NewCampaign()
+        {
+            Progress.Forget("theatre.");
+            Progress.Forget("campaign.");
+            Progress.Forget("hotspot.");
+            seed = 0;
+            hotspots = null;
+            builtRound = -1;
+            mapAdvance = -1f;
+            Progress.Set("theatre.seed", Random.Range(1, 1000000));
+            Progress.Save();
         }
 
         // ---- The map picture ----

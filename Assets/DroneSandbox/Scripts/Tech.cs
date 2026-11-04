@@ -14,7 +14,7 @@ namespace DroneSandbox
     }
 
     // The tech shop. Destroying Dravin units in missions earns points, which buy new drones and upgrades.
-    // Points and purchases are saved in PlayerPrefs and kept from mission to mission. Free play has all the tech.
+    // Points and purchases are saved (Progress) and kept from mission to mission. Free play has all the tech.
     public static class Tech
     {
         public const int PointsPerNewStar = 20;
@@ -124,17 +124,17 @@ namespace DroneSandbox
         {
             if (loaded) return;
             loaded = true;
-            points = PlayerPrefs.GetInt("tech.points", 0);
+            points = Progress.Get("tech.points");
             foreach (var item in Items)
-                if (PlayerPrefs.GetInt("tech." + item.id, 0) == 1) owned.Add(item.id);
+                if (Progress.Get("tech." + item.id) == 1) owned.Add(item.id);
         }
 
         static void Save()
         {
             if (!SandboxGame.SaveProgress) return;
-            PlayerPrefs.SetInt("tech.points", points);
-            foreach (var item in Items) PlayerPrefs.SetInt("tech." + item.id, owned.Contains(item.id) ? 1 : 0);
-            PlayerPrefs.Save();
+            Progress.Set("tech.points", points);
+            foreach (var item in Items) Progress.Set("tech." + item.id, owned.Contains(item.id) ? 1 : 0);
+            Progress.Save();
         }
     }
 }

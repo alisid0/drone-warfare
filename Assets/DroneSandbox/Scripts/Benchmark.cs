@@ -37,6 +37,7 @@ namespace DroneSandbox
         void Begin(string folder)
         {
             SandboxGame.SaveProgress = false;
+            Progress.UseTestStore();
             outDir = folder;
             Directory.CreateDirectory(outDir);
             log = new StreamWriter(Path.Combine(outDir, "benchmark.log")) { AutoFlush = true };

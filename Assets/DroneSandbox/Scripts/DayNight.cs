@@ -195,7 +195,7 @@ namespace DroneSandbox
             // thermal camera, which sees the grass as one cool even field, doesn't show them at all.
             if (Ground.Current != null)
             {
-                float grass = Thermal ? 0f : Mathf.Round(Grass.DrawDistance * Mathf.InverseLerp(8f, 20f, sunElevation) / 10f) * 10f;
+                float grass = Thermal ? 0f : Mathf.Round(Atmosphere.GrassDistance * Mathf.InverseLerp(8f, 20f, sunElevation) / 10f) * 10f;
                 if (!Mathf.Approximately(Ground.Current.detailObjectDistance, grass)) Ground.Current.detailObjectDistance = grass;
             }
             bool dark = IsDark;

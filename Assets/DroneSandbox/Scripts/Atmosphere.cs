@@ -63,7 +63,39 @@ namespace DroneSandbox
                 data.renderingPathCustomFrameSettingsOverrideMask.mask[(uint)field] = true;
                 data.renderingPathCustomFrameSettings.SetEnabled(field, true);
             }
+            ApplyQuality(cam);
         }
+
+        // The graphics quality setting (Settings.Quality) on the game camera: High draws everything above; Medium
+        // drops screen-space reflections, contact shadows and the volumetric fog (plain height fog still hazes the
+        // distance) and brings in the tree detail a little; Low also drops ambient occlusion and the volumetric
+        // clouds, cuts tree detail further and thins the grass and draws it nearer. The water stays at every level.
+        public static void ApplyQuality(Camera cam)
+        {
+            int q = Settings.Quality;
+            var data = cam != null ? cam.GetComponent<HDAdditionalCameraData>() : null;
+            if (data != null)
+            {
+                void Set(FrameSettingsField field, bool on)
+                {
+                    data.renderingPathCustomFrameSettingsOverrideMask.mask[(uint)field] = true;
+                    data.renderingPathCustomFrameSettings.SetEnabled(field, on);
+                }
+                Set(FrameSettingsField.SSR, q >= 2);
+                Set(FrameSettingsField.ContactShadows, q >= 2);
+                Set(FrameSettingsField.SSAO, q >= 1);
+                Set(FrameSettingsField.Volumetrics, q >= 2);
+                Set(FrameSettingsField.VolumetricClouds, q >= 1);
+            }
+            QualitySettings.lodBias = q == 0 ? 0.6f : q == 1 ? 0.8f : 1f;
+            if (Ground.Current != null) Ground.Current.detailObjectDensity = GrassDensity;
+        }
+
+        // How much of the grass is drawn at this quality.
+        public static float GrassDensity => Settings.Quality == 0 ? 0.35f : Settings.Quality == 1 ? 0.7f : 1f;
+
+        // How far out the grass is drawn at this quality (DayNight shortens it further as the sun sets).
+        public static float GrassDistance => Settings.Quality == 0 ? 60f : Settings.Quality == 1 ? 90f : Grass.DrawDistance;
 
         // The sun as an HDRP light in lux, casting soft shadows. Also saved into the scene by the editor setup.
         public static void ApplyLighting(Light sun)

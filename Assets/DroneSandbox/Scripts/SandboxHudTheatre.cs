@@ -76,8 +76,15 @@ namespace DroneSandbox
         void HotspotBadge(Vector2 c, Hotspot h, bool done, bool chosenOne, bool hovered)
         {
             float s = Scale;
-            float size = (24f + 12f * h.heat) * s * (hovered ? 1.15f : 1f);
+            float size = (24f + 12f * h.heat) * s * (hovered ? 1.15f : 1f) * (h.final ? 1.4f : 1f);
             Color control = done ? Teal : DravinOrange;
+            if (h.final && !done)
+            {
+                // The final operation: a steady red ring round its badge and its name under it.
+                Ring(c, size * 0.95f, new Color(Hostile.r, Hostile.g, Hostile.b, 0.9f));
+                GUI.Label(new Rect(c.x - 60f * s, c.y + size * 0.6f, 120f * s, 18f * s), "<b>FINAL OPERATION</b>",
+                    Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, Hostile));
+            }
             if (!done)
             {
                 float pulse = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * Mathf.PI * 2f / 1.5f + h.seed);

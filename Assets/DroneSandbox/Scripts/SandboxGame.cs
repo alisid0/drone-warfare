@@ -394,9 +394,9 @@ namespace DroneSandbox
         // How close a drone must fly to spot a hidden enemy; long-range optics push it out.
         public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;
 
-        public static int BestStars(int missionIndex) => PlayerPrefs.GetInt($"mission{missionIndex}.stars", 0);
+        public static int BestStars(int missionIndex) => Progress.Get($"mission{missionIndex}.stars");
 
-        static int BestStars(string key) => PlayerPrefs.GetInt(key + ".stars", 0);
+        static int BestStars(string key) => Progress.Get(key + ".stars");
 
         public static bool Unlocked(int missionIndex) => missionIndex == 0 || BestStars(missionIndex - 1) > 0;
 
@@ -616,12 +616,16 @@ namespace DroneSandbox
                 Tech.Earn(StarBonus);
                 PointsEarned += StarBonus;
             }
-            if (SaveProgress && Stars > BestStars(Mission.key))
+            if (Stars > BestStars(Mission.key))
             {
-                PlayerPrefs.SetInt(Mission.key + ".stars", Stars);
-                PlayerPrefs.Save();
+                Progress.Set(Mission.key + ".stars", Stars);
+                Progress.Save();
             }
-            if (won && Hotspot != null) Theatre.Won(Hotspot);
+            if (Hotspot != null)
+            {
+                if (won) Theatre.Won(Hotspot, dronesLost);
+                else Theatre.Lost(Hotspot, dronesLost);
+            }
             ResultsAt = Time.unscaledTime + ResultsDelay;
             StartCoroutine(FreezeForResults());
         }

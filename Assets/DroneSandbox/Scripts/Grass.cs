@@ -64,8 +64,8 @@ namespace DroneSandbox
             data.SetDetailLayer(0, 0, 0, grass);
             data.SetDetailLayer(0, 0, 1, flowers);
             data.SetDetailLayer(0, 0, 2, reeds);
-            terrain.detailObjectDistance = DrawDistance;
-            terrain.detailObjectDensity = 1f;
+            terrain.detailObjectDistance = Atmosphere.GrassDistance;
+            terrain.detailObjectDensity = Atmosphere.GrassDensity;
         }
 
         static DetailPrototype Prototype(GameObject holder, float minScale, float maxScale)

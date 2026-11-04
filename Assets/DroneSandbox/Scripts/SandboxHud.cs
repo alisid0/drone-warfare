@@ -51,6 +51,7 @@ namespace DroneSandbox
         public bool TheatreOpen; // the theatre map, opened from the main menu
         public bool SettingsOpen; // interface size, shake, flashes and sound, from the main menu
         Hotspot chosen;          // the hotspot picked on the theatre map
+        float newCampaignAsked = -100f; // when New campaign was first clicked (it asks again before it acts)
         static Texture2D dotTexture;
         public float Scale => Mathf.Max(1f, Screen.height / 900f) * Settings.UiScale;
 
@@ -538,7 +539,10 @@ namespace DroneSandbox
 
             float y = r.y + 172f * s;
             var theatre = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
-            if (GUI.Button(theatre, "<b>Theatre of war</b>   <size=" + Mathf.RoundToInt(12f * s) + ">pick a hotspot on the front: 30 kinds of sector, 30 situations</size>", leftButton))
+            string campaign = Theatre.Victory ? "campaign won: start a new one from the map"
+                : Theatre.FinalOpen ? "the final operation is open"
+                : $"the campaign: {Theatre.Wins}/{Theatre.WinsForFinal} sectors to break the Dravin line";
+            if (GUI.Button(theatre, "<b>Theatre of war</b>   <size=" + Mathf.RoundToInt(12f * s) + ">" + campaign + "</size>", leftButton))
             {
                 TheatreOpen = true;
                 chosen = null;
@@ -664,7 +668,8 @@ namespace DroneSandbox
             Rect r = new Rect((Screen.width - pair) / 2f, (Screen.height - 350f * s) / 2f, 520f * s, 350f * s);
             Fill(r, ModalColor);
             DrawDebriefMap(new Rect(r.xMax + 12f * s, (Screen.height - 470f * s) / 2f, 400f * s, 470f * s));
-            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
+            bool victory = won && game.Hotspot != null && game.Hotspot.final;
+            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), victory ? "VICTORY: THE WAR IS WON" : won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
             var starRow = new Rect(r.x + (r.width - 330f * s) / 2f, r.y + 96f * s, 330f * s, 46f * s);
@@ -684,7 +689,9 @@ namespace DroneSandbox
                 $"Launched <b>{game.DronesUsed}</b> (par {game.Mission.par})  \u00b7  expended <b>{game.dronesExpended}</b>  \u00b7  shot down or left <b>{game.dronesLost}</b>  \u00b7  " +
                 $"home <b>{game.DronesHome}</b>  \u00b7  {Clock(game.MissionTime)}", centered);
             GUI.Label(new Rect(r.x, r.y + 178f * s, r.width, 18f * s),
-                "One star for the win, one for using par or fewer drones, one for losing none.", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
+                victory ? $"The campaign: {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost."
+                    : "One star for the win, one for using par or fewer drones, one for losing none.",
+                Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, victory ? Friendly : small.normal.textColor));
             string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
             GUI.Label(new Rect(r.x, r.y + 202f * s, r.width, 22f * s),
                 $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
@@ -728,10 +735,27 @@ namespace DroneSandbox
             Rect r = Centered(1080f, 830f);
             Fill(r, ModalColor);
             GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
-            GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s),
-                $"The {Theatre.FrontKilometres:0} km Norvane-Dravin front     <b>{Theatre.Wins}</b> sectors won     <b>{Tech.Points}</b> points     " +
-                $"campaign: intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  supply +{Theatre.Stacks(Theatre.Bonus.Supply)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}",
-                Tinted(centered, TargetColor));
+            string progress = Theatre.Victory
+                ? $"<b>VICTORY:</b> the Dravin front command has fallen.   {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost"
+                : Theatre.FinalOpen
+                    ? "<b>FINAL OPERATION OPEN:</b> the front is at the Dravin lines. Strike their front command to win the war."
+                    : $"Sectors won <b>{Mathf.Min(Theatre.Wins, Theatre.WinsForFinal)}/{Theatre.WinsForFinal}</b> to break the Dravin line     lost <b>{Theatre.Losses}</b>     " +
+                      $"<b>{Tech.Points}</b> points     campaign: intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  supply +{Theatre.Stacks(Theatre.Bonus.Supply)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}";
+            GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s), progress,
+                Tinted(centered, Theatre.Victory ? Friendly : Theatre.FinalOpen ? Hostile : TargetColor));
+            // A new war: asks once more before it throws the campaign away.
+            bool asking = Time.unscaledTime - newCampaignAsked < 4f;
+            var fresh = new Rect(r.x + 20f * s, r.y + 16f * s, 190f * s, 36f * s);
+            if (GUI.Button(fresh, asking ? "<b>Sure? Click again</b>" : Theatre.Victory ? "<b>New campaign</b>" : "New campaign", button))
+            {
+                if (asking)
+                {
+                    Theatre.NewCampaign();
+                    chosen = null;
+                    newCampaignAsked = -100f;
+                }
+                else newCampaignAsked = Time.unscaledTime;
+            }
 
             var mapRect = new Rect(r.x + 24f * s, r.y + 86f * s, r.width - 48f * s, (r.width - 48f * s) * 560f / 1024f);
             GUI.DrawTexture(mapRect, Theatre.Map());
@@ -764,7 +788,7 @@ namespace DroneSandbox
                 var type = SectorTypes.Get(spot.kind);
                 float km = spot.mapPosition.x * Theatre.FrontKilometres;
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 10f * s, card.width - 300f * s, 30f * s),
-                    $"<b>{spot.sectorName}</b>  \u00b7  {type.name}", heading);
+                    (spot.final ? "<b>FINAL OPERATION</b>  \u00b7  " : "") + $"<b>{spot.sectorName}</b>  \u00b7  {type.name}", heading);
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 44f * s, card.width - 300f * s, 22f * s),
                     $"<b>{Situations.Name(spot.situation)}</b>     {spot.daylight}, {spot.weather.ToString().ToLowerInvariant()}     km {km:0} of the front     " +
                     $"activity {Mathf.RoundToInt(spot.heat * 100f)}%" + (Theatre.Done(spot) ? "     <b>WON</b>" : ""), label);
@@ -774,7 +798,8 @@ namespace DroneSandbox
                     $"<b>Difficulty:</b> {(spot.heat < 0.35f ? "low" : spot.heat < 0.7f ? "medium" : "high")}", label);
                 var bonus = Theatre.BonusOf(spot.situation);
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 22f * s),
-                    $"<b>On win:</b> {Theatre.BonusText(bonus)}" + (Theatre.BonusMaxed(bonus) ? "  (already at most)" : ""), Tinted(label, Teal));
+                    spot.final ? "<b>On win:</b> the Dravin front command falls, and the war is won"
+                        : $"<b>On win:</b> {Theatre.BonusText(bonus)}" + (Theatre.BonusMaxed(bonus) ? "  (already at most)" : ""), Tinted(label, Teal));
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 114f * s, card.width - 300f * s, 30f * s), type.blurb, smallWrap);
                 if (chosen != null)
                 {

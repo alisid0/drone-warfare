@@ -9,12 +9,14 @@ namespace DroneSandbox
         {
             float s = Scale;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
-            Rect r = Centered(560f, 420f);
+            Rect r = Centered(560f, 478f);
             Fill(r, ModalColor);
             Fill(new Rect(r.x, r.y, r.width, 3f * s), Teal);
             GUI.Label(new Rect(r.x, r.y + 16f * s, r.width, 34f * s), "SETTINGS", Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, label.normal.textColor));
 
             float y = r.y + 72f * s;
+            int quality = Choice(r, ref y, "Graphics", "Lower it if the game stutters", Settings.QualityNames, Settings.Quality);
+            if (quality >= 0) Settings.Quality = quality;
             int scale = Choice(r, ref y, "Interface size", "Text, panels and markers", new[] { "80%", "90%", "100%", "120%", "140%" },
                 System.Array.IndexOf(Settings.UiScales, Settings.UiScale));
             if (scale >= 0) Settings.UiScale = Settings.UiScales[scale];

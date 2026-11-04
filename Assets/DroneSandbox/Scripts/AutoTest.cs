@@ -29,6 +29,7 @@ namespace DroneSandbox
         void Begin(string folder, bool recordDemo)
         {
             SandboxGame.SaveProgress = false; // test runs don't touch the player's stars, points or purchases
+            Progress.UseTestStore();
             Tech.UseTestWallet();
             demo = recordDemo;
             outDir = folder;
@@ -263,6 +264,8 @@ namespace DroneSandbox
             Recon.ForceShowAll = false;
             yield return EmptyAndRearm(game, rts);
             yield return PlayMissions(game, rts);
+            yield return CampaignToVictory(game);
+            yield return QualityCheck(game, rts);
             yield return SectorTour(game, rts);
 
             log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
@@ -480,6 +483,85 @@ namespace DroneSandbox
         // A tour of generated sectors: the theatre map, then a dozen kinds of sector, each built, photographed from
         // above and from a drone's height, with one of its missions briefed and started through the theatre path,
         // so a broken generator shows up as errors, odd numbers in the log or odd pictures.
+        // The campaign end to end (in the test store): a new war; sectors won until the final operation opens (the
+        // fights themselves are played elsewhere in this run, so here they're credited) and one lost; the final
+        // operation flown, its targets destroyed and the war won; the victory on the results and the theatre map;
+        // then a new campaign.
+        IEnumerator CampaignToVictory(SandboxGame game)
+        {
+            var hud = game.GetComponent<SandboxHud>();
+            Theatre.NewCampaign();
+            int credited = 0, lostOne = 0;
+            for (int guard = 0; guard < 200 && !Theatre.FinalOpen; guard++)
+            {
+                var open = Theatre.Hotspots.Find(h => !h.final && !Theatre.Done(h));
+                if (open == null) break;
+                if (credited == 4 && lostOne == 0)
+                {
+                    Theatre.Lost(open, 2);
+                    lostOne++;
+                    continue;
+                }
+                Theatre.Won(open, 0);
+                credited++;
+            }
+            var final = Theatre.Hotspots.Find(h => h.final);
+            log.WriteLine($"Campaign: {credited} sectors credited, {lostOne} lost, front advance {Theatre.Advance:F3}, final open {Theatre.FinalOpen}, " +
+                          $"final {(final != null ? final.sectorName + " / " + final.situation : "missing")}");
+            game.OpenMenu();
+            hud.TheatreOpen = true;
+            yield return new WaitForSecondsRealtime(0.6f);
+            yield return Shot("33_campaign_final_open");
+            hud.TheatreOpen = false;
+            if (final == null) yield break;
+
+            game.PlayHotspot(final);
+            while (game.Loading) yield return null;
+            game.CloseBriefing();
+            yield return new WaitForSeconds(1f);
+            foreach (var e in game.enemies.FindAll(e => e != null && e.isTarget)) e.TakeDamage(100000f);
+            float until = Time.realtimeSinceStartup + 30f;
+            while (game.Result == MissionResult.None && Time.realtimeSinceStartup < until) yield return null;
+            while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until + 10f) yield return null;
+            log.WriteLine($"Campaign final: {game.Result} ({game.ResultReason}), victory {Theatre.Victory}, " +
+                          $"fights {Theatre.Fights}, wins {Theatre.Wins}, losses {Theatre.Losses}, drones lost {Theatre.DronesLost}");
+            yield return Shot("34_campaign_victory");
+
+            game.OpenMenu();
+            yield return new WaitForSecondsRealtime(0.4f);
+            yield return Shot("35_menu_after_victory");
+            hud.TheatreOpen = true;
+            yield return new WaitForSecondsRealtime(0.6f);
+            yield return Shot("36_theatre_victory");
+            hud.TheatreOpen = false;
+
+            Theatre.NewCampaign();
+            log.WriteLine($"Campaign after New campaign: wins {Theatre.Wins}, victory {Theatre.Victory}, final open {Theatre.FinalOpen}, " +
+                          $"hotspots {Theatre.Hotspots.Count}");
+        }
+
+        // The graphics settings: frames per second over the wide view of the sandbox at High and at Low, and a picture
+        // at Low.
+        IEnumerator QualityCheck(SandboxGame game, RtsController rts)
+        {
+            game.StartSandbox();
+            rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
+            yield return new WaitForSecondsRealtime(2f);
+            var fps = new float[3];
+            foreach (int q in new[] { 2, 1, 0 })
+            {
+                Settings.Quality = q;
+                yield return new WaitForSecondsRealtime(1f);
+                int frames = Time.frameCount;
+                float start = Time.realtimeSinceStartup;
+                yield return new WaitForSecondsRealtime(3f);
+                fps[q] = (Time.frameCount - frames) / (Time.realtimeSinceStartup - start);
+                if (q == 0) yield return Shot("37_quality_low");
+            }
+            log.WriteLine($"Graphics quality: High {fps[2]:F0} fps, Medium {fps[1]:F0} fps, Low {fps[0]:F0} fps over the sandbox's wide view");
+            Settings.Quality = 2;
+        }
+
         IEnumerator SectorTour(SandboxGame game, RtsController rts)
         {
             game.OpenMenu();
