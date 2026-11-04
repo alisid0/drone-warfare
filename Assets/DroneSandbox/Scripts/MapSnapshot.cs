@@ -78,11 +78,11 @@ namespace DroneSandbox
                     else
                     {
                         c = Land;
-                        var p = new Vector2(x, z);
+                        var p = FieldPlot.Unwarp(new Vector2(x, z));
                         foreach (var field in fields)
                         {
-                            if (!field.Contains(p, 0f)) continue;
-                            c = field.Contains(p, -0.8f) ? CropColour(field.crop) : Verge; // a darker edge round each field
+                            if (!field.ContainsUnwarped(p, 0f)) continue;
+                            c = field.ContainsUnwarped(p, -0.8f) ? CropColour(field.crop) : Verge; // a darker edge round each field
                             break;
                         }
                         // Woods: the canopy grid is 4 m square, so it's sampled a little off each pixel to fray the edges.

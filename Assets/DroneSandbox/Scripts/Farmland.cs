@@ -149,6 +149,9 @@ namespace DroneSandbox
                         + Mathf.PerlinNoise(across * 0.11f + seed * 2f, along * 0.11f + 7f) * 0.35f;
             float patchy = crop == Crop.Ploughed ? 0.5f : crop == Crop.YoungCrop ? 0.34f : crop == Crop.MownHay ? 0.2f : 0.28f;
             float f = 1f + (drift - 0.5f) * patchy;
+            // A paddock too small for the big machines shows no headland or tramlines (drawn there they make a
+            // stamped frame).
+            bool worked = length > 40f && width > 28f;
 
             // Thinner and trampled along the edges (ploughed soil turned up paler).
             float edge = Mathf.Min(Mathf.Min(across, width - across), Mathf.Min(along, length - along));
@@ -157,7 +160,7 @@ namespace DroneSandbox
             if (crop == Crop.Ploughed)
             {
                 // The headlands, ploughed last and the other way, come out a shade lighter.
-                if (along < Headland || along > length - Headland) f *= 1.07f;
+                if (worked && (along < Headland || along > length - Headland)) f *= 1.07f;
                 return f;
             }
 
@@ -175,13 +178,13 @@ namespace DroneSandbox
             float headlandTrack = Headland * 0.5f;
             bool inside = along > headlandTrack - 1f && along < length - headlandTrack + 1f;
             float t = Mathf.Abs(Mathf.Repeat(across - tramOffset, TramSpacing) - TramSpacing * 0.5f);
-            if (inside && t < 1.5f) f *= Track(t);
+            if (worked && inside && t < 1.5f) f *= Track(t);
             float ends = Mathf.Min(Mathf.Abs(along - headlandTrack), Mathf.Abs(along - (length - headlandTrack)));
-            if (ends < 1.5f && across > headlandTrack - 1f && across < width - headlandTrack + 1f) f *= Track(ends);
+            if (worked && ends < 1.5f && across > headlandTrack - 1f && across < width - headlandTrack + 1f) f *= Track(ends);
             if (crop == Crop.Wheat)
             {
                 float sides = Mathf.Min(Mathf.Abs(across - headlandTrack), Mathf.Abs(across - (width - headlandTrack)));
-                if (sides < 1.5f && inside) f *= Track(sides);
+                if (worked && sides < 1.5f && inside) f *= Track(sides);
                 // Patches knocked flat by wind and rain, which catch the light.
                 float lodged = Mathf.PerlinNoise(across * 0.09f + seed * 3f, along * 0.09f + 40f);
                 f *= 1f + 0.14f * Mathf.SmoothStep(0f, 1f, (lodged - 0.72f) * 8f);

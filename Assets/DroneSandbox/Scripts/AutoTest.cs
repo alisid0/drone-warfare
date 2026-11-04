@@ -87,7 +87,7 @@ namespace DroneSandbox
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
-            log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count}, " +
+            log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count} ({MapLayout.FieldCoverage():P0} of the land), " +
                           $"screen {Screen.width}x{Screen.height}");
 
             yield return Shot("01_start");
@@ -754,7 +754,8 @@ namespace DroneSandbox
             log.WriteLine($"Command Post: {game.TargetsTotal} target, {game.enemies.Count} enemies");
 
             // Long Watch (Shadow), played twice. First properly: a Scout shadows the column side-on, 38 m out from
-            // its middle (outside every vehicle's 26 m, inside the Scout's 46 m), then flies home with the intel.
+            // its middle (outside every vehicle's 26 m, inside the Scout's 46 m), on the side away from the AA guns,
+            // then flies home with the intel.
             // Then badly: a Scout sits right on top of the column until it's spotted three times.
             int watch = Missions.All.FindIndex(m => m.shadowSeconds > 0f);
             if (watch >= 0)
@@ -765,6 +766,34 @@ namespace DroneSandbox
                 var column = game.enemies.FindAll(e => e.isTarget);
                 var lead = column.Count > 0 ? column[0] : null;
                 bool extractShot = false;
+                // Which side of the road to keep to (right of travel, or left): the one that stays furthest from the
+                // AA guns all along the route.
+                float GunClearance(Vector3 at)
+                {
+                    float nearest = float.MaxValue;
+                    foreach (var e in game.enemies)
+                        if (e != null && e.IsAlive && e.type == EnemyType.AAGun)
+                            nearest = Mathf.Min(nearest, Vector3.Distance(e.transform.position, at));
+                    return nearest;
+                }
+                float shadowSide = 1f, safest = -1f;
+                var watchRoute = game.Mission.convoyRoute;
+                foreach (float sign in new[] { 1f, -1f })
+                {
+                    float closest = float.MaxValue;
+                    for (int i = 1; watchRoute != null && i < watchRoute.Count; i++)
+                    {
+                        Vector3 dir = watchRoute[i] - watchRoute[i - 1];
+                        dir.y = 0f;
+                        if (dir.sqrMagnitude < 0.01f) continue;
+                        closest = Mathf.Min(closest, GunClearance(watchRoute[i] + Vector3.Cross(Vector3.up, dir.normalized) * sign * 38f));
+                    }
+                    if (closest > safest)
+                    {
+                        safest = closest;
+                        shadowSide = sign;
+                    }
+                }
                 for (float t = 0f; t < 120f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
                 {
                     if (game.Phase == MissionPhase.Extract)
@@ -785,8 +814,7 @@ namespace DroneSandbox
                             if (e != null && e.IsAlive) { middle += e.transform.position; alive++; }
                         if (alive == 0) break;
                         middle /= alive;
-                        Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized;
-                        if (Vector3.Dot(shadow.transform.position - middle, side) < 0f) side = -side;
+                        Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized * shadowSide;
                         shadow.MoveTo(middle + side * 38f);
                         rts.LookAt(middle, 70f, 60f);
                         if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
@@ -802,8 +830,15 @@ namespace DroneSandbox
                 column = game.enemies.FindAll(e => e.isTarget);
                 lead = column.Count > 0 ? column[0] : null;
                 bool detectedShot = false;
-                for (float t = 0f; t < 60f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
+                int scoutsLost = 0;
+                for (float t = 0f; t < 60f && lead != null && game.Result == MissionResult.None; t += 0.5f)
                 {
+                    // Shot down by the escort: launch another, as a player would.
+                    if (shadow == null)
+                    {
+                        scoutsLost++;
+                        shadow = game.SpawnDrone(DroneType.Scout);
+                    }
                     shadow.MoveTo(lead.transform.position);
                     rts.LookAt(lead.transform.position, 70f, 60f);
                     if (!detectedShot && game.ShadowDetections > 0)
@@ -813,7 +848,8 @@ namespace DroneSandbox
                     }
                     yield return new WaitForSecondsRealtime(0.5f);
                 }
-                log.WriteLine($"Long Watch (reckless): detected {game.ShadowDetections}, watched {game.ShadowProgress:F0} s, result {game.Result} ({game.ResultReason})");
+                log.WriteLine($"Long Watch (reckless): detected {game.ShadowDetections}, watched {game.ShadowProgress:F0} s, scouts shot down {scoutsLost}, " +
+                              $"result {game.Result} ({game.ResultReason})");
             }
 
             // Last Delivery (Interdiction), played twice. First: a Scout looks at both tankers from close (which

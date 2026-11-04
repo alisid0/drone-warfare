@@ -7,7 +7,8 @@ namespace DroneSandbox
 
     // A four-sided field with its rows running along `along`: its two ends are square to the rows, but it can be
     // wider at one end than the other (taper) and slanted (shear), the way strips cut from one block of land fan
-    // out and lean with it. With both zero it's a rectangle.
+    // out and lean with it. With both zero it's a rectangle. Then the whole thing is bent a little by Warp, so no
+    // edge is a ruled line.
     public struct FieldPlot
     {
         public Vector2 center, along;
@@ -21,7 +22,10 @@ namespace DroneSandbox
         public float HalfWidthAt(float u) => halfWidth * (1f + taper * u / halfLength);
 
         // True if p is inside the field grown by margin on every side.
-        public bool Contains(Vector2 p, float margin)
+        public bool Contains(Vector2 p, float margin) => ContainsUnwarped(Unwarp(p), margin);
+
+        // The same for a point already taken back through Unwarp (to test one point against many fields).
+        public bool ContainsUnwarped(Vector2 p, float margin)
         {
             Vector2 d = p - center;
             float u = Vector2.Dot(d, along);
@@ -31,7 +35,44 @@ namespace DroneSandbox
 
         // A point in the field: u metres along from the middle, and v across, where v = +-halfWidth is the edge
         // (scaled to the field's width there).
-        public Vector2 Point(float u, float v) => center + along * u + Across * (v * HalfWidthAt(u) / halfWidth + shear * u);
+        public Vector2 Point(float u, float v)
+        {
+            Vector2 p = center + along * u + Across * (v * HalfWidthAt(u) / halfWidth + shear * u);
+            return p + Warp(p);
+        }
+
+        // Field edges in aerial photos wander a metre or two over a few tens of metres (an old boundary, a
+        // ditch, where the plough turned). Every field is bent by the same gentle warp of the land, so strips that
+        // share an edge still share it.
+        public const float WarpMax = 1.8f;
+        public static Vector2 Warp(Vector2 p)
+        {
+            // Looked up in a 2 m grid of it (the builders ask millions of times), worked out the first time.
+            if (warpGrid == null)
+            {
+                warpGrid = new Vector2[WarpCount * WarpCount];
+                for (int j = 0; j < WarpCount; j++)
+                    for (int i = 0; i < WarpCount; i++)
+                        warpGrid[j * WarpCount + i] = WarpAt(new Vector2(i * WarpCell - WarpReach, j * WarpCell - WarpReach));
+            }
+            float gx = (p.x + WarpReach) / WarpCell, gz = (p.y + WarpReach) / WarpCell;
+            int x0 = Mathf.FloorToInt(gx), z0 = Mathf.FloorToInt(gz);
+            if (x0 < 0 || z0 < 0 || x0 >= WarpCount - 1 || z0 >= WarpCount - 1) return WarpAt(p);
+            float fx = gx - x0, fz = gz - z0;
+            int k = z0 * WarpCount + x0;
+            return Vector2.Lerp(Vector2.Lerp(warpGrid[k], warpGrid[k + 1], fx), Vector2.Lerp(warpGrid[k + WarpCount], warpGrid[k + WarpCount + 1], fx), fz);
+        }
+
+        const float WarpCell = 2f, WarpReach = 240f;
+        const int WarpCount = 241;
+        static Vector2[] warpGrid;
+
+        static Vector2 WarpAt(Vector2 p) => new Vector2(
+            2.6f * (Mathf.PerlinNoise(p.x * 0.036f + 13f, p.y * 0.036f + 71f) - 0.5f) + 0.9f * (Mathf.PerlinNoise(p.x * 0.09f + 5f, p.y * 0.09f + 29f) - 0.5f),
+            2.6f * (Mathf.PerlinNoise(p.x * 0.036f + 47f, p.y * 0.036f + 3f) - 0.5f) + 0.9f * (Mathf.PerlinNoise(p.x * 0.09f + 61f, p.y * 0.09f + 88f) - 0.5f));
+
+        // Where a point of the bent land was before Warp moved it (near enough: the warp is gentle).
+        public static Vector2 Unwarp(Vector2 p) => p - Warp(p - Warp(p));
     }
 
     // The layout of the map being played: bases, defences, the river, roads, villages, water, farm fields and the
@@ -90,6 +131,8 @@ namespace DroneSandbox
         public static PathField RailField { get; private set; }
         public static readonly List<Ground.FlatSite> FlatSites = new List<Ground.FlatSite>();
         public static readonly List<FieldPlot> Fields = new List<FieldPlot>();
+        // Where roads meet or cross, which wheels have worn into a wider patch of bare ground.
+        public static readonly List<Vector2> Junctions = new List<Vector2>();
 
         // Builds the lines, distance fields and field plan for the current sector. Only runs once per sector.
         public static void Prepare()
@@ -113,12 +156,13 @@ namespace DroneSandbox
 
             RiverLine = p.river != null ? Smooth(p.river, 2f) : new List<Vector2>();
             DamDown = p.hasDam && RiverLine.Count > 1 ? (RiverLine[Mathf.Min(4, RiverLine.Count - 1)] - RiverLine[0]).normalized : Vector2.right;
-            RoadLines = new List<List<Vector2>>();
-            foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
-            RailLines = new List<List<Vector2>>();
-            foreach (var rail in p.railways) RailLines.Add(Smooth(rail, 2f));
             // The river field reaches far out so the hills can open into a valley around the river.
             RiverField = new PathField(p.river != null ? new[] { RiverLine } : new List<Vector2>[0], 80f, Ground.Size);
+            RoadLines = new List<List<Vector2>>();
+            foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
+            Wander(RoadLines);
+            RailLines = new List<List<Vector2>>();
+            foreach (var rail in p.railways) RailLines.Add(Smooth(rail, 2f));
             RoadField = new PathField(RoadLines, 12f, Ground.Size);
             RailField = new PathField(RailLines, 12f, Ground.Size);
 
@@ -126,7 +170,76 @@ namespace DroneSandbox
             IndexFields();
         }
 
+        // Country lanes aren't drawn with a French curve: they drift a metre or three either way over a few tens of
+        // metres (round an old boundary or a wet patch). Ends, junctions and bridges stay put so the roads still
+        // meet and cross the river square, and so does a road beside water, which keeps to its bank.
+        static void Wander(List<List<Vector2>> lines)
+        {
+            Junctions.Clear();
+            var anchors = new List<Vector2>(Plan.bridges);
+            for (int a = 0; a < lines.Count; a++)
+            {
+                anchors.Add(lines[a][0]);
+                anchors.Add(lines[a][lines[a].Count - 1]);
+                for (int b = 0; b < lines.Count; b++)
+                {
+                    if (b == a) continue;
+                    // A road ending on another one, or two crossing: the first point within 3 m of the other road.
+                    foreach (var q in lines[a])
+                    {
+                        bool meets = false;
+                        foreach (var r in lines[b])
+                            if ((q - r).sqrMagnitude < 9f) { meets = true; break; }
+                        if (!meets) continue;
+                        bool known = false;
+                        foreach (var j in Junctions)
+                            if ((j - q).sqrMagnitude < 100f) { known = true; break; }
+                        if (!known) Junctions.Add(q);
+                    }
+                }
+            }
+            anchors.AddRange(Junctions);
+            for (int k = 0; k < lines.Count; k++)
+            {
+                var line = lines[k];
+                var moved = new List<Vector2>(line.Count);
+                float walked = 0f;
+                for (int i = 0; i < line.Count; i++)
+                {
+                    if (i > 0) walked += Vector2.Distance(line[i - 1], line[i]);
+                    Vector2 q = line[i];
+                    float near = Far;
+                    foreach (var a in anchors) near = Mathf.Min(near, Vector2.Distance(a, q));
+                    float water = LakeDistance(q.x, q.y);
+                    if (HasRiver) water = Mathf.Min(water, RiverField.Distance(q.x, q.y) - RiverHalfWidth);
+                    float hold = Mathf.SmoothStep(0f, 1f, (near - 14f) / 30f) * Mathf.SmoothStep(0f, 1f, (water - 6f) / 12f);
+                    float drift = 5.2f * (Mathf.PerlinNoise(walked / 55f, k * 7.3f + 0.5f) - 0.5f)
+                                + 1.4f * (Mathf.PerlinNoise(walked / 19f, k * 3.1f + 40.5f) - 0.5f);
+                    Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(i - 1, 0)]).normalized;
+                    moved.Add(q + new Vector2(-dir.y, dir.x) * drift * hold);
+                }
+                lines[k] = moved;
+            }
+        }
+
         // ---- Questions the builders ask ----
+
+        // How much of the farmed valley floor (the middle 300 m square, less water, villages and sites) is under
+        // fields, sampled every 3 m. Aerial photos of farmland show 55 to 70%.
+        public static float FieldCoverage()
+        {
+            int land = 0, farmed = 0;
+            for (float z = -150f; z <= 150f; z += 3f)
+                for (float x = -150f; x <= 150f; x += 3f)
+                {
+                    var q = new Vector2(x, z);
+                    if (LakeDistance(x, z) < 0f || NearVillage(q, 0f) || NearFlatSite(q, 0f)) continue;
+                    if (HasRiver && RiverField.Distance(x, z) < RiverHalfWidth) continue;
+                    land++;
+                    if (InField(q, 0f)) farmed++;
+                }
+            return land > 0 ? farmed / (float)land : 0f;
+        }
 
         public static bool NearFlatSite(Vector2 p, float margin)
         {
@@ -150,14 +263,16 @@ namespace DroneSandbox
                 int cz = Mathf.Clamp(Mathf.FloorToInt((p.y + Ground.Size / 2f) / FieldCell), 0, fieldCellCount - 1);
                 var near = fieldCells[cz * fieldCellCount + cx];
                 if (near == null) return false;
+                Vector2 q = FieldPlot.Unwarp(p);
                 foreach (int i in near)
-                    if ((i < Fields.Count ? Fields[i] : Plan.orchards[i - Fields.Count]).Contains(p, margin)) return true;
+                    if ((i < Fields.Count ? Fields[i] : Plan.orchards[i - Fields.Count]).ContainsUnwarped(q, margin)) return true;
                 return false;
             }
+            Vector2 flat = FieldPlot.Unwarp(p);
             foreach (var f in Fields)
-                if (f.Contains(p, margin)) return true;
+                if (f.ContainsUnwarped(flat, margin)) return true;
             foreach (var f in Plan.orchards)
-                if (f.Contains(p, margin)) return true;
+                if (f.ContainsUnwarped(flat, margin)) return true;
             return false;
         }
 
@@ -175,7 +290,7 @@ namespace DroneSandbox
             for (int i = 0; i < total; i++)
             {
                 var f = i < Fields.Count ? Fields[i] : Plan.orchards[i - Fields.Count];
-                float ex = Extent(f, Vector2.right) + FieldReachPad, ez = Extent(f, Vector2.up) + FieldReachPad;
+                float ex = Extent(f, Vector2.right) + FieldReachPad + FieldPlot.WarpMax, ez = Extent(f, Vector2.up) + FieldReachPad + FieldPlot.WarpMax;
                 int x0 = Mathf.Max(0, Mathf.FloorToInt((f.center.x - ex + Ground.Size / 2f) / FieldCell));
                 int x1 = Mathf.Min(fieldCellCount - 1, Mathf.FloorToInt((f.center.x + ex + Ground.Size / 2f) / FieldCell));
                 int z0 = Mathf.Max(0, Mathf.FloorToInt((f.center.y - ez + Ground.Size / 2f) / FieldCell));
@@ -322,8 +437,10 @@ namespace DroneSandbox
         static void PlanFields(System.Random rng)
         {
             Fields.Clear();
+            fieldCells = null; // the last sector's index
             float share = Plan.fields;
             if (share <= 0f) return;
+            MapBlocked();
             double roadsideSkip = Mathf.Clamp01(0.1f + (0.7f - share) * 1.2f), fillSkip = Mathf.Clamp01(0.85f - share);
             foreach (var line in RoadLines)
             {
@@ -371,6 +488,90 @@ namespace DroneSandbox
                 var c = new Vector2(Range(rng, -130f, 130f), Range(rng, -130f, 130f));
                 TryBlock(rng, c, GridDirection(c, rng), Range(rng, 16f, 30f), Range(rng, 14f, 28f));
             }
+            Lengthen();
+
+            // And what's still open: farmland in aerial photos is fields with tracks and hedges between, not fields
+            // on a lawn. So every gap on the valley floor gets the biggest square-cornered field that fits it, slid
+            // about a little to find the room (as much of it as the sector's fields share asks for).
+            double gapSkip = Mathf.Clamp01(0.1f + (0.7f - share) * 1.5f);
+            for (float gz = -148f; gz <= 148f; gz += 6f)
+            {
+                for (float gx = -148f; gx <= 148f; gx += 6f)
+                {
+                    var c = new Vector2(gx, gz);
+                    if (Blocked(c) || NearAnyField(c, 4f) || rng.NextDouble() < gapSkip) continue;
+                    Vector2 grid = GridDirection(c, rng);
+                    bool placed = false;
+                    foreach (var size in GapSizes)
+                    {
+                        // Either way round: a gap is usually longer one way than the other.
+                        for (int turn = 0; turn < 2 && !placed; turn++)
+                        {
+                            Vector2 away = turn == 0 ? grid : new Vector2(-grid.y, grid.x), side = new Vector2(-away.y, away.x);
+                            foreach (var shift in GapShifts)
+                            {
+                                Vector2 at = c + away * (shift.x * size.x) + side * (shift.y * size.y);
+                                if (TryBlock(rng, at, away, size.x, size.y, true)) { placed = true; break; }
+                            }
+                        }
+                        if (placed) break;
+                    }
+                }
+            }
+            Lengthen();
+        }
+
+        // Every field runs on as far as the land lets it, each end on its own (to 100 m long at most), the way
+        // the strips of a block end raggedly, each where it meets a road, a track or the next field.
+        static void Lengthen()
+        {
+            for (int i = 0; i < Fields.Count; i++)
+            {
+                var f = Fields[i];
+                foreach (float end in new[] { 1f, -1f })
+                {
+                    for (int step = 0; step < 10 && f.halfLength < 50f; step++)
+                    {
+                        var longer = Lengthened(f, end, 4f);
+                        if (!Fits(longer, int.MaxValue, i)) break;
+                        f = longer;
+                    }
+                }
+                Fields[i] = f;
+            }
+        }
+
+        // The field made `metres` longer at its far end (end 1) or its near end (-1), its edges running straight on.
+        static FieldPlot Lengthened(FieldPlot f, float end, float metres)
+        {
+            float slope = f.halfWidth * f.taper / f.halfLength; // how much wider it gets per metre along
+            float half = metres / 2f;
+            var g = f;
+            g.halfLength = f.halfLength + half;
+            g.center = f.center + (f.along + f.Across * f.shear) * (end * half);
+            g.halfWidth = f.halfWidth + slope * end * half;
+            g.taper = slope * g.halfLength / g.halfWidth;
+            return g;
+        }
+
+        // Fields tried in the gaps, depth by frontage, biggest first; and how far each is slid (in its own sizes).
+        static readonly Vector2[] GapSizes =
+        {
+            new Vector2(60f, 48f), new Vector2(46f, 38f), new Vector2(36f, 30f), new Vector2(28f, 22f), new Vector2(22f, 17f), new Vector2(17f, 13f),
+            new Vector2(30f, 11f), new Vector2(14f, 11f),
+        };
+        static readonly Vector2[] GapShifts =
+        {
+            Vector2.zero, new Vector2(0.3f, 0f), new Vector2(-0.3f, 0f), new Vector2(0f, 0.3f), new Vector2(0f, -0.3f),
+        };
+
+        // Whether p is in or within margin of a field planned so far (before the fields are indexed).
+        static bool NearAnyField(Vector2 p, float margin)
+        {
+            Vector2 q = FieldPlot.Unwarp(p);
+            foreach (var f in Fields)
+                if (f.ContainsUnwarped(q, margin)) return true;
+            return false;
         }
 
         // Which way a block away from the roads lies: square to the nearest road, or a slowly turning grid.
@@ -385,11 +586,13 @@ namespace DroneSandbox
         // A block of farmland `depth` deep along `away` and `frontage` wide, centred on `center`, cut into strips
         // that run its depth. Its far side is a little wider or narrower than its near side and may lean; every strip
         // shares that. Where the whole block doesn't fit (a road, a village, water in the way), the strips that do
-        // fit are kept, as farmers work round such things. False if none fit.
-        static bool TryBlock(System.Random rng, Vector2 center, Vector2 away, float depth, float frontage)
+        // fit are kept, as farmers work round such things. False if none fit. A square block (for filling gaps)
+        // neither fans nor leans.
+        static bool TryBlock(System.Random rng, Vector2 center, Vector2 away, float depth, float frontage, bool square = false)
         {
-            float spread = Range(rng, -0.2f, 0.2f); // the far side is (1 + spread) times as wide as the near side
-            float slant = Range(rng, -0.25f, 0.25f); // and sits slant metres across for every metre deep
+            float spread = Range(rng, -0.15f, 0.15f); // the far side is (1 + spread) times as wide as the near side
+            float slant = Range(rng, -0.15f, 0.15f); // and sits slant metres across for every metre deep
+            if (square) spread = slant = 0f;
             var block = new FieldPlot
             {
                 center = center, along = away, halfLength = depth / 2f,
@@ -443,27 +646,65 @@ namespace DroneSandbox
         }
 
         // Whether a field (or orchard) fits here: clear of roads, water, sites, villages and other plots.
-        // Fields from siblingsFrom on (the strips of the block being laid out) don't count as in the way.
-        public static bool Fits(FieldPlot plot, int siblingsFrom = int.MaxValue)
+        // Fields from siblingsFrom on (the strips of the block being laid out), and field number `self` (the one
+        // being lengthened), don't count as in the way.
+        static bool Fits(FieldPlot plot, int siblingsFrom = int.MaxValue, int self = -1)
         {
-            for (int i = 0; i < Fields.Count && i < siblingsFrom; i++)
-                if (Overlaps(plot, Fields[i], 3f)) return false;
-            foreach (var other in Plan.orchards)
-                if (Overlaps(plot, other, 3f)) return false;
             // Sample the plot every few metres, corners included.
             for (float u = -plot.halfLength; u <= plot.halfLength + 0.01f; u += plot.halfLength / 5f)
-            {
                 for (float v = -plot.halfWidth; v <= plot.halfWidth + 0.01f; v += plot.halfWidth / 4f)
+                    if (Blocked(plot.Point(u, v))) return false;
+            float reach = Reach(plot);
+            for (int i = 0; i < Fields.Count && i < siblingsFrom; i++)
+            {
+                if (i == self) continue;
+                var other = Fields[i];
+                float apart = reach + Reach(other) + 2f;
+                if ((other.center - plot.center).sqrMagnitude < apart * apart && Overlaps(plot, other, 2f)) return false;
+            }
+            foreach (var other in Plan.orchards)
+                if (Overlaps(plot, other, 3f)) return false;
+            return true;
+        }
+
+        // How far a plot reaches from its middle, at most.
+        static float Reach(FieldPlot f)
+        {
+            float across = f.halfWidth * (1f + Mathf.Abs(f.taper)) + Mathf.Abs(f.shear) * f.halfLength;
+            return Mathf.Sqrt(f.halfLength * f.halfLength + across * across) + FieldPlot.WarpMax;
+        }
+
+        // Which 2 m squares of the map no field may touch (roads and their verges, water, the dam and works, sites,
+        // villages, the edge), worked out once per sector so the planner's thousands of tries look it up.
+        const float BlockCell = 2f;
+        static bool[] blocked;
+        static int blockCount;
+
+        static void MapBlocked()
+        {
+            blockCount = Mathf.CeilToInt(2f * Edge / BlockCell);
+            blocked = new bool[blockCount * blockCount];
+            // A point of a square is up to 1.4 m from its middle, but every limit here already keeps a metre or two in
+            // hand (a road's verge, the shore), so half a metre's slack is enough.
+            const float slack = 0.5f;
+            for (int j = 0; j < blockCount; j++)
+            {
+                for (int i = 0; i < blockCount; i++)
                 {
-                    Vector2 p = plot.Point(u, v);
-                    if (Mathf.Abs(p.x) > Edge - 15f || Mathf.Abs(p.y) > Edge - 15f) return false;
-                    if (RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f) return false;
-                    if (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f) return false;
-                    if (LakeDistance(p.x, p.y) < 30f || NearDam(p, 15f) || OnWorks(p, 4f)) return false;
-                    if (NearFlatSite(p, 4f) || NearVillage(p, 0f)) return false;
+                    var p = new Vector2(-Edge + (i + 0.5f) * BlockCell, -Edge + (j + 0.5f) * BlockCell);
+                    blocked[j * blockCount + i] = Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack
+                        || RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f + slack
+                        || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
+                        || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
+                        || NearFlatSite(p, 4f + slack) || NearVillage(p, slack);
                 }
             }
-            return true;
+        }
+
+        static bool Blocked(Vector2 p)
+        {
+            int i = Mathf.FloorToInt((p.x + Edge) / BlockCell), j = Mathf.FloorToInt((p.y + Edge) / BlockCell);
+            return i < 0 || j < 0 || i >= blockCount || j >= blockCount || blocked[j * blockCount + i];
         }
 
         // Separating-axis test between two rectangles, grown by margin.

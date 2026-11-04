@@ -210,7 +210,7 @@ namespace DroneSandbox
                         if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / 7f) continue;
                         if (r > edge + 7f || Mathf.PerlinNoise(p.x * 0.07f + seed % 211, p.y * 0.07f + 5f) < 0.28f) continue;
                         if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
-                        Place(PickTree(rng, isOuter), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
+                        Place(PickTree(rng, isOuter, p), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
                         Undergrowth.NoteTree(p);
                     }
                 }
@@ -243,14 +243,19 @@ namespace DroneSandbox
             return false;
         }
 
-        // A tree for a wood: the Varrow Valley's own mix, or, elsewhere, the sector's shares of conifers and birches
-        // (more conifers on the outer hills).
-        static string PickTree(System.Random rng, bool outer)
+        // A tree for a wood at p: the Varrow Valley's own mix, or, elsewhere, the sector's shares of conifers and
+        // birches (more conifers on the outer hills). Woods seen from above grow in stands of one kind 15 to 35 m
+        // across (a clump of birch, a block of spruce), so three trees in four take the kind of the stand they're
+        // in, and the rest are strays from the whole mix.
+        static string PickTree(System.Random rng, bool outer, Vector2 p)
         {
             var plan = MapLayout.Plan;
+            float stand = Mathf.Clamp01((Mathf.PerlinNoise(p.x * 0.04f + 300f, p.y * 0.04f + 150f) - 0.22f) / 0.56f);
+            double r = rng.NextDouble();
+            r = r < 0.75 ? stand : (r - 0.75) / 0.25;
             if (plan.kind != SectorKind.VarrowValley)
             {
-                float roll = (float)rng.NextDouble(), conifer = outer ? Mathf.Min(1f, plan.conifer + 0.35f) : plan.conifer;
+                float roll = (float)r, conifer = outer ? Mathf.Min(1f, plan.conifer + 0.35f) : plan.conifer;
                 if (roll < conifer * 0.25f) return "Scenery_Pine";
                 if (roll < conifer * 0.4f) return "Scenery_Pine_B";
                 if (roll < conifer) return "Scenery_Spruce";
@@ -258,7 +263,6 @@ namespace DroneSandbox
                 float rest = (float)rng.NextDouble();
                 return rest < 0.55f ? "Scenery_Tree" : rest < 0.85f ? "Scenery_Tree_B" : "Scenery_Poplar";
             }
-            double r = rng.NextDouble();
             if (outer)
                 return r < 0.4 ? "Scenery_Spruce" : r < 0.6 ? "Scenery_Pine" : r < 0.75 ? "Scenery_Pine_B" : r < 0.9 ? "Scenery_Tree" : "Scenery_Tree_B";
             return r < 0.35 ? "Scenery_Tree" : r < 0.6 ? "Scenery_Tree_B" : r < 0.72 ? "Scenery_Birch" : r < 0.86 ? "Scenery_Pine" : "Scenery_Spruce";

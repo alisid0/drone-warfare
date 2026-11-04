@@ -460,18 +460,20 @@ namespace DroneSandbox
                 // Both photos are brownish ground with grass through it; the tints make the meadow a sunlit summer
                 // green and the lush grass (in damp hollows, by woods and water) a deeper, bluer green, so from the
                 // game camera, where the texture is a blur, the two read as the light and dark of a real meadow.
-                Layer("meadow", 7f, new Color(0.44f, 0.80f, 0.34f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
-                Layer("lush", 6f, new Color(0.24f, 0.60f, 0.24f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
-                Layer("dirt", 5f, Color.white, new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
-                Layer("rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
+                // The dry grass is the meadow photo again, tinted to the pale olive of grass on high, thin ground.
+                Layer("meadow", "meadow", 7f, new Color(0.45f, 0.76f, 0.37f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
+                Layer("lush", "lush", 6f, new Color(0.25f, 0.57f, 0.27f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
+                Layer("dirt", "dirt", 5f, Color.white, new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
+                Layer("rock", "rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
+                Layer("dry", "meadow", 8f, new Color(0.66f, 0.66f, 0.38f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
             };
         }
 
-        // Uses Resources/Textures/Terrain/<name>_diff (and _nor) when present, else a generated noise texture.
-        static TerrainLayer Layer(string name, float tile, Color tint, Color light, Color dark)
+        // Uses Resources/Textures/Terrain/<file>_diff (and _nor) when present, else a generated noise texture.
+        static TerrainLayer Layer(string name, string file, float tile, Color tint, Color light, Color dark)
         {
-            var diffuse = Resources.Load<Texture2D>("Textures/Terrain/" + name + "_diff");
-            var normal = Resources.Load<Texture2D>("Textures/Terrain/" + name + "_nor");
+            var diffuse = Resources.Load<Texture2D>("Textures/Terrain/" + file + "_diff");
+            var normal = Resources.Load<Texture2D>("Textures/Terrain/" + file + "_nor");
             return new TerrainLayer
             {
                 name = name,
@@ -488,7 +490,8 @@ namespace DroneSandbox
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
             float hw = MapLayout.RiverHalfWidth, roadHw = MapLayout.RoadHalfWidth;
-            var splat = new float[SplatRes, SplatRes, 4];
+            var splat = new float[SplatRes, SplatRes, 5];
+            var junctions = MapLayout.Junctions;
             for (int zi = 0; zi < SplatRes; zi++)
             {
                 for (int xi = 0; xi < SplatRes; xi++)
@@ -500,13 +503,24 @@ namespace DroneSandbox
 
                     float rock = Mathf.SmoothStep(0f, 1f, (steep - 22f) / 12f);
                     float dirt = bare ? 1f : 0f;
-                    // Dirt roads: two wheel tracks with a strip of grass down the middle.
+                    // Dirt roads: two wheel tracks with a strip of grass down the middle, wider and narrower along the
+                    // way (3 to 4 m), with ragged edges where wheels have strayed onto the verge, and a wider patch of
+                    // bare ground where roads meet.
                     float dRoad = roads.Distance(x, z);
-                    if (dRoad < roadHw + 1f)
+                    float laneHw = roadHw * (0.75f + 0.3f * Mathf.PerlinNoise(x * 0.025f + 5f, z * 0.025f + 90f))
+                                 + 0.5f * (Mathf.PerlinNoise(x * 0.35f + 17f, z * 0.35f + 4f) - 0.5f);
+                    if (dRoad < laneHw + 1f)
                     {
-                        float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - roadHw + 0.4f) / 1.2f);
+                        float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - laneHw + 0.4f) / 1.2f);
                         if (dRoad < 0.5f) track *= 0.35f;
                         dirt = Mathf.Max(dirt, track);
+                    }
+                    foreach (var j in junctions)
+                    {
+                        float dj = Vector2.Distance(new Vector2(x, z), j);
+                        if (dj > 9f) continue;
+                        float apron = 5f + 2f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
+                        dirt = Mathf.Max(dirt, 0.85f * (1f - Mathf.SmoothStep(0f, 1f, (dj - apron + 1.5f) / 2.5f)));
                     }
                     // Gravel railway beds, and the quarry's dusty floor.
                     if (MapLayout.RailField.points.Count > 0)
@@ -559,15 +573,24 @@ namespace DroneSandbox
                     float variation = Mathf.Max(Mathf.SmoothStep(0f, 1f, (patches - 0.42f) * 3.5f), damp * 0.85f);
                     // A verge of rank, darker grass round each field, where the plough doesn't reach.
                     if (MapLayout.InField(new Vector2(x, z), 2.2f) && !MapLayout.InField(new Vector2(x, z), 0f)) variation = Mathf.Max(variation, 0.9f);
+                    // And along the roads, in stretches: long uncut grass a couple of metres wide each side.
+                    float verge = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRoad - laneHw - 1.6f) / 1.4f);
+                    if (verge > 0f) variation = Mathf.Max(variation, 0.8f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
+                    // Regions with a reason, as aerial photos show them: grass thin and pale on the higher, drier
+                    // ground and in broad drifts of old pasture, never in the damp by water.
+                    float high = Mathf.SmoothStep(0f, 1f, (data.GetInterpolatedHeight(u, v) - Sink - 1.5f) / 8f);
+                    float region = Mathf.PerlinNoise(x * 0.011f + 120f, z * 0.011f + 60f) * 0.7f + Mathf.PerlinNoise(x * 0.09f + 3f, z * 0.09f + 77f) * 0.3f;
+                    float dry = Mathf.SmoothStep(0f, 1f, (region + 0.3f * high - 0.56f) * 5f) * (1f - damp);
 
                     // Each layer covers the ones before it.
-                    float[] w = new float[4];
+                    float[] w = new float[5];
                     w[3] = rock;
                     w[2] = dirt * (1f - rock);
                     w[1] = variation * (1f - rock) * (1f - dirt);
-                    w[0] = (1f - rock) * (1f - dirt) * (1f - variation);
-                    float sum = w[0] + w[1] + w[2] + w[3];
-                    for (int k = 0; k < 4; k++) splat[zi, xi, k] = w[k] / sum;
+                    w[4] = dry * (1f - rock) * (1f - dirt) * (1f - variation);
+                    w[0] = (1f - rock) * (1f - dirt) * (1f - variation) * (1f - dry);
+                    float sum = w[0] + w[1] + w[2] + w[3] + w[4];
+                    for (int k = 0; k < 5; k++) splat[zi, xi, k] = w[k] / sum;
                 }
             }
             return splat;
