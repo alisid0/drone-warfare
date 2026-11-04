@@ -54,5 +54,28 @@ namespace DroneSandbox.EditorTools
                 if (counts[k] > 0) report.Append($" {names[k]} {counts[k] * 100f / (4f * half * half):0}%");
             Debug.Log(report.ToString());
         }
+
+        // Reports, for every photo-scanned model, each mesh's vertex count, how many of its UVs are distinct and
+        // how many normals point down: a mesh whose UVs all collapsed to one point draws as a flat silhouette.
+        //   Unity.exe -batchmode -quit -projectPath . -executeMethod DroneSandbox.EditorTools.LayoutProbe.ScanMeshes
+        public static void ScanMeshes()
+        {
+            foreach (var model in Resources.LoadAll<GameObject>("Models"))
+            {
+                if (!model.name.StartsWith("Scan_")) continue;
+                foreach (var filter in model.GetComponentsInChildren<MeshFilter>(true))
+                {
+                    var mesh = filter.sharedMesh;
+                    if (mesh == null) continue;
+                    var uvs = mesh.uv;
+                    var distinct = new System.Collections.Generic.HashSet<Vector2>(uvs);
+                    int down = 0;
+                    foreach (var n in mesh.normals) if (n.y < -0.2f) down++;
+                    var material = filter.GetComponent<MeshRenderer>()?.sharedMaterial;
+                    Debug.Log($"Scan mesh {model.name}/{filter.name}: {mesh.vertexCount} verts, {distinct.Count} distinct UVs, " +
+                              $"{down * 100 / Mathf.Max(1, mesh.vertexCount)}% normals down, material {(material != null ? material.name : "none")}");
+                }
+            }
+        }
     }
 }

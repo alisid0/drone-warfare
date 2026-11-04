@@ -578,17 +578,22 @@ namespace DroneSandbox
                     float dRoad = roads.Distance(x, z);
                     float laneHw = roadHw * (0.75f + 0.3f * Mathf.PerlinNoise(x * 0.025f + 5f, z * 0.025f + 90f))
                                  + 0.5f * (Mathf.PerlinNoise(x * 0.35f + 17f, z * 0.35f + 4f) - 0.5f);
-                    if (dRoad < laneHw + 1f)
+                    if (dRoad < laneHw + 2.5f)
                     {
+                        // The ruts come and go (deep and bare in some stretches, grassed over in others), and the
+                        // shoulder is churned to mud in patches every couple of dozen metres.
                         float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - laneHw + 0.4f) / 1.2f);
+                        track *= 0.72f + 0.28f * Mathf.PerlinNoise(x * 0.1f + 70f, z * 0.1f + 12f);
                         if (dRoad < 0.5f) track *= 0.35f;
-                        dirt = Mathf.Max(dirt, track);
+                        float shoulder = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRoad - laneHw - 0.6f) / 0.9f);
+                        float mud = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.07f + 33f, z * 0.07f + 81f) - 0.6f) * 6f);
+                        dirt = Mathf.Max(dirt, Mathf.Max(track, 0.8f * shoulder * mud));
                     }
                     foreach (var j in junctions)
                     {
                         float dj = Vector2.Distance(new Vector2(x, z), j);
-                        if (dj > 9f) continue;
-                        float apron = 5f + 2f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
+                        if (dj > 11f) continue;
+                        float apron = 6.5f + 3f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
                         dirt = Mathf.Max(dirt, 0.85f * (1f - Mathf.SmoothStep(0f, 1f, (dj - apron + 1.5f) / 2.5f)));
                     }
                     // Wheel tracks out to the emplacements: two ruts 1.6 m apart, worn bare in stretches.

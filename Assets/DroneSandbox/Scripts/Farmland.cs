@@ -223,7 +223,7 @@ namespace DroneSandbox
         {
             for (int edge = 0; edge < 4; edge++)
             {
-                if (rng.NextDouble() > (edge % 2 == 0 ? 0.35 : 0.2)) continue;
+                if (rng.NextDouble() > (edge % 2 == 0 ? 0.45 : 0.3)) continue; // about two field edges in five
                 bool side = edge % 2 == 0; // a long side, or an end
                 float sign = edge < 2 ? 1f : -1f;
                 Vector2 outward = side ? plot.Across * sign : plot.along * sign;

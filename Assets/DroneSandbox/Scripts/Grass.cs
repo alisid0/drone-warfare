@@ -101,8 +101,9 @@ namespace DroneSandbox
         // A tussock: five cards standing round the middle and leaning out (grass 40 degrees, reeds nearly upright),
         // 0.55 m wide and 0.55 m long, so from the game camera above you look onto the blades fanning out, not
         // along thin crossed cards.
-        // Normals all point up, so the grass is lit like the ground it grows from instead of going dark on the side
-        // facing away from the sun.
+        // Normals point mostly up and a little out along each card (a quarter of the way), so the grass is lit
+        // much like the ground it grows from instead of going dark on the side facing away from the sun, while the
+        // tuft still has a bit of shape.
         static Mesh ClumpMesh(float leanDegrees)
         {
             const int cards = 5;
@@ -131,7 +132,7 @@ namespace DroneSandbox
                 uvs[v + 3] = new Vector2(0f, 1f);
                 for (int i = 0; i < 4; i++)
                 {
-                    normals[v + i] = Vector3.up;
+                    normals[v + i] = (Vector3.up * 0.78f + outward * 0.25f).normalized;
                     sway[v + i] = new Vector2(k * 0.29f, uvs[v + i].y); // roots stay put, tips sway
                 }
                 int t = k * 6;
@@ -141,6 +142,7 @@ namespace DroneSandbox
                 triangles[t + 3] = v; triangles[t + 4] = v + 2; triangles[t + 5] = v + 3;
             }
             var mesh = new Mesh { name = "Grass Clump", vertices = vertices, uv = uvs, uv2 = sway, normals = normals, triangles = triangles };
+            mesh.RecalculateTangents(); // the shader expects them; without, its tangent space was undefined
             mesh.RecalculateBounds();
             return mesh;
         }
