@@ -56,10 +56,10 @@ namespace DroneSandbox
         // ---- What it knows of us ----
         public float AlertedAt { get; private set; } = -100f;
         public float alertSeconds = AlertSeconds; // shorter for a Shadow mission's column, which settles quickly
-        public bool Alerted => Time.time - AlertedAt < alertSeconds;
+        public bool Alerted => Time.time >= alertReadyAt && Time.time - AlertedAt < alertSeconds;
         Vector3 trouble;          // where the last threat was
         float acquiring;          // AA: how long it has been laying its guns on the current drone
-        float acquireBegan, alertBegan;
+        float acquireBegan, alertBegan, alertReadyAt;
 
         // What an AA gun is doing, for the HUD's threat warnings.
         public Unit TrackedDrone { get; private set; }
@@ -624,9 +624,9 @@ namespace DroneSandbox
                 : type == EnemyType.AAGun ? CurrentRange + 6f
                 : IsMobile ? 26f : 20f;
             range *= Mathf.Lerp(1f, 0.7f, dark) * Recon.WeatherFactor * Wariness;
-            if (distance > range) return;
+            if (distance * Difficulty.AlertReactionFactor > range) return;
             Alert(drone.transform.position);
-            if (type == EnemyType.Radar)
+            if (type == EnemyType.Radar && Alerted)
             {
                 foreach (var e in SandboxGame.Instance.enemies)
                 {
@@ -638,14 +638,15 @@ namespace DroneSandbox
             }
         }
 
-        // Trouble at `threat`: go on alert (and say so, once, unless it was already).
+        // Warn once at the first trouble; Recruit gets a moment before the alarm changes behaviour.
         public void Alert(Vector3 threat, bool loud = true)
         {
-            bool was = Alerted;
+            bool was = Time.time - AlertedAt < alertSeconds; // includes the warning grace, so sightings cannot restart it
             AlertedAt = Time.time;
             trouble = threat;
             if (was) return;
             alertBegan = Time.time;
+            alertReadyAt = Time.time + Difficulty.AlertWarningSeconds;
             if (loud && Intel >= Intel.Identified) SandboxGame.Instance.OnEnemyAlerted(this);
             if (IsMobile && route == null && parked) fleeTo = FleePoint(threat);
             else if (IsMobile && route == null && !parked) investigating = true;
@@ -770,6 +771,7 @@ namespace DroneSandbox
         // A parked vehicle that's been spotted or shot at drives off to park somewhere else.
         void Flee(float dt)
         {
+            if (Time.time < alertReadyAt) return;
             Vector3 to = fleeTo.Value - transform.position;
             to.y = 0f;
             if (to.magnitude < 2f)
@@ -801,7 +803,7 @@ namespace DroneSandbox
 
         void Patrol(float dt)
         {
-            if (investigating)
+            if (investigating && Time.time >= alertReadyAt)
             {
                 // Off to see where the trouble was, then back to the rounds.
                 investigating = false;
@@ -903,7 +905,7 @@ namespace DroneSandbox
             if (acquiring == 0f) acquireBegan = Time.time;
             acquiring += dt;
             bool warned = SandboxGame.Instance.RadarCovers(transform.position) || (Alerted && alertBegan < acquireBegan - 0.5f);
-            float needed = warned ? 0.5f : 1.6f;
+            float needed = (warned ? 0.5f : 1.6f) * Difficulty.AALockTimeFactor;
             AcquireProgress = Mathf.Clamp01(acquiring / needed);
             if (acquiring < needed) return;
             if (!Alerted) Alert(target.transform.position);

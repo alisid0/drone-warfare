@@ -299,7 +299,9 @@ namespace DroneSandbox
                         for (int i = 0; i < 4; i++) m.units.Add(new MissionUnit { type = EnemyType.Tank, position = V3(Open(c, 24f)), yaw = R(0f, 360f), decoy = true });
                         Guns(c, 1, false, 20f);
                         Stock(3, 2, 5, 5);
-                        Brief("Seven tanks are parked in the open, but only three are real: the rest are inflatable decoys. Fly a Scout close to tell them apart, and don't waste drones.");
+                        int decoys = AdjustDecoys(c, 24f);
+                        string tanks = decoys == 3 ? "Six" : decoys == 5 ? "Eight" : "Seven";
+                        Brief($"{tanks} tanks are parked in the open, but only three are real: the rest are inflatable decoys. Fly a Scout close to tell them apart, and don't waste drones.");
                         break;
                     }
                     case Situation.RailSupply:
@@ -395,13 +397,15 @@ namespace DroneSandbox
                         }
                         // One hit per target, plus one spare for a mistaken strike; no AA interrupts the observation.
                         Stock(2, 0, targets + 1, targets + 1);
+                        count = targets + AdjustDecoys(c, 18f);
                         m.contactRadius = 20f;
                         string vehicles = empty ? "fuel tankers" : "supply trucks";
                         string real = targets == 1 ? "one is a real target" : "two are real targets";
                         string falseTargets = empty ? "empty" : "inflatable decoys";
                         Brief($"{count} similar Dravin {vehicles} are parked together beside the road, but only {real}; the rest are {falseTargets}. " +
                             "Fly a Scout over the contact circles and watch each vehicle for a couple of seconds to confirm which ones are real before striking. " +
-                            "Spend Kamikazes only on the real targets, then bring the Scouts home. You have one spare Kamikaze.");
+                            "Spend Kamikazes only on the real targets, then bring the Scouts home. " +
+                            (Difficulty.SpareDrone ? "You have two spare Kamikazes." : "You have one spare Kamikaze."));
                         break;
                     }
                 }
@@ -410,6 +414,34 @@ namespace DroneSandbox
             }
 
             // ---- Units ----
+
+            // Adjust only existing decoy groups, after stock and placement, leaving Regular's random sequence intact.
+            int AdjustDecoys(Vector2 center, float spread)
+            {
+                int count = 0, last = -1, targets = 0;
+                for (int i = 0; i < m.units.Count; i++)
+                {
+                    if (m.units[i].target) targets++;
+                    if (!m.units[i].decoy) continue;
+                    count++;
+                    last = i;
+                }
+                int adjustment = Difficulty.DecoyAdjustment(count);
+                if (adjustment < 0)
+                {
+                    m.units.RemoveAt(last);
+                    return count - 1;
+                }
+                // Both groups can be scouted without spending ammunition on fakes; keep a reusable Strike or a spare hit.
+                if (adjustment == 0 || m.scouts <= 0 || (m.strikes <= 0 && m.kamikazes <= targets)) return count;
+                Vector2 at = Open(center, spread);
+                if (!OpenGround(at, 2.5f)) return count; // Open's crowded-site fallback is not safe for an extra vehicle
+                MissionUnit decoy = m.units[last];
+                decoy.position = V3(at);
+                decoy.yaw = R(0f, 360f);
+                m.units.Insert(rng.Next(m.units.Count + 1), decoy); // contact order must not give the added fake away
+                return count + 1;
+            }
 
             void Unit(EnemyType type, Vector2 at, bool target, bool hidden = false) =>
                 m.units.Add(new MissionUnit { type = type, position = V3(at), yaw = R(0f, 360f), target = target, hidden = hidden });
