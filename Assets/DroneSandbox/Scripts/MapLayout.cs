@@ -470,6 +470,9 @@ namespace DroneSandbox
             if (TrackField.Distance(p.x, p.y) < 1.5f + margin) return false;
             if (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 2.5f + margin) return false;
             if (OnWorks(p, margin)) return false;
+            // Trees keep 10 m back from the base and the HQ, so their walls, pads and vehicles stay in plain view.
+            if (Vector2.Distance(p, Flat(Plan.basePosition)) < BaseRadius + 10f + margin
+                || Vector2.Distance(p, Flat(Plan.enemyHqPosition)) < HqRadius + 10f + margin) return false;
             return !NearFlatSite(p, 3f + margin) && !NearVillage(p, margin) && !InField(p, 1f + margin);
         }
 

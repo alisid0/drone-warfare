@@ -126,10 +126,14 @@ namespace DroneSandbox
             const int cells = 96; // fields about 170 m across (the texture covers 16 km)
             var seeds = new Vector2[cells * cells];
             var cellColour = new Color[cells * cells];
+            // Far off the fields differ less than close to (the haze and distance even them out), so each is drawn
+            // a fifth of the way towards the mean colour of all of them.
+            var mean = Color.black;
+            foreach (var c in colours) mean += c / colours.Length;
             for (int i = 0; i < seeds.Length; i++)
             {
                 seeds[i] = new Vector2((i % cells) + 0.15f + 0.7f * (float)rng.NextDouble(), (i / cells) + 0.15f + 0.7f * (float)rng.NextDouble());
-                cellColour[i] = colours[rng.Next(colours.Length)] * (0.9f + 0.2f * (float)rng.NextDouble());
+                cellColour[i] = Color.Lerp(colours[rng.Next(colours.Length)], mean, 0.22f) * (0.93f + 0.14f * (float)rng.NextDouble());
             }
             var pixels = new Color[size * size];
             var wood = new Color(0.13f, 0.2f, 0.09f);
@@ -163,7 +167,7 @@ namespace DroneSandbox
                     var c = cellColour[owner];
                     // Hedgerows where two fields meet, with gaps.
                     float edge = Mathf.Sqrt(second) - Mathf.Sqrt(best);
-                    if (edge < 0.05f && Mathf.PerlinNoise(x * 0.05f + 7f, y * 0.05f) > 0.3f) c = Color.Lerp(c, wood, 0.85f);
+                    if (edge < 0.05f && Mathf.PerlinNoise(x * 0.05f + 7f, y * 0.05f) > 0.3f) c = Color.Lerp(c, wood, 0.6f);
                     // Woods: blobs of dark forest over about a fifth of the land.
                     float forest = Mathf.PerlinNoise(x * 0.004f + 11f, y * 0.004f + 23f) * 0.75f + Mathf.PerlinNoise(x * 0.02f, y * 0.02f + 5f) * 0.25f;
                     c = Color.Lerp(c, wood * (0.85f + 0.3f * Mathf.PerlinNoise(x * 0.15f, y * 0.15f)), Mathf.SmoothStep(0f, 1f, (forest - 0.5f) * 8f));

@@ -150,8 +150,8 @@ namespace DroneSandbox
             float patchy = crop == Crop.Ploughed ? 0.5f : crop == Crop.YoungCrop ? 0.34f : crop == Crop.MownHay ? 0.2f : 0.28f;
             float f = 1f + (drift - 0.5f) * patchy;
             // A paddock too small for the big machines shows no headland or tramlines (drawn there they make a
-            // stamped frame).
-            bool worked = length > 40f && width > 28f;
+            // stamped frame), and of the big fields only about two in three show them clearly.
+            bool worked = length > 40f && width > 28f && Mathf.Repeat(seed * 7.13f, 1f) < 0.65f;
 
             // Thinner and trampled along the edges (ploughed soil turned up paler).
             float edge = Mathf.Min(Mathf.Min(across, width - across), Mathf.Min(along, length - along));
@@ -201,13 +201,20 @@ namespace DroneSandbox
             return 0.5f + 0.5f * Mathf.Sqrt(Mathf.Clamp01(0.82f * (Mathf.Sqrt(f) - 1f)));
         }
 
+        // Round bales left where the baler dropped them: in a cluster or two, not sprinkled evenly.
         static void PlaceBales(FieldPlot plot, Transform parent, System.Random rng)
         {
-            int count = rng.Next(5, 13);
-            for (int i = 0; i < count; i++)
+            int count = rng.Next(5, 13), clusters = rng.Next(1, 3);
+            for (int k = 0; k < clusters; k++)
             {
-                Vector2 p = plot.Point(Range(rng, -0.8f, 0.8f) * plot.halfLength, Range(rng, -0.8f, 0.8f) * plot.halfWidth);
-                World.Place("Scenery_HayBale", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 1f, 0.05f, parent);
+                float cu = Range(rng, -0.6f, 0.6f) * plot.halfLength, cv = Range(rng, -0.6f, 0.6f) * plot.halfWidth;
+                for (int i = 0; i < count / clusters; i++)
+                {
+                    float u = Mathf.Clamp(cu + Range(rng, -7f, 7f), -0.85f * plot.halfLength, 0.85f * plot.halfLength);
+                    float v = Mathf.Clamp(cv + Range(rng, -5f, 5f), -0.85f * plot.halfWidth, 0.85f * plot.halfWidth);
+                    Vector2 p = plot.Point(u, v);
+                    World.Place("Scenery_HayBale", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 1f, 0.05f, parent);
+                }
             }
         }
 
@@ -308,8 +315,9 @@ namespace DroneSandbox
             {
                 case Crop.Wheat:
                 {
-                    // Ripe wheat with faint drill rows (the tramlines are in the field's detail map).
-                    c = Color.Lerp(new Color(0.70f, 0.55f, 0.27f), new Color(0.84f, 0.70f, 0.40f), n1 * 0.6f + n3 * 0.4f);
+                    // Ripe wheat with faint drill rows (the tramlines are in the field's detail map): a dusty straw
+                    // gold, around (171, 150, 94), not a saturated yellow.
+                    c = Color.Lerp(new Color(0.62f, 0.53f, 0.31f), new Color(0.74f, 0.65f, 0.42f), n1 * 0.6f + n3 * 0.4f);
                     float row = Mathf.Abs(Mathf.Sin(mx * Mathf.PI / 0.25f));
                     c *= 0.93f + 0.07f * row;
                     break;
