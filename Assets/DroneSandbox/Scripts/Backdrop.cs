@@ -10,14 +10,24 @@ namespace DroneSandbox
     // Project from Patchwork() below; about 8 m a pixel), which the haze blends into the distance.
     public static class Backdrop
     {
-        const int Segments = 256;
+        const int Segments = 512;
         const float Reach = 12000f;
         const float TextureSpan = 16384f; // metres the patchwork covers before it repeats
-        static readonly float[] Steps =
+        static readonly float[] Steps = RingSteps();
+
+        // How far out each ring of the mesh is: 8 m apart at the map's edge, then each 6% further than the last,
+        // out to 12 km, so a far hill has about as many triangles across it on screen as a near one (with a
+        // couple of dozen rings, far ridges showed as big flat facets).
+        static float[] RingSteps()
         {
-            0f, 8f, 20f, 40f, 70f, 110f, 170f, 250f, 360f, 520f, 750f, 1050f, 1450f, 2000f, 2700f, 3500f, 4500f,
-            5800f, 7400f, 9500f, Reach,
-        };
+            var steps = new List<float> { 0f };
+            for (float d = 0f; d < Reach;)
+            {
+                d = Mathf.Min(Reach, d + Mathf.Max(8f, d * 0.06f));
+                steps.Add(d);
+            }
+            return steps.ToArray();
+        }
 
         public static void Build(Transform parent)
         {
@@ -89,11 +99,13 @@ namespace DroneSandbox
             return h;
         }
 
-        // Ridged noise: sharp crests and soft valleys, like hill ranges.
+        // Ridged noise: crests and soft valleys, like hill ranges. The crests are rounded off (a softened fold
+        // rather than a sharp one), as weathered hills are.
         static float Ridge(Vector2 p, float scale, float seed)
         {
             float n = Mathf.PerlinNoise(p.x * scale + seed, p.y * scale + seed * 0.37f);
-            float r = 1f - Mathf.Abs(n * 2f - 1f);
+            float fold = n * 2f - 1f;
+            float r = Mathf.Clamp01(1.1f - Mathf.Sqrt(fold * fold + 0.02f));
             return r * r * 0.7f + n * 0.3f;
         }
 

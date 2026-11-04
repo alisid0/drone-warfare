@@ -106,22 +106,33 @@ namespace DroneSandbox
                     foreach (float s in slots)
                     {
                         if (farmstead && side > 0f && s > 0f) continue;
-                        Vector2 p = center + along * s + across * side * (MapLayout.RoadHalfWidth + 8f);
+                        bool church = v == 0 && !farmstead && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f;
+                        // Plots aren't a ruled row: each house sits a little along its plot and 4 to 9 m back from
+                        // the road, and now and then a plot is a paddock with no house on it.
+                        float shift = church ? 0f : Range(rng, -2.5f, 2.5f), setback = church ? 8f : Range(rng, 6.5f, 11f);
+                        if (!church && !farmstead && rng.NextDouble() < 0.12) continue;
+                        Vector2 p = center + along * (s + shift) + across * side * (MapLayout.RoadHalfWidth + setback);
                         if (!Buildable(p)) continue;
                         string model;
-                        if (v == 0 && !farmstead && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f) model = "Scenery_Church";
+                        if (church) model = "Scenery_Church";
                         else if (farmstead) model = s < 0f ? "Scenery_Barn" : "Scenery_House_A";
                         else
                         {
                             double roll = rng.NextDouble();
                             model = roll < 0.5 ? "Scenery_House_A" : roll < 0.82 ? "Scenery_House_B" : "Scenery_Barn";
                         }
-                        // Doors (the model's +Z) face the road.
+                        // Doors (the model's +Z) face the road. Houses differ a little in size (and so in height).
                         Vector2 facing = -across * side;
-                        float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -4f, 4f);
-                        var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, 1f, 0.35f, root);
+                        float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -6f, 6f);
+                        var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, church ? 1f : Range(rng, 0.88f, 1.12f), 0.35f, root);
                         if (model != "Scenery_Church") Repaint(house, v, p);
                         Garden(root, p, along, across * side, rng);
+                        if (farmstead && s < 0f && rng.NextDouble() < 0.6)
+                        {
+                            // A grain silo beside the barn.
+                            Vector2 silo = p + along * Range(rng, -9f, -7f) + across * side * Range(rng, 2f, 5f);
+                            if (Buildable(silo)) Place("Scenery_Silo", new Vector3(silo.x, 0f, silo.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1f), 0.1f, root);
+                        }
                     }
                 }
             }
@@ -142,9 +153,22 @@ namespace DroneSandbox
             Art.Swap(house, "PlasterWhite", Walls[wall]);
         }
 
-        // A fence behind the house and a fruit tree or two.
+        // A fence behind the house, a fruit tree or two, and in about a third of gardens a shed (with a log pile
+        // by it in some).
         static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, System.Random rng)
         {
+            if (rng.NextDouble() < 0.35)
+            {
+                Vector2 shed = house + outward * Range(rng, 5.5f, 6.8f) + along * ((rng.NextDouble() < 0.5 ? -1f : 1f) * Range(rng, 4f, 6f));
+                float shedYaw = Mathf.Atan2(outward.x, outward.y) * Mathf.Rad2Deg + 180f + Range(rng, -10f, 10f);
+                if (Buildable(shed))
+                {
+                    Place("Scenery_Hut", new Vector3(shed.x, 0f, shed.y), shedYaw, Range(rng, 0.7f, 0.95f), 0.1f, root);
+                    Vector2 logs = shed + along * 3f;
+                    if (rng.NextDouble() < 0.45 && Buildable(logs))
+                        Place("Scenery_LogPile", new Vector3(logs.x, 0f, logs.y), shedYaw + 90f, 0.8f, 0.05f, root);
+                }
+            }
             Vector2 back = house + outward * 8f;
             float yaw = Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg + 90f;
             for (int k = -2; k <= 2; k++)
@@ -210,7 +234,11 @@ namespace DroneSandbox
                         if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / 7f) continue;
                         if (r > edge + 7f || Mathf.PerlinNoise(p.x * 0.07f + seed % 211, p.y * 0.07f + 5f) < 0.28f) continue;
                         if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
-                        Place(PickTree(rng, isOuter, p), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
+                        // Trees of an age together (a stand planted or seeded at once), 0.7 to 1.3 times the usual size
+                        // over 15-25 m, and here and there a young one half the size.
+                        float age = 0.7f + 0.6f * Mathf.PerlinNoise(p.x * 0.05f + seed % 89, p.y * 0.05f + 31f);
+                        if (Mathf.PerlinNoise(p.x * 0.27f + 12f, p.y * 0.27f + seed % 53) > 0.74f) age *= 0.55f;
+                        Place(PickTree(rng, isOuter, p), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), age * Range(rng, 0.88f, 1.12f), 0.25f, root);
                         Undergrowth.NoteTree(p);
                     }
                 }

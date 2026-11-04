@@ -129,6 +129,8 @@ namespace DroneSandbox
         public static PathField RiverField { get; private set; }
         public static PathField RoadField { get; private set; }
         public static PathField RailField { get; private set; }
+        public static List<List<Vector2>> TrackLines { get; private set; }
+        public static PathField TrackField { get; private set; }
         public static readonly List<Ground.FlatSite> FlatSites = new List<Ground.FlatSite>();
         public static readonly List<FieldPlot> Fields = new List<FieldPlot>();
         // Where roads meet or cross, which wheels have worn into a wider patch of bare ground.
@@ -165,6 +167,8 @@ namespace DroneSandbox
             foreach (var rail in p.railways) RailLines.Add(Smooth(rail, 2f));
             RoadField = new PathField(RoadLines, 12f, Ground.Size);
             RailField = new PathField(RailLines, 12f, Ground.Size);
+            TrackLines = PlanTracks();
+            TrackField = new PathField(TrackLines, 6f, Ground.Size);
 
             PlanFields(new System.Random(p.fieldSeed));
             IndexFields();
@@ -220,6 +224,47 @@ namespace DroneSandbox
                 }
                 lines[k] = moved;
             }
+        }
+
+        // Wheel tracks worn across the grass from each emplacement and works site out to the nearest road, as every
+        // position in an aerial photo has: a gentle curve rather than a ruled line. Positions close to the base or
+        // the HQ use the compound's own roads, and of two positions close together only the first gets a track.
+        static List<List<Vector2>> PlanTracks()
+        {
+            var tracks = new List<List<Vector2>>();
+            var places = new List<(Vector2 at, float radius)>();
+            foreach (var d in Plan.defences) places.Add((Flat(d.position), DefenceRadius));
+            foreach (var s in Plan.sites)
+                if (s.flat > 0f) places.Add((s.position, s.flat));
+            var served = new List<Vector2>();
+            foreach (var (at, radius) in places)
+            {
+                if (Vector2.Distance(at, Flat(Plan.basePosition)) < 40f || Vector2.Distance(at, Flat(Plan.enemyHqPosition)) < 40f) continue;
+                bool near = false;
+                foreach (var other in served)
+                    if (Vector2.Distance(other, at) < 25f) near = true;
+                if (near) continue;
+                Vector2 road = default;
+                float best = float.MaxValue;
+                foreach (var line in RoadLines)
+                    foreach (var q in line)
+                    {
+                        float d = (q - at).sqrMagnitude;
+                        if (d < best) { best = d; road = q; }
+                    }
+                float distance = Mathf.Sqrt(best);
+                if (distance < radius + 6f || distance > 90f) continue;
+                Vector2 dir = (road - at) / distance, across = new Vector2(-dir.y, dir.x);
+                float bow = distance * 0.12f * (Mathf.Repeat(at.x * 0.37f + at.y * 0.11f, 2f) - 1f);
+                var track = Smooth(new[] { at + dir * radius * 0.6f, at + dir * distance * 0.5f + across * bow, road }, 2f);
+                bool wet = false;
+                foreach (var q in track)
+                    if (LakeDistance(q.x, q.y) < 1f || (HasRiver && RiverField.Distance(q.x, q.y) < RiverHalfWidth + 1f)) wet = true;
+                if (wet) continue;
+                tracks.Add(track);
+                served.Add(at);
+            }
+            return tracks;
         }
 
         // ---- Questions the builders ask ----
@@ -422,6 +467,7 @@ namespace DroneSandbox
             if (Mathf.Abs(p.x) > Edge || Mathf.Abs(p.y) > Edge) return false;
             if (LakeDistance(p.x, p.y) < 1.5f + margin || NearDam(p, margin) || InGorge(p, margin)) return false;
             if (RoadField.Distance(p.x, p.y) < RoadHalfWidth + 1.5f + margin) return false;
+            if (TrackField.Distance(p.x, p.y) < 1.5f + margin) return false;
             if (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 2.5f + margin) return false;
             if (OnWorks(p, margin)) return false;
             return !NearFlatSite(p, 3f + margin) && !NearVillage(p, margin) && !InField(p, 1f + margin);
@@ -481,18 +527,19 @@ namespace DroneSandbox
                 }
             }
 
-            // Finally odd small plots in the gaps.
+            // Finally odd small plots in the gaps (none under 20 by 18 m: a patch too small for a field stays meadow).
             int attempts = Mathf.RoundToInt(400 * Mathf.Min(1f, share / 0.7f));
             for (int attempt = 0; attempt < attempts; attempt++)
             {
                 var c = new Vector2(Range(rng, -130f, 130f), Range(rng, -130f, 130f));
-                TryBlock(rng, c, GridDirection(c, rng), Range(rng, 16f, 30f), Range(rng, 14f, 28f));
+                TryBlock(rng, c, GridDirection(c, rng), Range(rng, 20f, 30f), Range(rng, 18f, 28f));
             }
             Lengthen();
 
             // And what's still open: farmland in aerial photos is fields with tracks and hedges between, not fields
-            // on a lawn. So every gap on the valley floor gets the biggest square-cornered field that fits it, slid
-            // about a little to find the room (as much of it as the sector's fields share asks for).
+            // on a lawn. So every gap on the valley floor big enough for a real field gets the biggest square-cornered
+            // one that fits it, slid about a little to find the room (as much of it as the sector's fields share asks
+            // for); smaller leftovers stay meadow.
             double gapSkip = Mathf.Clamp01(0.1f + (0.7f - share) * 1.5f);
             for (float gz = -148f; gz <= 148f; gz += 6f)
             {
@@ -557,8 +604,7 @@ namespace DroneSandbox
         // Fields tried in the gaps, depth by frontage, biggest first; and how far each is slid (in its own sizes).
         static readonly Vector2[] GapSizes =
         {
-            new Vector2(60f, 48f), new Vector2(46f, 38f), new Vector2(36f, 30f), new Vector2(28f, 22f), new Vector2(22f, 17f), new Vector2(17f, 13f),
-            new Vector2(30f, 11f), new Vector2(14f, 11f),
+            new Vector2(60f, 48f), new Vector2(46f, 38f), new Vector2(36f, 30f), new Vector2(28f, 22f), new Vector2(22f, 18f),
         };
         static readonly Vector2[] GapShifts =
         {
@@ -617,7 +663,7 @@ namespace DroneSandbox
             }
             float baulk = widths.Count > 1 ? 0.5f : 0f; // half the grass strip left between neighbours
             float near = -frontage / 2f;
-            var crop = PickCrop(rng);
+            var crop = PickCrop(rng, center);
             foreach (float w in widths)
             {
                 // The strip's edges across the block, at the near side and (fanned and shifted) at the far side.
@@ -627,7 +673,7 @@ namespace DroneSandbox
                 a0 -= slant * depth / 2f;
                 a1 -= slant * depth / 2f;
                 float nearWidth = a1 - a0, farWidth = b1 - b0;
-                if (rng.NextDouble() < 0.7) crop = PickCrop(rng); // neighbours usually grow different things
+                if (rng.NextDouble() < 0.5) crop = PickCrop(rng, center); // neighbours often grow different things
                 var strip = new FieldPlot
                 {
                     center = center + block.Across * ((a0 + a1 + b0 + b1) / 4f),
@@ -693,7 +739,7 @@ namespace DroneSandbox
                 {
                     var p = new Vector2(-Edge + (i + 0.5f) * BlockCell, -Edge + (j + 0.5f) * BlockCell);
                     blocked[j * blockCount + i] = Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack
-                        || RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f + slack
+                        || RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
                         || NearFlatSite(p, 4f + slack) || NearVillage(p, slack);
@@ -722,6 +768,44 @@ namespace DroneSandbox
         static float Extent(FieldPlot f, Vector2 axis) =>
             Mathf.Abs(Vector2.Dot(f.along, axis)) * f.halfLength
             + Mathf.Abs(Vector2.Dot(f.Across, axis)) * (f.halfWidth * (1f + Mathf.Abs(f.taper)) + Mathf.Abs(f.shear) * f.halfLength);
+
+        // A crop for a field at `at`. The valley is farmed in districts about 140 m across, one farm's land each,
+        // and a farm grows mostly two crops (half its fields the first, a third the second), so neighbouring fields
+        // agree more often than not and the land reads as farms rather than confetti.
+        static Crop PickCrop(System.Random rng, Vector2 at)
+        {
+            uint farm = FarmAt(at);
+            Crop main = (Crop)(farm % 5), second = (Crop)((farm / 5 + 1 + farm % 4) % 5);
+            double r = rng.NextDouble();
+            return r < 0.5 ? main : r < 0.83 ? second : PickCrop(rng);
+        }
+
+        // Which farm a point belongs to: the nearest of a lattice of farmsteads 140 m apart, each shifted up to 50 m.
+        static uint FarmAt(Vector2 at)
+        {
+            const float spacing = 140f;
+            int cx = Mathf.FloorToInt(at.x / spacing), cz = Mathf.FloorToInt(at.y / spacing);
+            uint best = 0;
+            float bestDistance = float.MaxValue;
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    uint h = Hash(cx + dx, cz + dz);
+                    var stead = new Vector2((cx + dx + 0.5f) * spacing + ((h & 255) / 255f - 0.5f) * 100f,
+                                            (cz + dz + 0.5f) * spacing + (((h >> 8) & 255) / 255f - 0.5f) * 100f);
+                    float d = (stead - at).sqrMagnitude;
+                    if (d < bestDistance) { bestDistance = d; best = h >> 16; }
+                }
+            return best;
+        }
+
+        static uint Hash(int x, int z)
+        {
+            uint h = (uint)(x * 73856093) ^ (uint)(z * 19349663) ^ (uint)(Plan.fieldSeed * 83492791);
+            h ^= h >> 13;
+            h *= 0x5bd1e995;
+            return h ^ (h >> 15);
+        }
 
         static Crop PickCrop(System.Random rng)
         {

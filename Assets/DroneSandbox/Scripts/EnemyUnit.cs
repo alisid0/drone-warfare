@@ -417,7 +417,7 @@ namespace DroneSandbox
         public void Upgun()
         {
             range = 24f;
-            damage = 14f;
+            damage = 18f; // enough to bring down a Nightjar (182 hp) that flies the corridor without pinning them first
             unitName = "Heavy AA";
         }
 

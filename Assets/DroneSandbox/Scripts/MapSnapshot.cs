@@ -82,7 +82,9 @@ namespace DroneSandbox
                         foreach (var field in fields)
                         {
                             if (!field.ContainsUnwarped(p, 0f)) continue;
-                            c = field.ContainsUnwarped(p, -0.8f) ? CropColour(field.crop) : Verge; // a darker edge round each field
+                            // A darker edge round each field, but not round narrow strips, where at this scale the
+                            // edges would be all there is.
+                            c = field.halfWidth < 7f || field.ContainsUnwarped(p, -0.8f) ? CropColour(field.crop) : Verge;
                             break;
                         }
                         // Woods: the canopy grid is 4 m square, so it's sampled a little off each pixel to fray the edges.
@@ -90,6 +92,7 @@ namespace DroneSandbox
                         float jx = (hash % 7 - 3) * 0.5f, jz = (hash / 7 % 7 - 3) * 0.5f;
                         if (Canopy.TopNear(new Vector3(x + jx, 0f, z + jz), 0.5f) > h + 2.5f) c = Wood;
                         if (rails != null && rails.Distance(x, z) < 1.3f) c = Rail;
+                        if (MapLayout.TrackField.Distance(x, z) < 1f) c = Color.Lerp(c, Road, 0.5f); // a fainter line for a track
                         if (roads != null)
                         {
                             float d = roads.Distance(x, z);

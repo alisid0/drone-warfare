@@ -48,7 +48,7 @@ namespace DroneSandbox
                     if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > (pond ? 0.55f : 0.5f) && !MapLayout.NearDam(p, 2f)) // a third of a pond's shore, in clumps
                         reeds[zi, xi] = Mathf.PerlinNoise(x * 0.4f, z * 0.4f) > 0.45f ? 2 : 1;
                     if (data.GetSteepness((xi + 0.5f) / Resolution, (zi + 0.5f) / Resolution) > 30f) continue;
-                    if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f) continue;
+                    if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f || MapLayout.TrackField.Distance(x, z) < 1.3f) continue;
                     if (river.Distance(x, z) < MapLayout.RiverHalfWidth + 1f) continue;
                     if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;
                     if (MapLayout.NearFlatSite(p, -1f) || MapLayout.InField(p, 0.3f) || MapLayout.OnWorks(p, -2f)) continue;

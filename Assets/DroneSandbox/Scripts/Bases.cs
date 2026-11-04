@@ -183,26 +183,57 @@ namespace DroneSandbox
             return result;
         }
 
+        // The barrier round a compound: not a drawn circle but a dozen straight runs of hesco, each corner up to
+        // 3 m out (never in, where the compound's things stand), as laid out on the ground by hand; a gap and a
+        // gate where each road comes in.
         static void HescoRing(Transform root, Vector3 center, float radius)
         {
             var gaps = Entrances(center);
-            int count = Mathf.RoundToInt(2f * Mathf.PI * radius / HescoUnit);
-            for (int i = 0; i < count; i++)
+            const int corners = 12;
+            var rng = new System.Random(Mathf.RoundToInt(center.x * 7f + center.z * 13f));
+            var ring = new Vector2[corners];
+            for (int k = 0; k < corners; k++)
             {
-                float a = 2f * Mathf.PI * i / count;
-                var dir = new Vector2(Mathf.Sin(a), Mathf.Cos(a));
-                bool gap = false;
-                foreach (var g in gaps)
-                    if (Vector2.Angle(dir, g) * Mathf.Deg2Rad * radius < 3.2f) gap = true;
-                if (gap) continue;
-                var pos = center + new Vector3(dir.x, 0f, dir.y) * radius;
-                World.Place("Prop_Hesco", pos, a * Mathf.Rad2Deg, 1f, 0.05f, root);
+                float a = 2f * Mathf.PI * (k + ((float)rng.NextDouble() - 0.5f) * 0.4f) / corners;
+                ring[k] = new Vector2(Mathf.Sin(a), Mathf.Cos(a)) * (radius + 0.3f + (float)rng.NextDouble() * 2.7f);
+            }
+            for (int k = 0; k < corners; k++)
+            {
+                Vector2 a = ring[k], b = ring[(k + 1) % corners];
+                float length = Vector2.Distance(a, b);
+                Vector2 outward = new Vector2(b.y - a.y, a.x - b.x) / length;
+                if (Vector2.Dot(outward, a + b) < 0f) outward = -outward;
+                float yaw = Mathf.Atan2(outward.x, outward.y) * Mathf.Rad2Deg;
+                int count = Mathf.Max(1, Mathf.RoundToInt(length / HescoUnit));
+                for (int i = 0; i < count; i++)
+                {
+                    Vector2 p = Vector2.Lerp(a, b, (i + 0.5f) / count);
+                    bool gap = false;
+                    foreach (var g in gaps)
+                        if (Vector2.Angle(p, g) * Mathf.Deg2Rad * p.magnitude < 3.2f) gap = true;
+                    if (!gap) World.Place("Prop_Hesco", center + new Vector3(p.x, 0f, p.y), yaw, 1f, 0.05f, root);
+                }
             }
             foreach (var g in gaps)
             {
-                var pos = center + new Vector3(g.x, 0f, g.y) * radius;
+                float reach = RingReach(ring, g, radius);
+                var pos = center + new Vector3(g.x, 0f, g.y) * reach;
                 World.Place("Prop_Gate", pos, Mathf.Atan2(g.x, g.y) * Mathf.Rad2Deg, 1f, 0f, root);
             }
+        }
+
+        // How far from the middle the ring is in direction dir (unit).
+        static float RingReach(Vector2[] ring, Vector2 dir, float fallback)
+        {
+            for (int k = 0; k < ring.Length; k++)
+            {
+                Vector2 a = ring[k], e = ring[(k + 1) % ring.Length] - a;
+                float denom = dir.x * e.y - dir.y * e.x;
+                if (Mathf.Abs(denom) < 1e-5f) continue;
+                float t = (a.x * e.y - a.y * e.x) / denom, s = (a.x * dir.y - a.y * dir.x) / denom;
+                if (t > 0f && s >= 0f && s <= 1f) return t;
+            }
+            return fallback;
         }
 
         // Czech hedgehogs scattered outside each gate.

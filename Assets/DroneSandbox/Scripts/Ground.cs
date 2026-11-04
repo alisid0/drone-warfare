@@ -492,6 +492,7 @@ namespace DroneSandbox
             float hw = MapLayout.RiverHalfWidth, roadHw = MapLayout.RoadHalfWidth;
             var splat = new float[SplatRes, SplatRes, 5];
             var junctions = MapLayout.Junctions;
+            var tracks = MapLayout.TrackField;
             for (int zi = 0; zi < SplatRes; zi++)
             {
                 for (int xi = 0; xi < SplatRes; xi++)
@@ -521,6 +522,16 @@ namespace DroneSandbox
                         if (dj > 9f) continue;
                         float apron = 5f + 2f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
                         dirt = Mathf.Max(dirt, 0.85f * (1f - Mathf.SmoothStep(0f, 1f, (dj - apron + 1.5f) / 2.5f)));
+                    }
+                    // Wheel tracks out to the emplacements: two ruts 1.6 m apart, worn bare in stretches.
+                    if (tracks.points.Count > 0)
+                    {
+                        float dTrack = tracks.Distance(x, z);
+                        if (dTrack < 1.6f)
+                        {
+                            float rut = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dTrack - 0.8f) / 0.45f);
+                            dirt = Mathf.Max(dirt, 0.75f * rut * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.15f + 21f, z * 0.15f + 9f) - 0.25f) * 3f));
+                        }
                     }
                     // Gravel railway beds, and the quarry's dusty floor.
                     if (MapLayout.RailField.points.Count > 0)
