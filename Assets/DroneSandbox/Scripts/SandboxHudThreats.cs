@@ -62,7 +62,7 @@ namespace DroneSandbox
                 {
                     Color ring = Color.Lerp(Amber, Hostile, game.ShadowSuspicion);
                     ring.a = 0.6f + 0.4f * game.ShadowSuspicion;
-                    GroundRing(closest.transform.position, game.ShadowNoticeRange, ring, 120, 3.5f);
+                    GroundLoop(closest.transform.position, game.ShadowNoticeRange, ring, 2.5f * Scale);
                 }
             }
             // What each selected Scout can see.
@@ -108,6 +108,24 @@ namespace DroneSandbox
                 Vector3 p = centre + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * radius;
                 p.y = Ground.HeightAt(p) + 0.1f;
                 if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), colour);
+            }
+        }
+
+        // A ring on the ground drawn as a bold dashed line (GroundRing's dots get lost over a big radius).
+        void GroundLoop(Vector3 centre, float radius, Color colour, float thickness)
+        {
+            const int steps = 72;
+            Vector2 previous = default;
+            bool had = false;
+            for (int i = 0; i <= steps; i++)
+            {
+                float a = i * Mathf.PI * 2f / steps;
+                Vector3 p = centre + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * radius;
+                p.y = Ground.HeightAt(p) + 0.1f;
+                bool seen = ToGui(p, out Vector2 g);
+                if (seen && had && i % 2 == 1) Dashes(previous, g, colour, thickness, 0f, 0f, 0f);
+                previous = g;
+                had = seen;
             }
         }
 
