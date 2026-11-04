@@ -9,10 +9,10 @@ namespace DroneSandbox
         // True while a heavy bomb's blast is being dealt out: the only thing a hardened target really feels.
         public static bool Heavy { get; private set; }
 
-        public static void HeavyBlast(Vector3 center, float blastRadius, float damage, Team attacker)
+        public static void HeavyBlast(Vector3 center, float blastRadius, float damage, Team attacker, Achievements.Shot shot = null)
         {
             Heavy = true;
-            try { Blast(center, blastRadius, damage, attacker); }
+            try { Blast(center, blastRadius, damage, attacker, shot); }
             finally { Heavy = false; }
         }
 
@@ -45,8 +45,9 @@ namespace DroneSandbox
         }
 
         // Damages every hostile unit caught in the blast, less at the edge.
-        public static void Blast(Vector3 center, float blastRadius, float damage, Team attacker)
+        public static void Blast(Vector3 center, float blastRadius, float damage, Team attacker, Achievements.Shot shot = null)
         {
+            using var blast = Achievements.TrackBlast(shot);
             // Copy first: units that die are removed from the game's lists mid-loop.
             foreach (var unit in new List<Unit>(HostilesOf(attacker)))
             {
@@ -54,6 +55,7 @@ namespace DroneSandbox
                 float distance = Mathf.Max(0f, Vector3.Distance(center, unit.AimPoint) - unit.radius);
                 if (distance > blastRadius) continue;
                 float falloff = 1f - 0.5f * (distance / blastRadius);
+                using var hit = Achievements.TrackHit(unit, shot);
                 unit.TakeDamage(damage * falloff);
             }
         }

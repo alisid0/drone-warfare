@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DroneSandbox
@@ -51,6 +52,186 @@ namespace DroneSandbox
         };
 
         public static event Action<Achievement> Unlocked;
+
+        static SandboxGame missionGame, pendingFinish;
+        static Mission mission;
+        static int missionRun, damageDepth;
+        static bool decoyStruck;
+        static readonly HashSet<EnemyUnit> exposed = new HashSet<EnemyUnit>();
+        static readonly HashSet<Drone> kamikazes = new HashSet<Drone>();
+        static readonly HashSet<Drone> usefulKamikazes = new HashSet<Drone>();
+        static readonly Dictionary<int, Strike> strikes = new Dictionary<int, Strike>();
+
+        // A G order keeps its original members and targets; only each member's first shot can belong to it.
+        internal sealed class Strike
+        {
+            internal readonly Dictionary<Drone, Unit> targets = new Dictionary<Drone, Unit>();
+            internal readonly HashSet<Drone> fired = new HashSet<Drone>();
+            internal readonly List<StrikeHit> hits = new List<StrikeHit>();
+        }
+
+        // Actual first-volley hits must be close in time, with at least one destroying a mission target.
+        internal sealed class StrikeHit
+        {
+            internal Drone drone;
+            internal float time;
+            internal bool killedTarget;
+        }
+
+        // Capture attribution when a weapon fires, before a drone rearms, changes orders or is expended.
+        public sealed class Shot
+        {
+            internal int run;
+            internal Drone drone;
+            internal EnemyUnit target;
+            internal Strike strike;
+            internal bool kamikaze, realTarget, reported;
+        }
+
+        // Observe damage without changing it; a surrounding blast scope delays result checks until every hit lands.
+        public struct DamageScope : IDisposable
+        {
+            int run;
+            Unit unit;
+            Shot shot;
+            float before;
+            bool active;
+
+            // Ignore free play and stale shots; the pending result keeps the rest of its lethal blast observable.
+            internal DamageScope(Unit unit, Shot shot)
+            {
+                this = default(DamageScope);
+                if (!Playing() && !(damageDepth > 0 && pendingFinish == missionGame && pendingFinish != null)) return;
+                if (shot != null && shot.run != missionRun) return;
+                this.unit = unit;
+                this.shot = shot;
+                before = unit != null ? unit.hp : 0f;
+                run = missionRun;
+                active = true;
+                damageDepth++;
+            }
+
+            // Read the actual post-armour health change, then release any result deferred by the lethal hit.
+            public void Dispose()
+            {
+                if (!active) return;
+                active = false;
+                if (run != missionRun) return;
+                try { RecordHit(unit, shot, before); }
+                finally
+                {
+                    damageDepth--;
+                    if (damageDepth == 0 && pendingFinish != null)
+                    {
+                        var finished = pendingFinish;
+                        pendingFinish = null;
+                        MissionFinished(finished);
+                    }
+                }
+            }
+        }
+
+        // Reset all attempt evidence, including retries of the same Mission object, without erasing earned records.
+        public static void BeginMission(SandboxGame game)
+        {
+            missionGame = game;
+            mission = game.Mission;
+            missionRun++;
+            damageDepth = 0;
+            pendingFinish = null;
+            decoyStruck = false;
+            exposed.Clear();
+            kamikazes.Clear();
+            usefulKamikazes.Clear();
+            strikes.Clear();
+        }
+
+        // Gameplay events only count during this mission, never in a briefing, free play or after results.
+        static bool Playing()
+        {
+            return missionGame != null && mission != null && missionGame.Mission == mission &&
+                missionGame.Mode == GameMode.Mission && !missionGame.BriefingOpen && missionGame.Result == MissionResult.None;
+        }
+
+        // Each living decoy counts once per attempt; saved per-mission bests prevent replay or reacquisition farming.
+        public static void DecoyExposed(EnemyUnit enemy)
+        {
+            if (!Playing() || enemy == null || !enemy.IsAlive || !enemy.ExposedDecoy ||
+                !missionGame.enemies.Contains(enemy) || Earned("decoys") || !exposed.Add(enemy)) return;
+            string key = "ach.decoys.mission." + mission.key;
+            int previous = Progress.Get(key);
+            if (exposed.Count <= previous) return;
+            Progress.Set(key, exposed.Count);
+            Count("decoys", exposed.Count - previous);
+        }
+
+        // Keep launched Kamikazes so an interception counts as waste even when the destroyed drone leaves the lists.
+        public static void DroneLaunched(Drone drone)
+        {
+            if (Playing() && drone != null && drone.IsKamikaze) kamikazes.Add(drone);
+        }
+
+        // Register the accepted G order without granting anything just for issuing or repeating it.
+        public static void Coordinate(List<Drone> group)
+        {
+            if (!Playing() || group.Count < 2) return;
+            var strike = new Strike();
+            foreach (var drone in group) strike.targets[drone] = drone.AttackTarget;
+            strikes[group[0].SyncGroup] = strike;
+        }
+
+        // A shot at a decoy disqualifies a clean run even if it misses; cancelled attack orders do not.
+        public static Shot Fired(Drone drone)
+        {
+            if (!Playing() || drone == null || !drone.IsAlive || drone.team != Team.Player) return null;
+            var target = drone.AttackTarget as EnemyUnit;
+            if (target != null && target.isDecoy) decoyStruck = true;
+            var shot = new Shot { run = missionRun, drone = drone, target = target, kamikaze = drone.IsKamikaze,
+                realTarget = target != null && target.IsAlive && target.isTarget && !target.isDecoy };
+            Strike strike;
+            Unit ordered;
+            if (drone.SyncGroup != 0 && strikes.TryGetValue(drone.SyncGroup, out strike) &&
+                strike.targets.TryGetValue(drone, out ordered) && ordered == drone.AttackTarget && strike.fired.Add(drone))
+                shot.strike = strike;
+            return shot;
+        }
+
+        // Bracket a whole blast so an early lethal hit cannot award clean completion before later splash damage.
+        public static DamageScope TrackBlast(Shot shot)
+        {
+            return new DamageScope(null, shot);
+        }
+
+        // Bracket one existing TakeDamage call, retaining health and attribution until that call returns.
+        public static DamageScope TrackHit(Unit unit, Shot shot)
+        {
+            return new DamageScope(unit, shot);
+        }
+
+        // Use health, not destruction effects or attack orders, to distinguish a real hit from a miss or duplicate.
+        static void RecordHit(Unit unit, Shot shot, float before)
+        {
+            var enemy = unit as EnemyUnit;
+            if (ReferenceEquals(enemy, null) || before <= enemy.hp) return;
+            if (enemy.isDecoy) decoyStruck = true;
+            if (shot == null || shot.run != missionRun) return;
+            if (shot.kamikaze && shot.realTarget && enemy.isTarget && !enemy.isDecoy) usefulKamikazes.Add(shot.drone);
+            if (shot.strike == null || shot.reported || enemy != shot.target || enemy.isDecoy) return;
+            shot.reported = true;
+            var hit = new StrikeHit { drone = shot.drone, time = Time.time, killedTarget = enemy.isTarget && !enemy.IsAlive };
+            foreach (var other in shot.strike.hits)
+                if (other.drone != hit.drone && Math.Abs(other.time - hit.time) <= 1.5f && (other.killedTarget || hit.killedTarget))
+                    Unlock("coordinated");
+            shot.strike.hits.Add(hit);
+        }
+
+        // A surviving unused Kamikaze is not lost; every expended or intercepted one must have damaged a real target.
+        static bool NoWastedKamikazes()
+        {
+            foreach (var drone in kamikazes)
+                if (!usefulKamikazes.Contains(drone) && (drone == null || !drone.IsAlive)) return false;
+            return true;
+        }
 
         // Resolve only catalogue IDs so a typo in a hook cannot create an invisible achievement.
         static Achievement Find(string id)
@@ -114,10 +295,18 @@ namespace DroneSandbox
         public static void MissionFinished(SandboxGame game)
         {
             if (game.Mode != GameMode.Mission || game.Mission == null || game.Result != MissionResult.Won) return;
+            if (game == missionGame && damageDepth > 0)
+            {
+                pendingFinish = game;
+                return;
+            }
             OperationRecords();
             if (game.DronesUsed <= game.Mission.par && game.dronesLost == 0) Unlock("par");
             if (game.Mission.key == "mimic.silentWings") Unlock("silentWings");
             if (game.Mission.key == "mimic.hideAndSeek" && game.BaseIntegrity > 75f) Unlock("base");
+            if (game != missionGame || game.Mission != mission) return;
+            if (mission.units.Exists(u => u.decoy) && !decoyStruck) Unlock("cleanDecoys");
+            if (game.Hotspot != null && game.Hotspot.situation == Situation.IdentificationHunt && NoWastedKamikazes()) Unlock("identification");
         }
 
         // Record every campaign attempt before Theatre changes wins, rounds or threats, including abandonments.

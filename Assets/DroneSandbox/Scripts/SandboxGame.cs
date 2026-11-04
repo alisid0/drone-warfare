@@ -185,6 +185,7 @@ namespace DroneSandbox
             Mission = mission;
             Hotspot = hotspot;
             if (Mission.key == null) Mission.key = $"mission{index}";
+            Achievements.BeginMission(this);
             Atmosphere.SetWeather(hotspot != null ? hotspot.weather : Weather.Clear);
             for (int t = 0; t < stock.Length; t++) stock[t] = MissionStock(Mission, (DroneType)t);
             SupportSpent = 0;
@@ -333,6 +334,7 @@ namespace DroneSandbox
                 d.HoldUntil = now + Mathf.Max(0f, latest - d.TimeToStrike() - 0.3f);
             }
             syncWatch[id] = group.Count;
+            Achievements.Coordinate(group);
             ShowMessage($"Coordinated strike: {group.Count} drones, hits in {latest:0} s");
             Coordinated++;
             Sound.Alert("objective", 0.3f);

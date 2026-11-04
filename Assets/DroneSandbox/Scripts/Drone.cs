@@ -111,6 +111,7 @@ namespace DroneSandbox
             go.transform.position = position;
             var drone = go.AddComponent<Drone>();
             drone.Setup(type);
+            Achievements.DroneLaunched(drone);
             return drone;
         }
 
@@ -544,7 +545,7 @@ namespace DroneSandbox
             BombsLeft--;
             if (BombsLeft < bombModels.Count) bombModels[BombsLeft].SetActive(false);
             float hitChance = attackTarget is EnemyUnit enemy && enemy.IsMoving ? BombHitMoving : BombHitStill;
-            Projectile.Bomb(transform.position + Vector3.down * 0.7f, attackTarget, team, weaponDamage, 4.5f, velocity, hitChance);
+            Projectile.Bomb(transform.position + Vector3.down * 0.7f, attackTarget, team, weaponDamage, 4.5f, velocity, hitChance, Achievements.Fired(this));
             Sound.At("whistle", transform.position, 0.8f, 0.03f);
             if (BombsLeft > 0) return;
             GoRearm();
@@ -569,12 +570,12 @@ namespace DroneSandbox
             Vector3 muzzle = transform.position + transform.forward * radius * 0.6f + Vector3.down * 0.2f;
             if (type == DroneType.Scout)
             {
-                Projectile.Bullet(muzzle, attackTarget, team, weaponDamage, 0.8f, new Color(1f, 0.9f, 0.4f));
+                Projectile.Bullet(muzzle, attackTarget, team, weaponDamage, 0.8f, new Color(1f, 0.9f, 0.4f), Achievements.Fired(this));
                 Sound.At("gunshot", muzzle, 0.55f);
             }
             else
             {
-                Projectile.Missile(muzzle, attackTarget, team, weaponDamage, 3f, transform.forward);
+                Projectile.Missile(muzzle, attackTarget, team, weaponDamage, 3f, transform.forward, Achievements.Fired(this));
                 Sound.At("missile", muzzle);
                 if (--MissilesLeft == 0) GoRearm();
             }
@@ -582,9 +583,10 @@ namespace DroneSandbox
 
         void Detonate()
         {
+            var shot = Achievements.Fired(this);
             hp = 0f;
             DroneFeed.Instance?.SignalLost(this);
-            Combat.Blast(transform.position, 5f, weaponDamage, team);
+            Combat.Blast(transform.position, 5f, weaponDamage, team, shot);
             Effects.Explosion(transform.position, 5f);
             SandboxGame.Instance.OnDroneExpended(this);
             Destroy(gameObject);

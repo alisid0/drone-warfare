@@ -5,6 +5,8 @@ using System.Collections.Generic;
 
 namespace UnityEngine
 {
+    // Advance impact times explicitly to test the coordinated-strike window.
+    public static class Time { public static float time; }
     // Only the integer helpers used by the achievement ledger are needed outside Unity.
     public static class Mathf
     {
@@ -38,11 +40,33 @@ namespace DroneSandbox
     public enum DifficultyLevel { Recruit, Regular, Veteran }
     public enum GameMode { Menu, Sandbox, Mission }
     public enum MissionResult { None, Won, Failed }
+    public enum Team { Player, Enemy }
+    public enum DroneType { Scout, Strike, Kamikaze, Bomber }
+    public enum Situation { Other, IdentificationHunt }
 
     // Supply the preference the campaign hook reads.
     public static class Settings { public static DifficultyLevel Difficulty; }
     // Supply the mission fields used by the completion hook.
-    public class Mission { public string key; public int par; }
+    public class Mission { public string key; public int par; public List<MissionUnit> units = new List<MissionUnit>(); }
+    // Only decoy presence is needed from the mission's placement records.
+    public struct MissionUnit { public bool decoy; }
+    // Match the health fields read before and after the game's unchanged damage call.
+    public class Unit
+    {
+        public float hp = 100f;
+        public Team team;
+        public bool IsAlive { get { return hp > 0f; } }
+    }
+    // Keep original orders and sync membership available when capturing a shot.
+    public class Drone : Unit
+    {
+        public DroneType type;
+        public Unit AttackTarget;
+        public int SyncGroup;
+        public bool IsKamikaze { get { return type == DroneType.Kamikaze; } }
+    }
+    // Provide the recon verdict and objective flags used by actual impact and observation hooks.
+    public class EnemyUnit : Unit { public bool isTarget, isDecoy, ExposedDecoy; }
     // Supply final mission results without running the world.
     public class SandboxGame
     {
@@ -51,9 +75,12 @@ namespace DroneSandbox
         public MissionResult Result;
         public int DronesUsed, dronesLost;
         public float BaseIntegrity;
+        public bool BriefingOpen;
+        public Hotspot Hotspot;
+        public readonly List<EnemyUnit> enemies = new List<EnemyUnit>();
     }
     // Model only hotspot identity and completion state.
-    public class Hotspot { public bool final, done; }
+    public class Hotspot { public bool final, done; public Situation situation; }
     // Expose the state read before Theatre records a campaign result.
     public static class Theatre
     {
@@ -79,6 +106,11 @@ namespace DroneSandbox
             OperationStars();
             MissionResults();
             CampaignHistory();
+            DecoyObservations();
+            CleanMissions();
+            IdentificationHunts();
+            CoordinatedStrikes();
+            AttemptIsolation();
             Console.WriteLine("Achievements: " + assertions + " assertions passed.");
             return 0;
         }
@@ -101,6 +133,303 @@ namespace DroneSandbox
             Theatre.Turn = 1;
             Theatre.ThreatDue = 0;
             Theatre.ThreatSpot = null;
+            UnityEngine.Time.time = 0f;
+            Achievements.BeginMission(new SandboxGame());
+        }
+
+        // Begin a mission with at least one fake, optionally the procedural Identification Hunt.
+        static SandboxGame Begin(string key = "mission0", bool identification = false)
+        {
+            var game = new SandboxGame { Mode = GameMode.Mission, Mission = new Mission { key = key, par = 3 },
+                Hotspot = identification ? new Hotspot { situation = Situation.IdentificationHunt } : null };
+            game.Mission.units.Add(new MissionUnit { decoy = true });
+            Achievements.BeginMission(game);
+            return game;
+        }
+
+        // Place a real target or a decoy and optionally make the decoy's recon verdict confirmed.
+        static EnemyUnit Enemy(SandboxGame game, bool decoy = false, bool confirmed = true)
+        {
+            var enemy = new EnemyUnit { isDecoy = decoy, isTarget = !decoy, ExposedDecoy = decoy && confirmed, team = Team.Enemy };
+            game.enemies.Add(enemy);
+            return enemy;
+        }
+
+        // Register a launch at the same point as Drone.Create, then give it an attack order.
+        static Drone Launch(EnemyUnit target, DroneType type = DroneType.Strike, int group = 1)
+        {
+            var drone = new Drone { type = type, team = Team.Player, AttackTarget = target, SyncGroup = group };
+            Achievements.DroneLaunched(drone);
+            return drone;
+        }
+
+        // Reproduce TakeDamage's synchronous finish callback between the real tracking scope's entry and exit.
+        static void Hit(EnemyUnit enemy, float damage, Achievements.Shot shot = null, Action duringDamage = null)
+        {
+            using (Achievements.TrackHit(enemy, shot))
+            {
+                enemy.hp = Math.Max(0f, enemy.hp - damage);
+                if (duringDamage != null) duringDamage();
+            }
+        }
+
+        // Finish with the same result value Finish sets before calling the achievement hook.
+        static void Win(SandboxGame game)
+        {
+            game.Result = MissionResult.Won;
+            Achievements.MissionFinished(game);
+        }
+
+        // Observations are unique within attempts and use saved high-water marks across retries and campaign resets.
+        static void DecoyObservations()
+        {
+            Reset();
+            var game = Begin();
+            var fake = Enemy(game, true, false);
+            Achievements.DecoyExposed(fake);
+            Check(Achievements.Current("decoys") == 0, "unconfirmed decoy does not count");
+            fake.ExposedDecoy = true;
+            game.BriefingOpen = true;
+            Achievements.DecoyExposed(fake);
+            game.BriefingOpen = false;
+            game.Mode = GameMode.Sandbox;
+            Achievements.DecoyExposed(fake);
+            game.Mode = GameMode.Mission;
+            Check(Achievements.Current("decoys") == 0, "briefings and sandbox cannot farm reveals");
+            for (int i = 0; i < 20; i++) Achievements.DecoyExposed(fake);
+            Check(Achievements.Current("decoys") == 1, "reacquisition counts once");
+            for (int i = 0; i < 3; i++) Achievements.DecoyExposed(Enemy(game, true));
+            Check(Achievements.Current("decoys") == 4, "distinct decoys in one attempt count");
+            Progress.Forget("campaign."); Progress.Forget("theatre."); Progress.Forget("hotspot.");
+            game.enemies.Clear();
+            Achievements.BeginMission(game); // same mission object, as on Retry
+            for (int i = 0; i < 4; i++) Achievements.DecoyExposed(Enemy(game, true));
+            Check(Achievements.Current("decoys") == 4, "retry and new campaign cannot re-count a mission");
+            Achievements.DecoyExposed(Enemy(game, true));
+            Check(Achievements.Current("decoys") == 5, "better observation attempt adds only its improvement");
+            game.Result = MissionResult.Failed;
+            Achievements.DecoyExposed(Enemy(game, true));
+            Check(Achievements.Current("decoys") == 5, "results cannot farm reveals");
+            game = Begin("sector.new.DecoyField");
+            for (int i = 0; i < 5; i++) Achievements.DecoyExposed(Enemy(game, true));
+            Check(Achievements.Earned("decoys") && Achievements.Current("decoys") == 10, "ten unique observations across missions");
+            Achievements.DecoyExposed(Enemy(game, true));
+            Check(notices == 1 && Achievements.Current("decoys") == 10, "observation award fires once");
+        }
+
+        // Direct shots, misses at fakes and collateral hits all disqualify a clean run, even after a lethal result callback.
+        static void CleanMissions()
+        {
+            Reset();
+            var game = Begin();
+            Win(game);
+            Check(Achievements.Earned("cleanDecoys"), "untouched decoy mission qualifies");
+            Reset();
+            game = Begin();
+            game.Mission.units.Clear();
+            Win(game);
+            Check(!Achievements.Earned("cleanDecoys"), "mission must contain decoys");
+            Reset();
+            game = Begin();
+            Achievements.Fired(Launch(Enemy(game, true)));
+            Win(game);
+            Check(!Achievements.Earned("cleanDecoys"), "missed shot aimed at a fake still disqualifies");
+            Reset();
+            game = Begin();
+            var fake = Enemy(game, true);
+            Hit(fake, 100f);
+            game.enemies.Remove(fake);
+            Win(game);
+            Check(!Achievements.Earned("cleanDecoys"), "destroyed and removed decoy remains recorded");
+            Reset();
+            game = Begin();
+            var target = Enemy(game);
+            fake = Enemy(game, true);
+            var shot = Achievements.Fired(Launch(target));
+            using (Achievements.TrackBlast(shot))
+            {
+                Hit(target, 100f, shot, delegate { Win(game); });
+                Check(!Achievements.Earned("cleanDecoys"), "lethal callback waits for the whole blast");
+                Hit(fake, 10f, shot);
+            }
+            Check(!Achievements.Earned("cleanDecoys") && Achievements.Earned("par"), "later splash prevents only the clean award");
+            Reset();
+            game = Begin();
+            target = Enemy(game);
+            var scope = Achievements.TrackHit(target, null);
+            target.hp = 0f;
+            Win(game);
+            scope.Dispose();
+            int saved = Progress.Saves;
+            scope.Dispose();
+            Check(Achievements.Earned("cleanDecoys") && Progress.Saves == saved, "scope disposal and completion are idempotent");
+        }
+
+        // Useful expenditure is recorded after actual damage; misses, interception and fake targets cannot qualify.
+        static void IdentificationHunts()
+        {
+            Reset();
+            var game = Begin("sector.test.IdentificationHunt", true);
+            var target = Enemy(game);
+            var drone = Launch(target, DroneType.Kamikaze);
+            var shot = Achievements.Fired(drone);
+            drone.hp = 0f;
+            using (Achievements.TrackBlast(shot)) Hit(target, 100f, shot, delegate { Win(game); });
+            Check(Achievements.Earned("identification"), "final Kamikaze hit is useful before completion is evaluated");
+            Reset();
+            game = Begin("sector.test.IdentificationHunt", true);
+            target = Enemy(game);
+            drone = Launch(target, DroneType.Kamikaze);
+            drone.hp = 0f;
+            Win(game);
+            Check(!Achievements.Earned("identification"), "intercepted Kamikaze is waste");
+            Reset();
+            game = Begin("sector.test.IdentificationHunt", true);
+            target = Enemy(game);
+            drone = Launch(target, DroneType.Kamikaze);
+            shot = Achievements.Fired(drone);
+            drone.hp = 0f;
+            using (Achievements.TrackBlast(shot)) Hit(target, 0f, shot);
+            Win(game);
+            Check(!Achievements.Earned("identification"), "no damage means no useful expenditure");
+            Reset();
+            game = Begin("sector.test.IdentificationHunt", true);
+            var fake = Enemy(game, true);
+            drone = Launch(fake, DroneType.Kamikaze);
+            shot = Achievements.Fired(drone);
+            drone.hp = 0f;
+            using (Achievements.TrackBlast(shot)) Hit(fake, 100f, shot);
+            Win(game);
+            Check(!Achievements.Earned("identification"), "Kamikaze spent on a fake is waste");
+            Reset();
+            game = Begin("sector.test.IdentificationHunt", true);
+            target = Enemy(game);
+            Launch(target, DroneType.Kamikaze);
+            Win(game);
+            Check(Achievements.Earned("identification"), "living unused Kamikaze is not lost");
+            Reset();
+            game = Begin();
+            Win(game);
+            Check(!Achievements.Earned("identification"), "other missions cannot award Identification Hunt");
+        }
+
+        // Only first shots from two different members of one G group, close in impact time, can supply the kill.
+        static void CoordinatedStrikes()
+        {
+            Reset();
+            var game = Begin();
+            var target = Enemy(game);
+            var a = Launch(target);
+            var b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            Check(!Achievements.Earned("coordinated"), "G alone never awards");
+            var first = Achievements.Fired(a);
+            var second = Achievements.Fired(b);
+            a.AttackTarget = null; a.SyncGroup = 0; // already-fired projectile retains its attribution
+            a.hp = 0f;
+            Hit(target, 40f, first);
+            UnityEngine.Time.time = 1.5f;
+            Hit(target, 60f, second);
+            Check(Achievements.Earned("coordinated"), "two real hits including a kill at the timing boundary");
+            int saved = Progress.Saves;
+            Hit(target, 0f, second);
+            Check(Progress.Saves == saved, "duplicate impact cannot announce twice");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a); second = Achievements.Fired(b);
+            Hit(target, 40f, first);
+            UnityEngine.Time.time = 1.51f;
+            Hit(target, 60f, second);
+            Check(!Achievements.Earned("coordinated"), "widely separated hits are not coordinated");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a);
+            Hit(target, 40f, first);
+            Hit(target, 60f, Achievements.Fired(a));
+            Check(!Achievements.Earned("coordinated"), "one drone's later volley cannot impersonate the group");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a);
+            Hit(target, 40f, first);
+            b.SyncGroup = 0;
+            Hit(target, 60f, Achievements.Fired(b));
+            Check(!Achievements.Earned("coordinated"), "cancelled group member cannot supply credit");
+
+            Reset();
+            game = Begin(); target = Enemy(game); target.isTarget = false;
+            a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            Hit(target, 40f, Achievements.Fired(a));
+            Hit(target, 60f, Achievements.Fired(b));
+            Check(!Achievements.Earned("coordinated"), "kill must be a mission objective");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a); second = Achievements.Fired(b);
+            Hit(target, 10f, first);
+            Hit(target, 90f); // unrelated projectile deals the lethal hit
+            Hit(target, 0f, second);
+            Check(!Achievements.Earned("coordinated"), "an unrelated kill is not attributed to G");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target);
+            var secondTarget = Enemy(game); b = Launch(secondTarget);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a); second = Achievements.Fired(b);
+            a.hp = b.hp = 0f;
+            Hit(target, 100f, first);
+            UnityEngine.Time.time = 1f;
+            using (Achievements.TrackBlast(second)) Hit(secondTarget, 100f, second, delegate { Win(game); });
+            Check(Achievements.Earned("coordinated"), "split targets and the final lethal callback preserve shot attribution");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a);
+            b.AttackTarget = Enemy(game);
+            second = Achievements.Fired(b);
+            Hit(target, 40f, first);
+            Hit((EnemyUnit)b.AttackTarget, 100f, second);
+            Check(!Achievements.Earned("coordinated"), "a changed target cannot reuse stale group membership");
+
+            Reset();
+            game = Begin(); target = Enemy(game); a = Launch(target); b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            first = Achievements.Fired(a); // misses; its later shots cannot stand in for the missed first volley
+            second = Achievements.Fired(b);
+            Hit(target, 40f, second);
+            Hit(target, 60f, Achievements.Fired(a));
+            Check(!Achievements.Earned("coordinated"), "a later volley cannot replace a missed coordinated shot");
+        }
+
+        // New runs reject old in-flight evidence, and post-result or sandbox events cannot produce skill awards.
+        static void AttemptIsolation()
+        {
+            Reset();
+            var game = Begin();
+            var target = Enemy(game);
+            var a = Launch(target); var b = Launch(target);
+            Achievements.Coordinate(new List<Drone> { a, b });
+            var shot = Achievements.Fired(a);
+            var oldScope = Achievements.TrackBlast(shot);
+            Achievements.BeginMission(game);
+            oldScope.Dispose();
+            Hit(target, 50f, shot);
+            Hit(target, 50f, Achievements.Fired(b));
+            Check(!Achievements.Earned("coordinated"), "retry clears groups and rejects earlier projectile evidence");
+            Win(game);
+            Check(Achievements.Earned("cleanDecoys"), "old scope disposal cannot unbalance the new mission");
+            Check(Achievements.Fired(a) == null, "no new shots tracked after results");
+            game = Begin();
+            game.Mode = GameMode.Sandbox;
+            Check(Achievements.Fired(Launch(Enemy(game))) == null, "sandbox shots carry no achievement attribution");
         }
 
         // Give failures a useful reason without any testing package.

@@ -13,6 +13,7 @@ namespace DroneSandbox
         bool smokeTrail, heavy;
         float trailTimer;
         Vector3 velocity;
+        Achievements.Shot shot; // firing-time attribution survives a drone's rearm, new orders or loss
 
         static Projectile Spawn(Vector3 from, Unit target, Team team, Vector3 scale, Color color)
         {
@@ -26,9 +27,10 @@ namespace DroneSandbox
         }
 
         // A fast tracer round. hitChance is the odds (0-1) that it connects.
-        public static void Bullet(Vector3 from, Unit target, Team team, float damage, float hitChance, Color color)
+        public static void Bullet(Vector3 from, Unit target, Team team, float damage, float hitChance, Color color, Achievements.Shot shot = null)
         {
             var p = Spawn(from, target, team, new Vector3(0.08f, 0.3f, 0.08f), color);
+            p.shot = shot;
             p.speed = 70f;
             p.damage = damage;
             if (Random.value > hitChance)
@@ -43,9 +45,10 @@ namespace DroneSandbox
         }
 
         // A homing missile that explodes on arrival.
-        public static void Missile(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 launchDirection)
+        public static void Missile(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 launchDirection, Achievements.Shot shot = null)
         {
             var p = Spawn(from, target, team, new Vector3(0.18f, 0.3f, 0.18f), Color.white);
+            p.shot = shot;
             p.speed = 24f;
             p.damage = damage;
             p.blastRadius = blastRadius;
@@ -58,9 +61,10 @@ namespace DroneSandbox
         // A bomb dropped from a hovering bomber. It falls with the drone's own speed and its fins steer it
         // onto the target. hitChance is the odds (0-1) it lands on target; a miss lands 6-8 m away.
         public static void Bomb(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 dropVelocity,
-            float hitChance)
+            float hitChance, Achievements.Shot shot = null)
         {
             var p = Spawn(from, target, team, new Vector3(0.2f, 0.32f, 0.2f), new Color(0.2f, 0.21f, 0.13f));
+            p.shot = shot;
             if (Random.value > hitChance)
             {
                 Vector2 off = Random.insideUnitCircle.normalized * Random.Range(6f, 8f);
@@ -113,12 +117,13 @@ namespace DroneSandbox
         {
             if (blastRadius > 0f)
             {
-                if (heavy) Combat.HeavyBlast(transform.position, blastRadius, damage, team);
-                else Combat.Blast(transform.position, blastRadius, damage, team);
+                if (heavy) Combat.HeavyBlast(transform.position, blastRadius, damage, team, shot);
+                else Combat.Blast(transform.position, blastRadius, damage, team, shot);
                 Effects.Explosion(transform.position, blastRadius);
             }
             else if (target != null && target.IsAlive && damage > 0f)
             {
+                using var hit = Achievements.TrackHit(target, shot);
                 target.TakeDamage(target is EnemyUnit armoured ? damage * armoured.BulletFactor : damage);
                 Effects.Spark(transform.position);
                 if (target is EnemyUnit) Sound.At("ricochet", transform.position, 0.35f, 0.15f);

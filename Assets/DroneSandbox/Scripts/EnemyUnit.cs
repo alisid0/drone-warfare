@@ -539,6 +539,7 @@ namespace DroneSandbox
                 // Confirmed up close, or after 1.2 s of steady watching.
                 Intel = close || watchedFor > 1.2f || wasConfirmed ? Intel.Confirmed : Intel.Identified;
                 if (!wasConfirmed && Intel == Intel.Confirmed && isDecoy) SandboxGame.Instance.OnDecoyExposed(this);
+                if (!wasConfirmed && Intel == Intel.Confirmed && isDecoy) Achievements.DecoyExposed(this);
                 LastSeenPosition = transform.position;
                 LastSeenTime = Time.time;
             }
