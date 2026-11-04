@@ -39,14 +39,20 @@ namespace DroneSandbox
             river.refractionColor = new Color(0.16f, 0.40f, 0.40f);
             river.scatteringColor = new Color(0.05f, 0.19f, 0.19f);
             river.absorptionDistance = 3.5f;
-            river.ripplesWindSpeed = 12f;
-            river.largeWindSpeed = dam ? 35f : 18f; // choppy enough below the dam to churn up foam, where the mask lets it
-            river.largeChaos = 0.9f;
+            // A river doesn't swell like the sea: no long rolling waves, just a low chop and ripples, all running
+            // down the current (little chaos, so they line up with it) rather than heaving every which way. The
+            // foam below the dam comes from its mask, not from big waves.
+            river.largeWindSpeed = dam ? 10f : 6f;
+            river.largeChaos = 0.2f;
+            river.largeBand0Multiplier = 0.1f; // the long swell band, all but off
+            river.largeBand1Multiplier = 0.45f;
+            river.ripplesWindSpeed = 10f;
+            river.ripplesChaos = 0.3f;
 
             // The current runs down the river's own course (a map of its direction, bend by bend), carrying the
             // ripples and foam along with it.
             FlowMaps(start, out var current, out var foamMask, out Vector2 extent, out Vector2 offset);
-            river.largeCurrentSpeedValue = 6f; // km/h: a brisk lowland river
+            river.largeCurrentSpeedValue = 7f; // km/h: a brisk lowland river
             river.ripplesMotionMode = WaterPropertyOverrideMode.Inherit;
             river.largeCurrentMap = current;
             river.largeCurrentRegionExtent = extent;

@@ -111,8 +111,11 @@ namespace DroneSandbox
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02c_bridge");
             rts.LookAt(new Vector3(-100f, 0f, 0f), 26f, 150f);
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(2f); // the camera settled, for the pair below
             yield return Shot("02f_river");
+            // The same view a second later, to check that the water flows down the river (compare the two).
+            yield return new WaitForSeconds(1f);
+            yield return Shot("02f_river_later");
             var village = MapLayout.Villages[0];
             rts.LookAt(new Vector3(village.x, 0f, village.y), 45f, 200f);
             yield return new WaitForSeconds(0.5f);
