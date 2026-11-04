@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DroneSandbox
@@ -9,6 +10,14 @@ namespace DroneSandbox
     {
         const float Cell = 4f;
         static float[,] top;
+        // Each tree's crown as an ellipsoid, for seeing past the trees (Blocks), found by the 8 m cell its middle is in.
+        struct Crown
+        {
+            public Vector3 centre;
+            public float radius, halfHeight;
+        }
+        const float CrownCell = 8f;
+        static readonly Dictionary<Vector2Int, List<Crown>> crowns = new Dictionary<Vector2Int, List<Crown>>();
         static int n;
         static float half;
 
@@ -19,6 +28,7 @@ namespace DroneSandbox
             top = new float[n, n];
             for (int z = 0; z < n; z++)
                 for (int x = 0; x < n; x++) top[x, z] = float.MinValue;
+            crowns.Clear();
             foreach (var group in world.GetComponentsInChildren<LODGroup>(true))
             {
                 var lods = group.GetLODs();
@@ -40,26 +50,73 @@ namespace DroneSandbox
                 for (int z = z0; z <= z1; z++)
                     for (int x = x0; x <= x1; x++)
                         if (bounds.max.y > top[x, z]) top[x, z] = bounds.max.y;
+                // The crown: the top two thirds of the tree, two thirds as wide as its branches reach (they're not
+                // solid to the tips: the autotest's occlusion check calibrates this against the picture).
+                float bottom = bounds.min.y + bounds.size.y * 0.35f;
+                var crown = new Crown
+                {
+                    centre = new Vector3(bounds.center.x, (bottom + bounds.max.y) / 2f, bounds.center.z),
+                    radius = Mathf.Min((bounds.extents.x + bounds.extents.z) / 2f * 0.65f, CrownCell),
+                    halfHeight = (bounds.max.y - bottom) / 2f,
+                };
+                var key = CrownKey(crown.centre);
+                if (!crowns.TryGetValue(key, out var list)) crowns[key] = list = new List<Crown>();
+                list.Add(crown);
             }
         }
 
         static int Index(float worldCoord) => Mathf.Clamp(Mathf.FloorToInt((worldCoord + half) / Cell), 0, n - 1);
 
-        // Whether tree crowns stand between two points, roughly: on the 4 m grid, a crown fills the top two thirds of
-        // its tree. The last couple of metres are left out, so a bird perched on a tree is still in sight.
+        // Whether tree crowns stand between two points: the line, sampled every metre, has to run through 2 m of
+        // crown. The last couple of metres are left out, so a bird perched on a tree is still in sight. (The 4 m
+        // height grid is no good for this: a cell knows only its tallest tree, and fills the corners of the square
+        // round each crown, so lines passing well clear of the trees counted as blocked.)
         public static bool Blocks(Vector3 from, Vector3 to)
         {
-            if (top == null) return false;
-            int steps = Mathf.CeilToInt(Vector3.Distance(from, to) / 2f);
-            for (int i = 1; i < steps - 1; i++)
+            int steps = Mathf.CeilToInt(Vector3.Distance(from, to)), run = 0;
+            for (int i = 1; i < steps - 2; i++)
             {
-                Vector3 p = Vector3.Lerp(from, to, i / (float)steps);
-                float crown = top[Index(p.x), Index(p.z)];
-                if (crown == float.MinValue || p.y >= crown) continue;
-                float ground = Ground.HeightAt(p);
-                if (p.y > ground + (crown - ground) * 0.35f) return true;
+                run = InCrown(Vector3.Lerp(from, to, i / (float)steps)) ? run + 1 : 0;
+                if (run >= 2) return true;
             }
             return false;
+        }
+
+        // For the tests: where along the line, and in which crown, Blocks found its 2 m of foliage ("" if none).
+        public static string Explain(Vector3 from, Vector3 to)
+        {
+            int steps = Mathf.CeilToInt(Vector3.Distance(from, to)), run = 0;
+            for (int i = 1; i < steps - 2; i++)
+            {
+                var p = Vector3.Lerp(from, to, i / (float)steps);
+                var c = CrownAt(p);
+                run = c.HasValue ? run + 1 : 0;
+                if (run >= 2)
+                    return $"{i} m of {steps} from the eye, crown at {c.Value.centre.y - Ground.HeightAt(c.Value.centre):F0} m up, r {c.Value.radius:F1}, " +
+                           $"half-height {c.Value.halfHeight:F1}, {Vector2.Distance(new Vector2(p.x, p.z), new Vector2(c.Value.centre.x, c.Value.centre.z)):F1} m off its trunk";
+            }
+            return "";
+        }
+
+        static Vector2Int CrownKey(Vector3 p) => new Vector2Int(Mathf.FloorToInt(p.x / CrownCell), Mathf.FloorToInt(p.z / CrownCell));
+
+        static bool InCrown(Vector3 p) => CrownAt(p).HasValue;
+
+        static Crown? CrownAt(Vector3 p)
+        {
+            var key = CrownKey(p);
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (!crowns.TryGetValue(new Vector2Int(key.x + dx, key.y + dz), out var list)) continue;
+                    foreach (var c in list)
+                    {
+                        float across = ((p.x - c.centre.x) * (p.x - c.centre.x) + (p.z - c.centre.z) * (p.z - c.centre.z)) / (c.radius * c.radius);
+                        float up = (p.y - c.centre.y) / c.halfHeight;
+                        if (across + up * up < 1f) return c;
+                    }
+                }
+            return null;
         }
 
         // The highest tree top within `radius` of p (minus infinity where there are no trees).

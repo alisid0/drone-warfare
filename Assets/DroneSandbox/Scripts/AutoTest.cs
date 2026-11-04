@@ -268,6 +268,7 @@ namespace DroneSandbox
             yield return QualityCheck(game, rts);
             yield return WildlifeShots(game, rts);
             yield return HuntMission(game, rts);
+            yield return OcclusionCheck(game);
             yield return SectorTour(game, rts);
 
             log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
@@ -726,6 +727,82 @@ namespace DroneSandbox
             log.WriteLine($"Silent Wings: {game.Result} ({game.ResultReason}), robots {game.TargetsDestroyed}/{game.TargetsTotal} in {hunted:F0} s, " +
                           $"{samples} birds sampled, {misses} misses, {spooks} spooked, scouts used {scoutIndex + 1}, crows confirmed {falseConfirms}, stars {game.Stars}");
             if (game.Result != MissionResult.Won || falseConfirms > 0) errors++;
+        }
+
+        // Does the treetop line-of-sight check (Canopy.Blocks) agree with the picture? 50 views of a 1 m sphere (a bird
+        // with its wings out) placed near trees, through photo mode at 12 degrees, each captured with and without it:
+        // the pixels that change show how much of it is in sight. Refusing a shot at a plainly visible target is the
+        // failure that matters; allowing one at a hidden target is the lesser one.
+        IEnumerator OcclusionCheck(SandboxGame game)
+        {
+            var photo = PhotoMode.Instance;
+            if (photo == null) yield break;
+            game.StartSandbox();
+            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere); // its collider gives photo mode its focus
+            marker.GetComponent<Renderer>().sharedMaterial = Art.NewMaterial(new Color(0.9f, 0.1f, 0.8f));
+            photo.Enter();
+            Time.timeScale = 0f;
+            var rng = new System.Random(5);
+            float R(float a, float b) => a + (float)rng.NextDouble() * (b - a);
+            int views = 0, tries = 0, agree = 0, falseBlocked = 0, falseClear = 0, partly = 0;
+            bool shotBlocked = false, shotClear = false;
+            Vector3 centre = game.basePosition;
+            while (views < 50 && tries < 3000)
+            {
+                tries++;
+                var target = centre + new Vector3(R(-260f, 260f), 0f, R(-260f, 260f));
+                if (Canopy.TopNear(target, 10f) < Ground.HeightAt(target) + 6f) continue; // near trees only
+                target.y = Ground.HeightAt(target) + R(10f, 24f);
+                float yaw = R(0f, 2f * Mathf.PI), d = R(15f, 45f);
+                var eye = target + new Vector3(Mathf.Sin(yaw) * d, 0f, Mathf.Cos(yaw) * d);
+                eye.y = Mathf.Max(Ground.HeightAt(eye) + 18f, target.y + R(-4f, 12f), Canopy.TopNear(eye, 3f) + 1.5f); // above the trees, as drones fly
+                float range = Vector3.Distance(eye, target);
+                if (Ground.Raycast(new Ray(eye, (target - eye) / range), out Vector3 hill) && Vector3.Distance(eye, hill) < range) continue;
+                views++;
+                bool blocked = Canopy.Blocks(eye, target);
+                photo.PlaceLooking(eye, target, 12f);
+                marker.transform.position = target;
+                marker.SetActive(false);
+                yield return new WaitForSecondsRealtime(0.3f);
+                yield return new WaitForEndOfFrame();
+                var without = ScreenCapture.CaptureScreenshotAsTexture();
+                marker.SetActive(true);
+                yield return new WaitForSecondsRealtime(0.3f);
+                yield return new WaitForEndOfFrame();
+                var with = ScreenCapture.CaptureScreenshotAsTexture();
+                // How much of the sphere shows, against how much would in open sky.
+                float pixelsPerMetre = with.height / (2f * range * Mathf.Tan(6f * Mathf.Deg2Rad));
+                float radius = 0.5f * pixelsPerMetre, expected = Mathf.PI * radius * radius;
+                int half = Mathf.Min(with.height / 2 - 1, Mathf.CeilToInt(radius) + 8);
+                int cx = with.width / 2, cy = with.height / 2, changed = 0;
+                var a = without.GetPixels(cx - half, cy - half, 2 * half, 2 * half);
+                var b = with.GetPixels(cx - half, cy - half, 2 * half, 2 * half);
+                for (int i = 0; i < a.Length; i++)
+                    if (Mathf.Abs(a[i].r - b[i].r) + Mathf.Abs(a[i].g - b[i].g) + Mathf.Abs(a[i].b - b[i].b) > 0.12f) changed++;
+                UnityEngine.Object.Destroy(without);
+                UnityEngine.Object.Destroy(with);
+                float shown = changed / expected;
+                if (shown >= 0.5f && blocked)
+                {
+                    falseBlocked++;
+                    log.WriteLine($"  refused but visible ({shown:P0} shown): eye {eye.y - Ground.HeightAt(eye):F0} m up, target {target.y - Ground.HeightAt(target):F0} m up, " +
+                                  $"{range:F0} m; {Canopy.Explain(eye, target)}");
+                    if (!shotBlocked) { shotBlocked = true; yield return Shot("58_los_refused_but_visible"); }
+                }
+                else if (shown <= 0.15f && !blocked)
+                {
+                    falseClear++;
+                    if (!shotClear) { shotClear = true; yield return Shot("59_los_allowed_but_hidden"); }
+                }
+                else if (shown > 0.15f && shown < 0.5f) partly++;
+                else agree++;
+            }
+            Time.timeScale = 1f;
+            photo.Exit();
+            UnityEngine.Object.Destroy(marker);
+            log.WriteLine($"Occlusion check: {views} views ({tries} tries), {agree} agree, {partly} partly hidden (either verdict fair), " +
+                          $"{falseBlocked} refused though plainly visible, {falseClear} allowed though hidden");
+            if (views < 50 || falseBlocked > views / 20 || falseClear > views / 10) errors++;
         }
 
         IEnumerator SectorTour(SandboxGame game, RtsController rts)

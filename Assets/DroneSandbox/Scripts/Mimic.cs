@@ -21,7 +21,8 @@ namespace DroneSandbox
         public float HoverWatched;              // seconds watched holding still in the air
         public float Aim;                       // 0-1, how steady the shot is (see Mimic.WouldHit)
         public bool Announced;                  // the confirmation has been called out
-        public bool Occluded;                   // trees between the feed's drone and it right now
+        public bool Occluded;                   // trees between the feed's camera and it (held: see Tick)
+        public float BlockedFor, ClearFor;      // how long the line to it has been blocked, or clear
         public readonly float[] KindAt = new float[5]; // when each kind of clue last came in (the panel flashes it)
         public const float MinWatch = 8f;       // no confirmation from a glance
 
@@ -117,14 +118,22 @@ namespace DroneSandbox
         {
             if (b == null || drone == null) return false;
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
-            return Of(b).Aim >= 1f && d <= 40f && (d < 25f || b.Hovering) && !Canopy.Blocks(drone.transform.position, b.transform.position);
+            return Of(b).Aim >= 1f && d <= 40f && (d < 25f || b.Hovering) && !Hidden(b, drone);
+        }
+
+        // Trees in the way of this drone's shot: as the feed shows it when this is the feed's drone (the same verdict
+        // as the OCCLUDED mark), otherwise straight from the drone.
+        static bool Hidden(Bird b, Drone drone)
+        {
+            var feed = DroneFeed.Instance;
+            return feed != null && feed.Source == drone ? Of(b).Occluded : Canopy.Blocks(drone.transform.position, b.transform.position);
         }
 
         // What's keeping the shot from being a sure one, for the hunt panel.
         public static string AimAdvice(Bird b, Drone drone)
         {
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
-            if (Canopy.Blocks(drone.transform.position, b.transform.position)) return "OBSTRUCTED: trees in the way";
+            if (Hidden(b, drone)) return "OBSTRUCTED: trees in the way";
             if (d > 40f) return $"out of range ({d:0} m)";
             if (d >= 25f && !b.Hovering) return $"{d:0} m: closer, or wait for a hover";
             return "steadying: match its speed";
@@ -220,7 +229,13 @@ namespace DroneSandbox
                     Vector3 v = cam.WorldToViewportPoint(b.transform.position);
                     d = Vector3.Distance(source.transform.position, b.transform.position);
                     inView = v.z > 0f && v.x >= 0f && v.x <= 1f && v.y >= 0f && v.y <= 1f && d <= 150f;
-                    e.Occluded = inView && Canopy.Blocks(source.transform.position, b.transform.position);
+                    // Hidden after two blocked looks 0.1 s apart, back in sight after 0.2 s clear, so the marker doesn't
+                    // flicker on a line grazing a crown; the line runs from the camera itself, as the picture does.
+                    bool blocked = inView && Canopy.Blocks(cam.transform.position, b.transform.position);
+                    e.BlockedFor = blocked ? e.BlockedFor + dt : 0f;
+                    e.ClearFor = blocked ? 0f : e.ClearFor + dt;
+                    if (e.BlockedFor >= 0.1f) e.Occluded = true;
+                    else if (e.ClearFor >= 0.2f) e.Occluded = false;
                 }
                 // The aim steadies on a bird in view within 40 m: quicker within 25 m, on a bird holding still, from a
                 // drone matching its speed (holding still with a hovering one, or flying with it), and slower on one
