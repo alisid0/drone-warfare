@@ -20,11 +20,11 @@ namespace DroneSandbox
             Water.Build(root);
             Reservoir.Build(root);
             Farmland.Build(root, rng);
-            Grass.Plant(Ground.Current);
             var scenery = new GameObject("Scenery").transform;
             scenery.SetParent(root, false);
             foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
+            Grass.Plant(Ground.Current); // after the villages, so it keeps off their worn paths and yards
             BuildWoods(scenery, rng);
             BuildRocks(scenery, rng);
             Features.Build(scenery);
@@ -126,6 +126,11 @@ namespace DroneSandbox
                         float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -6f, 6f);
                         var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, church ? 1f : Range(rng, 0.88f, 1.12f), 0.35f, root);
                         if (model != "Scenery_Church") Repaint(house, v, p);
+                        // A path worn from the door to the road at most houses; a farmyard of bare earth round a
+                        // farmstead's buildings.
+                        Vector2 toRoad = p + facing * (setback + 0.4f);
+                        if (farmstead) Ground.Wear(p, toRoad, Range(rng, 7f, 10f), 0.6f);
+                        else if (church || rng.NextDouble() < 0.7) Ground.Wear(p + facing * 3f, toRoad, church ? 3f : Range(rng, 1.4f, 2.4f), 0.75f);
                         Garden(root, p, along, across * side, rng);
                         if (farmstead && s < 0f && rng.NextDouble() < 0.6)
                         {
@@ -153,10 +158,15 @@ namespace DroneSandbox
             Art.Swap(house, "PlasterWhite", Walls[wall]);
         }
 
-        // A fence behind the house, a fruit tree or two, and in about a third of gardens a shed (with a log pile
-        // by it in some).
+        // A fence behind the house, a fruit tree or two, in about a third of gardens a shed (with a log pile by
+        // it in some), and in a third a vegetable patch of dug earth.
         static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, System.Random rng)
         {
+            if (rng.NextDouble() < 0.35)
+            {
+                Vector2 patch = house + outward * Range(rng, 5.5f, 7f) + along * Range(rng, -3f, 3f);
+                if (Buildable(patch)) Ground.Wear(patch - along * Range(rng, 2f, 3.5f), patch + along * Range(rng, 2f, 3.5f), Range(rng, 2.5f, 3.5f), 0.65f);
+            }
             if (rng.NextDouble() < 0.35)
             {
                 Vector2 shed = house + outward * Range(rng, 5.5f, 6.8f) + along * ((rng.NextDouble() < 0.5 ? -1f : 1f) * Range(rng, 4f, 6f));

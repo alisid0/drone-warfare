@@ -99,9 +99,11 @@ namespace DroneSandbox
             var fog = Get<Fog>(profile);
             fog.enabled.Override(true);
             fog.colorMode.Override(FogColorMode.SkyColor);
-            fog.meanFreePath.Override(900f);
+            // Thin near the ground but reaching higher, so the battlefield stays as clear as before while the far
+            // ridges (which rise well above 90 m) fade into a haze instead of standing out sharp.
+            fog.meanFreePath.Override(1100f);
             fog.baseHeight.Override(0f);
-            fog.maximumHeight.Override(90f);
+            fog.maximumHeight.Override(140f);
             fog.enableVolumetricFog.Override(true);
             fog.albedo.Override(Color.white);
             fog.anisotropy.Override(0.65f);

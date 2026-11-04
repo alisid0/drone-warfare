@@ -64,6 +64,7 @@ namespace DroneSandbox
             MapLayout.Prepare();
             sites.Clear();
             sites.AddRange(MapLayout.FlatSites);
+            worn.Clear();
 
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
             data.size = new Vector3(Size, HeightRange, Size);
@@ -182,8 +183,14 @@ namespace DroneSandbox
                     }
                     else
                     {
-                        h = Mathf.Min(h, water + 0.3f + (d - wet) * 0.5f); // banks no steeper than this
-                        if (d < wet + 2.5f) h = Mathf.Max(h, water + 0.12f); // and never below the water right at the edge
+                        // Banks aren't a trench: in places a low shelf of gravel and mud up to 2.5 m wide just
+                        // above the water, then a slope gentle in some reaches and steeper in others (a flat
+                        // site beside the river keeps its level ground).
+                        float shelf = BankShelf(x, z);
+                        float slope = 0.32f + 0.28f * Mathf.PerlinNoise(x * 0.03f + 5f, z * 0.03f + 61f);
+                        float bank = water + 0.18f + Mathf.Min(d - wet, shelf) * 0.04f + Mathf.Max(0f, d - wet - shelf) * slope;
+                        if (d < wet + 2.5f) bank = Mathf.Max(bank, water + 0.12f); // never below the water right at the edge
+                        h = Mathf.Lerp(h, Mathf.Min(h, bank), FlatMask(x, z, out _));
                     }
                     world[zi, xi] = h;
                 }
@@ -405,6 +412,67 @@ namespace DroneSandbox
             return mask;
         }
 
+        // Wears bare ground into the finished terrain, for things placed after it was painted (a garden path, a
+        // farmyard, a vegetable patch): earth along the line from `from` to `to`, `width` wide with soft, uneven
+        // edges, by `strength` (1 for bare earth). Grass is planted afterwards and keeps off it (Worn); writing
+        // the grass layers a second time brought back the black tussocks.
+        public static void Wear(Vector2 from, Vector2 to, float width, float strength)
+        {
+            if (terrain == null) return;
+            var data = terrain.terrainData;
+            float reach = width * 0.5f + 1.2f;
+            worn.Add(new WornStrip { a = from, b = to, width = width, strength = strength, lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach });
+            Vector2 lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach;
+
+            int res = data.alphamapResolution;
+            float cell = Size / res;
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x + Size / 2f) / cell), 0, res - 1), x1 = Mathf.Clamp(Mathf.CeilToInt((hi.x + Size / 2f) / cell), 0, res - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y + Size / 2f) / cell), 0, res - 1), z1 = Mathf.Clamp(Mathf.CeilToInt((hi.y + Size / 2f) / cell), 0, res - 1);
+            var maps = data.GetAlphamaps(x0, z0, x1 - x0 + 1, z1 - z0 + 1);
+            int layers = maps.GetLength(2);
+            for (int j = 0; j <= z1 - z0; j++)
+            {
+                for (int i = 0; i <= x1 - x0; i++)
+                {
+                    var p = new Vector2(-Size / 2f + (x0 + i + 0.5f) * cell, -Size / 2f + (z0 + j + 0.5f) * cell);
+                    float wear = WearAt(p, from, to, width) * strength;
+                    if (wear <= 0f) continue;
+                    for (int k = 0; k < layers; k++) maps[j, i, k] *= 1f - wear;
+                    maps[j, i, 2] += wear; // dirt
+                }
+            }
+            data.SetAlphamaps(x0, z0, maps);
+        }
+
+        struct WornStrip
+        {
+            public Vector2 a, b, lo, hi;
+            public float width, strength;
+        }
+        static readonly List<WornStrip> worn = new List<WornStrip>();
+
+        // Whether Wear has worn the ground at p bare enough that no grass grows there.
+        public static bool Worn(Vector2 p)
+        {
+            foreach (var s in worn)
+                if (p.x >= s.lo.x && p.x <= s.hi.x && p.y >= s.lo.y && p.y <= s.hi.y && WearAt(p, s.a, s.b, s.width) * s.strength > 0.35f) return true;
+            return false;
+        }
+
+        static float WearAt(Vector2 p, Vector2 a, Vector2 b, float width)
+        {
+            Vector2 ab = b - a;
+            float t = ab.sqrMagnitude > 0.0001f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+            float d = Vector2.Distance(p, a + ab * t);
+            float edge = width * 0.5f * (0.8f + 0.4f * Mathf.PerlinNoise(p.x * 0.4f + 3f, p.y * 0.4f + 7f));
+            return 1f - Mathf.SmoothStep(0f, 1f, (d - edge + 0.4f) / 0.8f);
+        }
+
+        // How wide the low shelf at the river's edge is here: none along much of the river, up to 2.5 m in reaches
+        // (where it would build up on an inside bend).
+        static float BankShelf(float x, float z) =>
+            2.5f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.04f + 13f, z * 0.04f + 77f) - 0.45f) * 4f);
+
         // Bilinear sample of a heights grid at world (x, z).
         static float Sample(float[,] grid, Vector2 p)
         {
@@ -547,13 +615,24 @@ namespace DroneSandbox
                         if (dq < plan.quarryRadius)
                             dirt = Mathf.Max(dirt, 1f - Mathf.SmoothStep(0f, 1f, (dq - plan.quarryRadius * 0.4f) / (plan.quarryRadius * 0.6f)));
                     }
-                    // Muddy river banks.
+                    // River banks: bare earth where the bank is cut back (about a third of it, in reaches), gravel and
+                    // mud on the shelves, and elsewhere grass growing down to the water.
                     float dRiver = river.Distance(x, z);
-                    if (dRiver < hw + 4f) dirt = Mathf.Max(dirt, 0.9f * (1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw - 0.5f) / 3f)));
-                    // A pale fringe of stones and gravel at the water's edge, in patches, outlining the river from above.
+                    if (dRiver < hw + 4f)
+                    {
+                        float wetEdge = MapLayout.RiverWidthAt(x, z);
+                        float onShelf = dRiver < wetEdge + BankShelf(x, z) + 0.3f ? 1f : 0f;
+                        float cut = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 3f, z * 0.05f + 44f) - 0.52f) * 5f);
+                        float nearWater = 1f - Mathf.SmoothStep(0f, 1f, (dRiver - wetEdge - 0.5f) / 2f);
+                        dirt = Mathf.Max(dirt, 0.9f * nearWater * Mathf.Max(cut, onShelf));
+                        if (onShelf > 0f) rock = Mathf.Max(rock, 0.35f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.3f + 9f, z * 0.3f) - 0.4f) * 3f));
+                        // A steep bank of soil is soil, not cliff.
+                        rock *= 0.4f + 0.6f * Mathf.SmoothStep(0f, 1f, (dRiver - hw - 2f) / 3f);
+                    }
+                    // Pale stones at the water's edge, in a few patches.
                     float edgeStones = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRiver - hw - 0.8f) / 1.6f);
                     if (edgeStones > 0f)
-                        rock = Mathf.Max(rock, edgeStones * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 5f) * 1.8f - 0.45f));
+                        rock = Mathf.Max(rock, edgeStones * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 5f) * 1.8f - 0.8f));
                     // The lake: a stony shore just above the water, and a rocky bed you see through the shallows.
                     float lake = MapLayout.LakeDistance(x, z);
                     if (lake < 3f)
