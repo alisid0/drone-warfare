@@ -539,7 +539,7 @@ namespace DroneSandbox
 
             float y = r.y + 172f * s;
             var theatre = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
-            string campaign = Theatre.Victory ? "campaign won: start a new one from the map"
+            string campaign = Theatre.Victory ? "campaign complete: start a new one from the map"
                 : Theatre.FinalOpen ? "the final operation is open"
                 : $"the campaign: {Theatre.Wins}/{Theatre.WinsForFinal} sectors to break the Dravin line";
             if (GUI.Button(theatre, "<b>Theatre of war</b>   <size=" + Mathf.RoundToInt(12f * s) + ">" + campaign + "</size>", leftButton))
@@ -668,10 +668,13 @@ namespace DroneSandbox
             Rect r = new Rect((Screen.width - pair) / 2f, (Screen.height - 350f * s) / 2f, 520f * s, 350f * s);
             Fill(r, ModalColor);
             DrawDebriefMap(new Rect(r.xMax + 12f * s, (Screen.height - 470f * s) / 2f, 400f * s, 470f * s));
+            // The final operation succeeded: a drone unit doesn't win a war on its own, it opens the way for the ground
+            // offensive, so the result says that.
             bool victory = won && game.Hotspot != null && game.Hotspot.final;
-            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), victory ? "VICTORY: THE WAR IS WON" : won ? "MISSION COMPLETE" : "MISSION FAILED",
+            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), victory ? "MISSION SUCCESSFUL" : won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
-            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
+            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s),
+                victory ? "Their front command is destroyed. The ground offensive can break through." : game.ResultReason, centered);
             var starRow = new Rect(r.x + (r.width - 330f * s) / 2f, r.y + 96f * s, 330f * s, 46f * s);
             DrawStars(starRow, game.Stars);
             // What each star is for, under each star.
@@ -689,7 +692,7 @@ namespace DroneSandbox
                 $"Launched <b>{game.DronesUsed}</b> (par {game.Mission.par})  \u00b7  expended <b>{game.dronesExpended}</b>  \u00b7  shot down or left <b>{game.dronesLost}</b>  \u00b7  " +
                 $"home <b>{game.DronesHome}</b>  \u00b7  {Clock(game.MissionTime)}", centered);
             GUI.Label(new Rect(r.x, r.y + 178f * s, r.width, 18f * s),
-                victory ? $"The campaign: {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost."
+                victory ? $"Campaign complete: {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost."
                     : "One star for the win, one for using par or fewer drones, one for losing none.",
                 Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, victory ? Friendly : small.normal.textColor));
             string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
@@ -736,9 +739,9 @@ namespace DroneSandbox
             Fill(r, ModalColor);
             GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
             string progress = Theatre.Victory
-                ? $"<b>VICTORY:</b> the Dravin front command has fallen.   {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost"
+                ? $"<b>CAMPAIGN COMPLETE:</b> their front command is destroyed and the ground offensive is through.   {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost"
                 : Theatre.FinalOpen
-                    ? "<b>FINAL OPERATION OPEN:</b> the front is at the Dravin lines. Strike their front command to win the war."
+                    ? "<b>FINAL OPERATION OPEN:</b> the front is at the Dravin lines. Destroy their front command so the ground offensive can break through."
                     : $"Sectors won <b>{Mathf.Min(Theatre.Wins, Theatre.WinsForFinal)}/{Theatre.WinsForFinal}</b> to break the Dravin line     lost <b>{Theatre.Losses}</b>     " +
                       $"<b>{Tech.Points}</b> points     campaign: intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  supply +{Theatre.Stacks(Theatre.Bonus.Supply)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}";
             GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s), progress,
@@ -798,7 +801,7 @@ namespace DroneSandbox
                     $"<b>Difficulty:</b> {(spot.heat < 0.35f ? "low" : spot.heat < 0.7f ? "medium" : "high")}", label);
                 var bonus = Theatre.BonusOf(spot.situation);
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 22f * s),
-                    spot.final ? "<b>On win:</b> the Dravin front command falls, and the war is won"
+                    spot.final ? "<b>On success:</b> their front command is destroyed, the ground offensive breaks through and the campaign is complete"
                         : $"<b>On win:</b> {Theatre.BonusText(bonus)}" + (Theatre.BonusMaxed(bonus) ? "  (already at most)" : ""), Tinted(label, Teal));
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 114f * s, card.width - 300f * s, 30f * s), type.blurb, smallWrap);
                 if (chosen != null)

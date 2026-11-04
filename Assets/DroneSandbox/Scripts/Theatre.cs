@@ -25,8 +25,9 @@ namespace DroneSandbox
     // map. Hotspots glow along the front line where the enemy is active; each one opens a sector built from its
     // seed. The campaign has a seed of its own (made the first time) and a round that goes up every third win:
     // the front line moves your way, and a new set of hotspots flares up. A lost fight pushes the front back a
-    // little. Win WinsForFinal sectors and the final operation opens: a strike on the Dravin front command; win
-    // that and the campaign is won. Saved through Progress.
+    // little. Win WinsForFinal sectors and the final operation opens: a strike on the Dravin front command; destroy
+    // it and the campaign is complete (the ground offensive breaks through: the drones open the way, they don't
+    // win the war on their own). Saved through Progress.
     public static class Theatre
     {
         public const int HotspotCount = 11;
@@ -166,7 +167,7 @@ namespace DroneSandbox
         public static bool BonusMaxed(Bonus b) => Stacks(b) >= MaxStacks[(int)b];
 
         // A win cools the hotspot, pushes the front, banks the sector's bonus and brings the next round of fighting;
-        // the final operation won wins the campaign.
+        // the final operation done completes the campaign.
         public static void Won(Hotspot h, int dronesLost)
         {
             Record(dronesLost);
