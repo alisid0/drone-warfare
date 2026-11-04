@@ -14,6 +14,14 @@ namespace DroneSandbox
         static float uiScale = 1f, volume = 1f;
         static bool shake = true, flashes = true, alertSounds = true, tips = true;
         static int quality = 2;
+        static DifficultyLevel difficulty = DifficultyLevel.Regular;
+
+        // Keep difficulty with the other preferences; old saves start at Regular.
+        public static DifficultyLevel Difficulty
+        {
+            get { Load(); return difficulty; }
+            set { Load(); difficulty = (DifficultyLevel)Mathf.Clamp((int)value, 0, 2); Save(); }
+        }
 
         // 0 low, 1 medium, 2 high (see Atmosphere.ApplyQuality).
         public static int Quality
@@ -46,6 +54,7 @@ namespace DroneSandbox
             flashes = PlayerPrefs.GetInt("settings.flashes", 1) == 1;
             alertSounds = PlayerPrefs.GetInt("settings.alertSounds", 1) == 1;
             quality = Mathf.Clamp(PlayerPrefs.GetInt("settings.quality", 2), 0, QualityNames.Length - 1);
+            difficulty = (DifficultyLevel)Mathf.Clamp(PlayerPrefs.GetInt("settings.difficulty", (int)DifficultyLevel.Regular), 0, 2);
             AudioListener.volume = volume;
         }
 
@@ -59,6 +68,7 @@ namespace DroneSandbox
             PlayerPrefs.SetInt("settings.flashes", flashes ? 1 : 0);
             PlayerPrefs.SetInt("settings.alertSounds", alertSounds ? 1 : 0);
             PlayerPrefs.SetInt("settings.quality", quality);
+            PlayerPrefs.SetInt("settings.difficulty", (int)difficulty);
             PlayerPrefs.Save();
         }
 
@@ -72,6 +82,7 @@ namespace DroneSandbox
             volume = 1f;
             shake = flashes = alertSounds = true;
             quality = 2;
+            difficulty = DifficultyLevel.Regular;
             AudioListener.volume = 1f;
         }
     }

@@ -710,6 +710,7 @@ namespace DroneSandbox
                 : $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}";
             GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s), where, Tinted(small, TargetColor));
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
+            GUI.Label(new Rect(x, r.yMax - 26f * s, w, 20f * s), $"Difficulty: {Settings.Difficulty}", small);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
             int bombers = game.StockLeft(DroneType.Bomber);
             string Extra(DroneType t) => game.SupportFor(t) > 0 ? $" <color=#5AADFF>(+{game.SupportFor(t)} support)</color>" : "";

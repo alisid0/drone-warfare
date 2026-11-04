@@ -57,7 +57,8 @@ namespace DroneSandbox
         public MissionPhase Phase { get; private set; }
         public float ExtractEndsAt { get; private set; } // MissionTime the extraction window closes
         public int DronesHome { get; private set; }      // drones back over the base when the mission ended
-        public const float ExtractSeconds = 60f, HomeRadius = 18f;
+        public static float ExtractSeconds => 60f + Difficulty.ExtraExtractSeconds;
+        public const float HomeRadius = 18f;
         public float ShadowProgress { get; private set; } // seconds the column has been watched unseen (Shadow missions)
         public bool ShadowSpotted { get; private set; }   // the column has noticed us (watching doesn't count for now)
         public float ShadowSuspicion { get; private set; } // 0-1: how close the column is to spotting the tail
@@ -254,7 +255,7 @@ namespace DroneSandbox
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
                 // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
-                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius * Theatre.IntelFactor);
+                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius * Theatre.IntelFactor * Difficulty.ReportCircleFactor);
                 if (u.target) TargetsTotal++;
             }
 
@@ -415,7 +416,7 @@ namespace DroneSandbox
         {
             if ((mission.shadowSeconds > 0f || mission.huntRobots > 0) && type != DroneType.Scout) return 0; // Shadow and hunt missions are Scouts only
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) || mission.nightjar ? 1 : 0;
-            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0);
+            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + Difficulty.SpareStock(mission, type);
         }
 
         // The Nightjar's launch button shows in free play, and in missions once it's bought.
