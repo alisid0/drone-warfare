@@ -149,6 +149,7 @@ namespace DroneSandbox
                     if (v.z <= 0f || v.z > 150f || v.x < 0.03f || v.x > 0.97f || v.y < 0.06f || v.y > 0.97f) continue;
                     var p = new Vector2(r.x + v.x * r.width, r.y + (1f - v.y) * r.height);
                     var ev = Mimic.Of(b);
+                    if (Mimic.Jammed(b)) JamPulse(p, 18f * s, b);
                     if (b != Mimic.Tracked)
                     {
                         Dot(p, 2f * s, ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : new Color(1f, 1f, 1f, 0.6f));
@@ -265,6 +266,25 @@ namespace DroneSandbox
                     break;
                 }
             }
+        }
+
+        // A jammed spotter (Hide and Seek): a blue ring pulsing outward round it, amber in the jam's last seconds,
+        // with the time left once nobody is watching it.
+        static readonly Color JamBlue = new Color(0.35f, 0.68f, 1f);
+
+        void JamPulse(Vector2 c, float radius, Bird b)
+        {
+            float s = Scale, left = Mimic.JamLeft(b);
+            bool fading = left < Mimic.JamFading;
+            Color colour = fading ? DravinOrange : JamBlue;
+            if (fading && Mathf.Repeat(Time.unscaledTime, 0.5f) > 0.25f) colour.a = 0.35f;
+            float wave = Mathf.Repeat(Time.unscaledTime * 1.2f, 1f);
+            Ring(c, radius * (0.9f + 0.7f * wave), new Color(colour.r, colour.g, colour.b, colour.a * (1f - wave) * 0.9f));
+            Ring(c, radius, new Color(colour.r, colour.g, colour.b, colour.a * 0.8f));
+            bool watched = left > Mimic.JamSeconds - 0.5f;
+            var tag = Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold }, colour);
+            tag.fontSize = Mathf.RoundToInt(9f * s);
+            GUI.Label(new Rect(c.x - 50f * s, c.y + radius + 1f * s, 100f * s, 12f * s), watched ? "JAMMED" : $"JAMMED {left:0} s", tag);
         }
 
         // A few frames of grey static, cycled.

@@ -133,6 +133,10 @@ namespace DroneSandbox
 
         void DrawThreats()
         {
+            // Hide and Seek: each jammed spotter pulses blue over the map, with its time left.
+            if (game.IsSpotting)
+                foreach (var b in Wildlife.Birds)
+                    if (b != null && b.Robot && !b.Down && Mimic.Jammed(b) && ToGui(b.transform.position, out Vector2 at)) JamPulse(at, 16f * Scale, b);
             // Hide and Seek: in the last 15 s before a directed salvo, the base it will land on is ringed in red.
             if (game.IsSpotting && game.Phase != MissionPhase.Extract && game.Spotters > 0 && game.NextSalvoAt - game.MissionTime < 15f)
             {

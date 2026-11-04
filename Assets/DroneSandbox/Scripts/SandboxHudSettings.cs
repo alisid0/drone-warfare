@@ -9,7 +9,7 @@ namespace DroneSandbox
         {
             float s = Scale;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
-            Rect r = Centered(560f, 478f);
+            Rect r = Centered(560f, 530f);
             Fill(r, ModalColor);
             Fill(new Rect(r.x, r.y, r.width, 3f * s), Teal);
             GUI.Label(new Rect(r.x, r.y + 16f * s, r.width, 34f * s), "SETTINGS", Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, label.normal.textColor));
@@ -26,6 +26,8 @@ namespace DroneSandbox
             if (flashes >= 0) Settings.Flashes = flashes == 0;
             int alerts = Choice(r, ref y, "Alert sounds", "Warnings and radio calls", new[] { "On", "Off" }, Settings.AlertSounds ? 0 : 1);
             if (alerts >= 0) Settings.AlertSounds = alerts == 0;
+            int tips = Choice(r, ref y, "Tips", "In the first two Operations", new[] { "On", "Off" }, Settings.Tips ? 0 : 1);
+            if (tips >= 0) Settings.Tips = tips == 0;
             int volume = Choice(r, ref y, "Volume", "Everything", new[] { "0", "25", "50", "75", "100" },
                 System.Array.IndexOf(Settings.Volumes, Settings.Volume));
             if (volume >= 0) Settings.Volume = Settings.Volumes[volume];

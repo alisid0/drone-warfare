@@ -23,7 +23,7 @@ namespace DroneSandbox
         public bool Announced;                  // the confirmation has been called out
         public bool Occluded;                   // trees between the feed's camera and it (held: see Tick)
         public float JammedUntil;               // Hide and Seek: its uplink jammed while it's watched, and a while after
-        public bool WasJammed;
+        public bool WasJammed, WarnedFade;
         public float BlockedFor, ClearFor;      // how long the line to it has been blocked, or clear
         public readonly float[] KindAt = new float[5]; // when each kind of clue last came in (the panel flashes it)
         public const float MinWatch = 8f;       // no confirmation from a glance
@@ -68,6 +68,8 @@ namespace DroneSandbox
         // that isn't jammed, down or gone is spotting for the guns.
         public static bool Jammed(Bird b) => Of(b).Confirmed && Time.time < Of(b).JammedUntil;
         public static bool Spotting(Bird b) => b != null && b.Robot && !b.Down && !b.Escaped && !Jammed(b);
+        public static float JamLeft(Bird b) => Jammed(b) ? Of(b).JammedUntil - Time.time : 0f;
+        public const float JamFading = 10f;     // the last seconds of a jam: amber, and a warning
         public static Bird Tracked { get; private set; }
         static readonly Dictionary<Drone, int> shotsLeft = new Dictionary<Drone, int>();
         public static int ShotsLeftFor(Drone d) => d != null && shotsLeft.TryGetValue(d, out int n) ? n : Shots;
@@ -230,10 +232,22 @@ namespace DroneSandbox
                     }
                 }
                 // A jam running out on a robot left unwatched.
-                if (b.Robot)
+                if (b.Robot && game != null && game.IsSpotting && !b.Down)
                 {
                     bool jammed = Jammed(b);
-                    if (e.WasJammed && !jammed && game != null && game.IsSpotting) game.ShowMessage("Jam lapsed: a spotter is back on the air", 3f);
+                    if (jammed && !e.WasJammed) Sound.Ui("jam on", 0.8f);
+                    if (jammed && JamLeft(b) < JamFading && !e.WarnedFade)
+                    {
+                        e.WarnedFade = true;
+                        game.ShowMessage($"Jam fading: {JamFading:0} s before that spotter is back on the air. Get eyes on it", 3f);
+                        Sound.Ui("jam fading", 0.9f);
+                    }
+                    if (JamLeft(b) > JamFading + 1f) e.WarnedFade = false;
+                    if (e.WasJammed && !jammed)
+                    {
+                        game.ShowMessage("Jam lapsed: a spotter is back on the air", 3f);
+                        Sound.Alert("warning", 1f);
+                    }
                     e.WasJammed = jammed;
                 }
                 if (b != Tracked) continue;

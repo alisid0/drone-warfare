@@ -177,33 +177,6 @@ namespace DroneSandbox
             Add(longWatch, EnemyType.AAGun, 30f, -30f, 40f);
             list.Add(longWatch);
 
-            // Mimic (prototype): two Dravin spy robots built to pass for crows are watching the forward base and the
-            // village road. Tell them from the real crows, then bring them down before they get their pictures out.
-            list.Add(new Mission
-            {
-                name = "Silent Wings",
-                briefing = "Two of the crows over the forward base and the village aren't crows. Click a bird in a Scout's feed to " +
-                           "track it, right-click to shadow it, and watch (hold Z and use the wheel to zoom) for what a machine can't hide: " +
-                           "hovering, an even wingbeat, a glint, a radio burst. Two kinds of evidence confirm it; steady the aim, then " +
-                           "right-click to fire (3 shots per Scout). Get within 10 m and it bolts.",
-                scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 10f, huntRobots = 2,
-                cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
-                escapeFailure = "A spy robot got away with its pictures.",
-            });
-
-            // Mimic (prototype): Hide and Seek, against the clock. The same two robots are spotting for the Dravin guns,
-            // and every minute they stay on the air the shelling of the forward base grows by half again.
-            list.Add(new Mission
-            {
-                name = "Hide and Seek",
-                briefing = "Two of the crows are spotting for the Dravin guns. Every minute they stay on the air, the shelling of the " +
-                           "forward base grows by half again: it lasts about six minutes. A confirmed robot is jammed while you keep it " +
-                           "in view (and for 45 s after); only bringing it down stops it for good. Find them as in Silent Wings.",
-                scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 15.5f, huntRobots = 2, spotterShelling = 3f,
-                cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
-                escapeFailure = "A spotter got away with the base's position.",
-            });
-
             // An Interdiction: one of two identical tankers carries the fuel. Telling them apart takes a Scout inside
             // 26 m, which the column notices - and a spooked column turns north at the crossroads for the far exit.
             var delivery = new Mission
@@ -248,6 +221,33 @@ namespace DroneSandbox
             Add(corridor, EnemyType.AAGun, 60f, 8f, 250f);
             Add(corridor, EnemyType.Truck, 46f, -24f, 120f);
             list.Add(corridor);
+
+            // Mimic (prototype): two Dravin spy robots built to pass for crows are watching the forward base and the
+            // village road. Tell them from the real crows, then bring them down before they get their pictures out.
+            list.Add(new Mission
+            {
+                name = "Silent Wings", key = "mimic.silentWings",
+                briefing = "Two of the crows over the forward base and the village aren't crows. Click a bird in a Scout's feed to " +
+                           "track it, right-click to shadow it, and watch (hold Z and use the wheel to zoom) for what a machine can't hide: " +
+                           "hovering, an even wingbeat, a glint, a radio burst. Two kinds of evidence confirm it; steady the aim, then " +
+                           "right-click to fire (3 shots per Scout). Get within 10 m and it bolts.",
+                scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 10f, huntRobots = 2,
+                cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
+                escapeFailure = "A spy robot got away with its pictures.",
+            });
+
+            // Mimic (prototype): Hide and Seek, against the clock. The same two robots are spotting for the Dravin guns,
+            // and every minute they stay on the air the shelling of the forward base grows by half again.
+            list.Add(new Mission
+            {
+                name = "Hide and Seek", key = "mimic.hideAndSeek",
+                briefing = "Two of the crows are spotting for the Dravin guns. Every minute they stay on the air, the shelling of the " +
+                           "forward base grows by half again: it lasts about six minutes. A confirmed robot is jammed while you keep it " +
+                           "in view (and for 45 s after); only bringing it down stops it for good. Find them as in Silent Wings.",
+                scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 15.5f, huntRobots = 2, spotterShelling = 3f,
+                cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
+                escapeFailure = "A spotter got away with the base's position.",
+            });
 
             return list;
         }

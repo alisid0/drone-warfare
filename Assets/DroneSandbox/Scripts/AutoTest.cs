@@ -505,7 +505,9 @@ namespace DroneSandbox
                 var offers = Theatre.Offers;
                 if (offers.Count < 3 || offers.Exists(o => !Theatre.Offered(o.spot))) { log.WriteLine($"Campaign: turn {Theatre.Turn} has {offers.Count} offers"); errors++; }
                 var rewards = new HashSet<Theatre.Reward>(offers.ConvertAll(o => o.reward));
-                if (rewards.Count != offers.Count || !offers.Exists(o => o.spot.heat < 0.6f)) { log.WriteLine($"Campaign: turn {Theatre.Turn} offers break the rules"); errors++; }
+                float coolest = 1f;
+                foreach (var h in Theatre.Hotspots) if (!h.final && !Theatre.Done(h)) coolest = Mathf.Min(coolest, h.heat);
+                if (rewards.Count != offers.Count || !offers.Exists(o => o.spot.heat < 0.6f || o.spot.heat <= coolest)) { log.WriteLine($"Campaign: turn {Theatre.Turn} offers break the rules"); errors++; }
                 var threat = Theatre.ThreatSpot;
                 if (threat != null && !offers.Exists(o => o.spot == threat)) { log.WriteLine("Campaign: the threat isn't on offer"); errors++; }
                 if (Theatre.AlertedSpot != null) alertedSeen++;
@@ -551,7 +553,7 @@ namespace DroneSandbox
                           $"progress {Theatre.Standing}/{Theatre.ProgressForFinal}, charges {chargesAtStart} at the start, {Theatre.Charges} now, intel +{Theatre.Stacks(Theatre.Bonus.Intel)}, " +
                           $"rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}, front advance {Theatre.Advance:F3}, final open {Theatre.FinalOpen}, " +
                           $"final {(final != null ? final.sectorName + " / " + final.situation : "missing")}; per turn {string.Join(" ", turnsLog)}");
-            if (!Theatre.FinalOpen || chargesAtStart != 2 || ignored == 0 || answered == 0) errors++;
+            if (!Theatre.FinalOpen || chargesAtStart != 1 || ignored == 0 || answered == 0) errors++;
             game.OpenMenu();
             hud.TheatreOpen = true;
             yield return new WaitForSecondsRealtime(0.6f);
@@ -710,7 +712,7 @@ namespace DroneSandbox
             float started = Time.time;
             var sampled = new HashSet<Bird>();
             int samples = 0, misses = 0, spooks = 0;
-            bool feedShot = false;
+            bool feedShot = false, jamShots = false;
             while (game.Result == MissionResult.None && game.Phase != MissionPhase.Extract && Time.time - started < 420f)
             {
                 if ((scout == null || !scout.IsAlive || Mimic.ShotsLeftFor(scout) <= 0) && scoutIndex + 1 < scouts.Count)
@@ -760,6 +762,20 @@ namespace DroneSandbox
                     yield return new WaitForSeconds(0.4f);
                     yield return Shot(prefix + "6_hunt_confirmed_feed");
                     feedShot = true;
+                }
+                // Hide and Seek: the jam on the confirmed spotter, then (looking away, as if for 38 s) fading.
+                if (spotting && !jamShots && Mimic.Jammed(next))
+                {
+                    jamShots = true;
+                    rts.LookAt(next.transform.position, 45f, 30f);
+                    yield return new WaitForSeconds(0.5f);
+                    yield return Shot("68_seek_jammed");
+                    Mimic.Track(null);
+                    Mimic.Of(next).JammedUntil = Time.time + 7f;
+                    yield return new WaitForSeconds(0.6f);
+                    yield return Shot("69_seek_jam_fading");
+                    log.WriteLine($"{name}: looking away, the jam is {(Mimic.Jammed(next) ? "holding" : "gone")} with {Mimic.JamLeft(next):F0} s left, spotters {game.Spotters}");
+                    Mimic.Act(next, scout);
                 }
                 float aiming = Time.time;
                 while (!next.Down && !next.Escaped && Mimic.ShotsLeftFor(scout) > 0 && game.Result == MissionResult.None && Time.time - aiming < 120f)
@@ -1053,6 +1069,10 @@ namespace DroneSandbox
             yield return new WaitForSecondsRealtime(0.5f);
             yield return Shot("08_briefing");
             game.CloseBriefing();
+            yield return new WaitForSecondsRealtime(0.4f);
+            log.WriteLine($"Mission 1 tips: {Coach.Count}, showing \"{Coach.Current}\"");
+            if (Settings.Tips && Coach.Count == 0) errors++;
+            yield return Shot("08a_first_tip");
             game.ToggleThermal();
             log.WriteLine($"Mission 1 thermal with no tech: {DayNight.Instance.Thermal} (\"{game.Message}\")");
             // Recon: a Scout flies out over the rough contacts until the trucks are found.
@@ -1091,7 +1111,7 @@ namespace DroneSandbox
                 yield return new WaitForSecondsRealtime(0.5f);
             log.WriteLine($"Mission 1: {game.Result}, {game.ResultReason} Stars {game.Stars}, drones used {game.DronesUsed}, " +
                           $"lost {game.dronesLost}, home {game.DronesHome}, targets {game.TargetsDestroyed}/{game.TargetsTotal}, time {game.MissionTime:F1}s, " +
-                          $"points +{game.PointsEarned} (stars {game.StarBonus}), total {Tech.Points}");
+                          $"points +{game.PointsEarned} (stars {game.StarBonus}), total {Tech.Points}; tips done {Coach.Step}/{Coach.Count}");
             yield return new WaitForSecondsRealtime(2f);
             yield return Shot("09_mission_complete");
 

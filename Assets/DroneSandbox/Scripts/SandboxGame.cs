@@ -109,8 +109,7 @@ namespace DroneSandbox
 
         public void OpenMenu()
         {
-            if (Mode == GameMode.Mission && Hotspot != null && Result == MissionResult.None && !BriefingOpen && MissionTime > 0f)
-                Theatre.Lost(Hotspot, dronesLost); // walking away from a campaign operation under way loses it
+            if (AbandonIsLoss) Theatre.Lost(Hotspot, dronesLost); // walking away from a campaign operation under way loses it
             ClearUnits();
             Mode = GameMode.Menu;
             Mission = null;
@@ -188,6 +187,9 @@ namespace DroneSandbox
             Atmosphere.SetWeather(hotspot != null ? hotspot.weather : Weather.Clear);
             for (int t = 0; t < stock.Length; t++) stock[t] = MissionStock(Mission, (DroneType)t);
             SupportSpent = 0;
+            Coordinated = 0;
+            Coach.Begin(mission, index);
+            System.Array.Clear(supportFor, 0, supportFor.Length);
             EnemyUnit.Wariness = Theatre.IsAlerted(hotspot) ? 1.3f : 1f;
             rts.Orbit(false);
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
@@ -331,6 +333,7 @@ namespace DroneSandbox
             }
             syncWatch[id] = group.Count;
             ShowMessage($"Coordinated strike: {group.Count} drones, hits in {latest:0} s");
+            Coordinated++;
             Sound.Alert("objective", 0.3f);
         }
 
@@ -378,14 +381,21 @@ namespace DroneSandbox
         // A support charge spent in a campaign mission's briefing: one more drone of a type the mission already offers
         // (not the Nightjar).
         public int SupportSpent { get; private set; }
+        public int Coordinated { get; private set; } // coordinated strikes ordered this mission (Coach)
+        readonly int[] supportFor = new int[4];
+        public int SupportFor(DroneType type) => supportFor[(int)type];
 
         public bool SpendSupport(DroneType type)
         {
             if (Hotspot == null || !BriefingOpen || type == DroneType.Bomber || MissionStock(Mission, type) <= 0 || !Theatre.SpendCharge()) return false;
             stock[(int)type]++;
+            supportFor[(int)type]++;
             SupportSpent++;
             return true;
         }
+
+        // Leaving a campaign operation under way counts as losing it, so the Menu button asks first (SandboxHud).
+        public bool AbandonIsLoss => Mode == GameMode.Mission && Hotspot != null && Result == MissionResult.None && !BriefingOpen && MissionTime > 0f;
 
         public void RetryMission()
         {
@@ -414,7 +424,7 @@ namespace DroneSandbox
         // How close a drone must fly to spot a hidden enemy; long-range optics push it out.
         public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;
 
-        public static int BestStars(int missionIndex) => Progress.Get($"mission{missionIndex}.stars");
+        public static int BestStars(int missionIndex) => Progress.Get((Missions.All[missionIndex].key ?? $"mission{missionIndex}") + ".stars");
 
         static int BestStars(string key) => Progress.Get(key + ".stars");
 
@@ -486,6 +496,7 @@ namespace DroneSandbox
                 dayNight.SetThermal(false);
                 ShowMessage("Thermal lost: no thermal camera in the air");
             }
+            if (Mode == GameMode.Mission) Coach.Tick(this);
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
             MissionTime += Time.deltaTime;
             RecordTracks();

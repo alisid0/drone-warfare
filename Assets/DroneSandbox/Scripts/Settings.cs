@@ -12,7 +12,7 @@ namespace DroneSandbox
 
         static bool loaded, persist = true;
         static float uiScale = 1f, volume = 1f;
-        static bool shake = true, flashes = true, alertSounds = true;
+        static bool shake = true, flashes = true, alertSounds = true, tips = true;
         static int quality = 2;
 
         // 0 low, 1 medium, 2 high (see Atmosphere.ApplyQuality).
@@ -31,6 +31,7 @@ namespace DroneSandbox
         public static float UiScale { get { Load(); return uiScale; } set { Load(); uiScale = value; Save(); } }
         public static float Volume { get { Load(); return volume; } set { Load(); volume = Mathf.Clamp01(value); AudioListener.volume = volume; Save(); } }
         public static bool Shake { get { Load(); return shake; } set { Load(); shake = value; Save(); } }
+        public static bool Tips { get { Load(); return tips; } set { Load(); tips = value; Save(); } } // Coach, in the first two Operations
         public static bool Flashes { get { Load(); return flashes; } set { Load(); flashes = value; Save(); } }
         public static bool AlertSounds { get { Load(); return alertSounds; } set { Load(); alertSounds = value; Save(); } }
 
@@ -41,6 +42,7 @@ namespace DroneSandbox
             uiScale = PlayerPrefs.GetFloat("settings.uiScale", 1f);
             volume = PlayerPrefs.GetFloat("settings.volume", 1f);
             shake = PlayerPrefs.GetInt("settings.shake", 1) == 1;
+            tips = PlayerPrefs.GetInt("settings.tips", 1) == 1;
             flashes = PlayerPrefs.GetInt("settings.flashes", 1) == 1;
             alertSounds = PlayerPrefs.GetInt("settings.alertSounds", 1) == 1;
             quality = Mathf.Clamp(PlayerPrefs.GetInt("settings.quality", 2), 0, QualityNames.Length - 1);
@@ -53,6 +55,7 @@ namespace DroneSandbox
             PlayerPrefs.SetFloat("settings.uiScale", uiScale);
             PlayerPrefs.SetFloat("settings.volume", volume);
             PlayerPrefs.SetInt("settings.shake", shake ? 1 : 0);
+            PlayerPrefs.SetInt("settings.tips", tips ? 1 : 0);
             PlayerPrefs.SetInt("settings.flashes", flashes ? 1 : 0);
             PlayerPrefs.SetInt("settings.alertSounds", alertSounds ? 1 : 0);
             PlayerPrefs.SetInt("settings.quality", quality);

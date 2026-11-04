@@ -31,7 +31,7 @@ namespace DroneSandbox
     // nor below 0. At most one threat is announced at a time, on offer for two turns; left alone, it costs ground and
     // puts another hotspot on alert. At ProgressForFinal the final operation opens: a strike on the Dravin front
     // command; destroy it and the campaign is complete (the ground offensive breaks through: the drones open the
-    // way, they don't win the war on their own). Support charges (start 2, at most 3) buy an extra drone before a
+    // way, they don't win the war on their own). Support charges (start 1, at most 3) buy an extra drone before a
     // mission. Saved through Progress.
     public static class Theatre
     {
@@ -94,13 +94,13 @@ namespace DroneSandbox
             }
         }
 
-        // A campaign's first look: two support charges to begin with. A save from before turns gets its progress from
+        // A campaign's first look: one support charge to begin with. A save from before turns gets its progress from
         // the sectors it had won.
         static void Start()
         {
             if (Progress.Get("campaign.started") != 0) return;
             Progress.Set("campaign.started", 1);
-            Progress.Set("campaign.charges", 2);
+            Progress.Set("campaign.charges", 1);
             if (Standing == 0 && Wins > 0) Progress.Set("theatre.progress", Mathf.Max(0, 2 * Wins - Losses));
             Progress.Save();
         }
@@ -185,8 +185,8 @@ namespace DroneSandbox
         }
 
         // A win banks its offer's reward and progress, deals with the threat if it was the one, and ends the turn;
-        // every second win brings a support charge, every third a new round (the hotspots move). The final
-        // operation done completes the campaign.
+        // every third win brings a support charge and a new round (the hotspots move). The final operation done
+        // completes the campaign.
         public static void Won(Hotspot h, int dronesLost)
         {
             Record(dronesLost);
@@ -219,10 +219,10 @@ namespace DroneSandbox
             }
             Progress.Set(h.Key + ".won", 1);
             Progress.Set("theatre.wins", Wins + 1);
-            if (Wins % 2 == 0 && Charges < MaxCharges)
+            if (Wins % 3 == 0 && Charges < MaxCharges)
             {
                 AddCharge();
-                Outcome += "  \u00b7  +1 support charge for two wins";
+                Outcome += "  \u00b7  +1 support charge for three wins";
             }
             if (Wins % 3 == 0) Progress.Set("theatre.round", Round + 1);
             EndTurn(false);
@@ -279,14 +279,12 @@ namespace DroneSandbox
                 int j = rng.Next(i + 1);
                 (pool[i], pool[j]) = (pool[j], pool[i]);
             }
-            if (!picks.Exists(h => h.heat < 0.6f))
+            if (!picks.Exists(h => h.heat < 0.6f) && pool.Count > 0)
             {
                 var easy = pool.Find(h => h.heat < 0.6f);
-                if (easy != null)
-                {
-                    picks.Add(easy);
-                    pool.Remove(easy);
-                }
+                if (easy == null) foreach (var h in pool) if (easy == null || h.heat < easy.heat) easy = h;
+                picks.Add(easy);
+                pool.Remove(easy);
             }
             foreach (var h in pool)
             {
@@ -389,7 +387,7 @@ namespace DroneSandbox
             Outcome = News = "";
             mapAdvance = -1f;
             Progress.Set("theatre.seed", Random.Range(1, 1000000));
-            Start(); // two support charges, from the first briefing on
+            Start(); // a support charge, from the first briefing on
         }
 
         // ---- The map picture ----

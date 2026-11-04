@@ -52,6 +52,7 @@ namespace DroneSandbox
         public bool SettingsOpen; // interface size, shake, flashes and sound, from the main menu
         Hotspot chosen;          // the hotspot picked on the theatre map
         float newCampaignAsked = -100f; // when New campaign was first clicked (it asks again before it acts)
+        float abandonAsked = -100f;     // the same for leaving a campaign operation under way
         static Texture2D dotTexture;
         public float Scale => Mathf.Max(1f, Screen.height / 900f) * Settings.UiScale;
 
@@ -153,6 +154,7 @@ namespace DroneSandbox
             DrawHelp();
             GUI.enabled = true;
             DrawMessage();
+            DrawCoach();
             DrawPauseBanner();
             DrawTelemetry();
             if (Event.current.type == EventType.Repaint) DrawFeed();
@@ -342,12 +344,23 @@ namespace DroneSandbox
             float left = Mathf.Max(0f, game.NextSalvoAt - game.MissionTime);
             int spotters = game.Spotters;
             bool close = left < 15f && spotters > 0;
+            int jammed = 0;
+            float shortest = float.MaxValue;
+            foreach (var b in Wildlife.Birds)
+                if (b != null && b.Robot && !b.Down && Mimic.Jammed(b))
+                {
+                    jammed++;
+                    shortest = Mathf.Min(shortest, Mimic.JamLeft(b));
+                }
+            string jams = jammed == 0 ? "" : $"   <color=#5AADFF><b>{jammed} jammed</b>" + (shortest < Mimic.JamSeconds - 0.5f ? $", {shortest:0} s left" : ", held while watched") + "</color>";
             Color warn = close ? Hostile : DravinOrange;
             if (close && Mathf.Repeat(Time.unscaledTime, 0.8f) < 0.4f) Fill(r, new Color(Hostile.r, Hostile.g, Hostile.b, 0.18f));
-            GUI.Label(new Rect(r.x + 10f * s, r.y + 4f * s, r.width - 20f * s, 20f * s),
-                $"<b>NEXT SALVO {Clock(left)}</b>   " + (spotters > 0 ? $"expected <b>{game.ExpectedDamage:0}</b>   {spotters} spotting" : "no spotter on the air"),
+            GUI.Label(new Rect(r.x + 10f * s, r.y + 3f * s, r.width - 20f * s, 20f * s),
+                $"<b>NEXT SALVO {Clock(left)}</b>   " + (spotters > 0 ? $"expected damage <b>{game.ExpectedDamage:0}</b>" : "it will fall wide"),
                 Tinted(label, spotters > 0 ? warn : Teal));
-            var bar = new Rect(r.x + 10f * s, r.y + 29f * s, r.width - 80f * s, 8f * s);
+            GUI.Label(new Rect(r.x + 10f * s, r.y + 23f * s, r.width - 20f * s, 18f * s),
+                (spotters > 0 ? $"{spotters} spotting for the guns" : "no spotter on the air") + jams, Tinted(small, spotters > 0 ? warn : Teal));
+            var bar = new Rect(r.x + 10f * s, r.y + 47f * s, r.width - 96f * s, 8f * s);
             Fill(bar, new Color(1f, 1f, 1f, 0.12f));
             float integrity = game.BaseIntegrity / 100f;
             Fill(new Rect(bar.x, bar.y, bar.width * integrity, bar.height), integrity > 0.5f ? Teal : integrity > 0.25f ? DravinOrange : Hostile);
@@ -356,7 +369,7 @@ namespace DroneSandbox
                 float after = Mathf.Max(0f, game.BaseIntegrity - game.ExpectedDamage) / 100f;
                 Fill(new Rect(bar.x + bar.width * after, bar.y, bar.width * (integrity - after), bar.height), new Color(Hostile.r, Hostile.g, Hostile.b, close ? 0.9f : 0.5f));
             }
-            GUI.Label(new Rect(bar.xMax + 8f * s, r.y + 23f * s, 70f * s, 20f * s), $"base <b>{game.BaseIntegrity:0}%</b>", label);
+            GUI.Label(new Rect(bar.xMax + 8f * s, r.y + 41f * s, 86f * s, 20f * s), $"base <b>{game.BaseIntegrity:0}%</b>", label);
         }
 
         void DrawDragBox()
@@ -382,7 +395,7 @@ namespace DroneSandbox
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s), Objective(), label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
                     $"Drones used <b>{game.DronesUsed}</b>/{m.par}   lost <b>{game.dronesLost}</b>     {Clock(game.MissionTime)}", label);
-                if (game.IsSpotting && game.Phase != MissionPhase.Extract) DrawShelling(new Rect(r.x, r.yMax + 4f * s, r.width, 46f * s));
+                if (game.IsSpotting && game.Phase != MissionPhase.Extract) DrawShelling(new Rect(r.x, r.yMax + 4f * s, r.width, 64f * s));
             }
             else
             {
@@ -399,7 +412,22 @@ namespace DroneSandbox
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 9f * s, r.width - 20f * s, 22f * s), clock,
                     new GUIStyle(small) { alignment = TextAnchor.UpperRight, richText = true });
             }
-            if (GUI.Button(MenuButton(), "Menu", button)) game.OpenMenu();
+            bool asking = Time.unscaledTime - abandonAsked < 4f;
+            if (asking)
+            {
+                var warn = MenuButton();
+                GUI.Label(new Rect(warn.xMax + 8f * s, warn.y, 320f * s, warn.height), "<b>Abandon the operation?</b> It counts as a loss. Click again",
+                    Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleLeft, richText = true }, Hostile));
+            }
+            if (GUI.Button(MenuButton(), asking ? "<b>Abandon</b>" : "Menu", button))
+            {
+                if (!game.AbandonIsLoss || asking)
+                {
+                    abandonAsked = -100f;
+                    game.OpenMenu();
+                }
+                else abandonAsked = Time.unscaledTime;
+            }
         }
 
         void DrawLaunchBar()
@@ -533,6 +561,19 @@ namespace DroneSandbox
                 GUI.Label(r, i == 0 ? $"<b>{text}</b>" : text, style);
                 y += h + 3f * s;
             }
+        }
+
+        // A tip from the Coach (the first two Operations), just above the launch bar, gone as soon as it's done.
+        void DrawCoach()
+        {
+            if (Coach.Current == null || PhotoMode.Active) return;
+            float s = Scale, w = 620f * s, h = 44f * s;
+            var r = new Rect((Screen.width - w) / 2f, Screen.height - 128f * s - h, w, h);
+            Fill(r, new Color(PanelColor.r, PanelColor.g, PanelColor.b, 0.94f));
+            Fill(new Rect(r.x, r.y, 4f * s, r.height), Teal);
+            GUI.Label(new Rect(r.x + 14f * s, r.y, 40f * s, r.height), "<b>TIP</b>", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleLeft, richText = true }, Teal));
+            GUI.Label(new Rect(r.x + 52f * s, r.y + 2f * s, r.width - 64f * s, r.height - 4f * s), Coach.Current,
+                new GUIStyle(smallWrap) { alignment = TextAnchor.MiddleLeft, richText = true, fontSize = Mathf.RoundToInt(12f * s) });
         }
 
         // ---- Menu, briefing, results ----
@@ -670,9 +711,10 @@ namespace DroneSandbox
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
             int bombers = game.StockLeft(DroneType.Bomber);
+            string Extra(DroneType t) => game.SupportFor(t) > 0 ? $" <color=#5AADFF>(+{game.SupportFor(t)} support)</color>" : "";
             GUI.Label(new Rect(x, r.y + 188f * s, w, 22f * s),
-                $"Drones:   Scout x{game.StockLeft(DroneType.Scout)}     Strike x{game.StockLeft(DroneType.Strike)}     " +
-                $"Kamikaze x{game.StockLeft(DroneType.Kamikaze)}" + (bombers > 0 ? $"     Nightjar x{bombers}" : ""), label);
+                $"Drones:   Scout x{game.StockLeft(DroneType.Scout)}{Extra(DroneType.Scout)}     Strike x{game.StockLeft(DroneType.Strike)}{Extra(DroneType.Strike)}     " +
+                $"Kamikaze x{game.StockLeft(DroneType.Kamikaze)}{Extra(DroneType.Kamikaze)}" + (bombers > 0 ? $"     Nightjar x{bombers}" : ""), label);
             GUI.Label(new Rect(x, r.y + 212f * s, w, 22f * s),
                 $"Targets: {game.TargetsTotal}     Three stars: {m.par} drones or fewer, none lost", label);
             // The campaign's reserve: a support charge buys one more drone of a type the mission already has.
@@ -680,7 +722,7 @@ namespace DroneSandbox
             {
                 float y = r.y + 242f * s, bx = x + 236f * s;
                 int charges = Theatre.Charges;
-                GUI.Label(new Rect(x, y, 236f * s, 24f * s), $"Support charges <b>{charges}</b>/{Theatre.MaxCharges}" + (charges > 0 ? ":  spend one for" : ""), label);
+                GUI.Label(new Rect(x, y, 236f * s, 24f * s), $"Support <b>{charges}</b>/{Theatre.MaxCharges}" + (charges > 0 ? ":  spend 1 for +1 drone" : ":  none left"), label);
                 foreach (var t in new[] { DroneType.Scout, DroneType.Strike, DroneType.Kamikaze })
                 {
                     if (SandboxGame.MissionStock(m, t) <= 0) continue;
@@ -790,7 +832,7 @@ namespace DroneSandbox
                 ? $"<b>CAMPAIGN COMPLETE:</b> their front command is destroyed and the ground offensive is through.   {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost"
                 : Theatre.FinalOpen
                     ? "<b>FINAL OPERATION OPEN:</b> the front is at the Dravin lines. Destroy their front command so the ground offensive can break through."
-                    : $"Turn <b>{Theatre.Turn}</b>     progress <b>{Theatre.Standing}/{Theatre.ProgressForFinal}</b> to break the Dravin line     " +
+                    : $"Turn <b>{Theatre.Turn}</b>     progress <b>{Theatre.Standing}/{Theatre.ProgressForFinal}</b>  (a win +2, Ground +3)     " +
                       $"support charges <b>{Theatre.Charges}</b>/{Theatre.MaxCharges}     intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}     <b>{Tech.Points}</b> points";
             GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s), progress,
                 Tinted(centered, Theatre.Victory ? Friendly : Theatre.FinalOpen ? Hostile : TargetColor));
@@ -821,8 +863,8 @@ namespace DroneSandbox
                 var line = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, richText = true, wordWrap = true };
                 if (threat != null)
                     GUI.Label(new Rect(strip.x + 6f * s, strip.y + 2f * s, strip.width - 12f * s, 18f * s),
-                        $"<b>DRAVIN THREAT:</b> a build-up at {threat.sectorName}. Deal with it " +
-                        (Theatre.ThreatDue <= Theatre.Turn ? "<b>this turn, last chance</b>" : "this turn or next") + ", or the front gives ground", Tinted(line, Hostile));
+                        $"<b>DRAVIN THREAT AT {threat.sectorName.ToUpperInvariant()}</b>   " +
+                        (Theatre.ThreatDue <= Theatre.Turn ? "<b>LAST TURN</b> to deal with it" : "expires in 2 turns") + "   ignored, the front gives ground", Tinted(line, Hostile));
                 if (Theatre.News.Length > 0)
                     GUI.Label(new Rect(strip.x + 6f * s, strip.y + 20f * s, strip.width - 12f * s, 18f * s), Theatre.News, Tinted(line, TargetColor));
             }
@@ -837,6 +879,11 @@ namespace DroneSandbox
                 bool over = (mouse - c).magnitude < radius + 4f * s;
                 if (over) hovered = h;
                 HotspotBadge(c, h, done, h == chosen, over, !offered && !done && !Theatre.Victory);
+                if (Theatre.IsThreat(h))
+                {
+                    float pulse = Mathf.Repeat(Time.unscaledTime * 0.9f, 1f), size = (24f + 12f * h.heat) * s;
+                    Ring(c, size * (0.8f + 0.6f * pulse), new Color(Hostile.r, Hostile.g, Hostile.b, 0.8f * (1f - pulse)));
+                }
                 // This turn's offers say what they're for; the threat and an alerted sector say so.
                 if (offered && !h.final && !Theatre.Victory)
                 {
