@@ -22,6 +22,8 @@ namespace DroneSandbox
         public float Aim;                       // 0-1, how steady the shot is (see Mimic.WouldHit)
         public bool Announced;                  // the confirmation has been called out
         public bool Occluded;                   // trees between the feed's camera and it (held: see Tick)
+        public float JammedUntil;               // Hide and Seek: its uplink jammed while it's watched, and a while after
+        public bool WasJammed;
         public float BlockedFor, ClearFor;      // how long the line to it has been blocked, or clear
         public readonly float[] KindAt = new float[5]; // when each kind of clue last came in (the panel flashes it)
         public const float MinWatch = 8f;       // no confirmation from a glance
@@ -60,6 +62,12 @@ namespace DroneSandbox
     public static class Mimic
     {
         public const int Shots = 3;
+        public const float JamSeconds = 45f;
+
+        // Hide and Seek: a confirmed robot's uplink is jammed while a drone keeps it in view, and for 45 s after; one
+        // that isn't jammed, down or gone is spotting for the guns.
+        public static bool Jammed(Bird b) => Of(b).Confirmed && Time.time < Of(b).JammedUntil;
+        public static bool Spotting(Bird b) => b != null && b.Robot && !b.Down && !b.Escaped && !Jammed(b);
         public static Bird Tracked { get; private set; }
         static readonly Dictionary<Drone, int> shotsLeft = new Dictionary<Drone, int>();
         public static int ShotsLeftFor(Drone d) => d != null && shotsLeft.TryGetValue(d, out int n) ? n : Shots;
@@ -221,6 +229,13 @@ namespace DroneSandbox
                         Sound.Alert("warning", 1f);
                     }
                 }
+                // A jam running out on a robot left unwatched.
+                if (b.Robot)
+                {
+                    bool jammed = Jammed(b);
+                    if (e.WasJammed && !jammed && game != null && game.IsSpotting) game.ShowMessage("Jam lapsed: a spotter is back on the air", 3f);
+                    e.WasJammed = jammed;
+                }
                 if (b != Tracked) continue;
                 bool inView = false;
                 float d = 0f;
@@ -245,6 +260,7 @@ namespace DroneSandbox
                     : (d < 25f ? 1f / 1.5f : 1f / 3.5f) * (b.Hovering ? 2f : 1f) * (drift < 4f ? 1f : 0.35f) * (b.Spooked ? 0.5f : 1f);
                 e.Aim = Mathf.Clamp01(e.Aim + rate * dt);
                 if (!inView) continue;
+                if (e.Confirmed && !e.Occluded) e.JammedUntil = Time.time + JamSeconds;
                 e.Watched += dt;
                 bool zoomed = feed.Zoom >= 1.9f;
                 if (zoomed && d < 45f) e.Close += dt;
@@ -260,7 +276,8 @@ namespace DroneSandbox
                 if (e.Confirmed && !e.Announced)
                 {
                     e.Announced = true;
-                    game?.ShowMessage("CONFIRMED: a machine. Steady the aim, then right-click to fire", 3.5f);
+                    game?.ShowMessage(game.IsSpotting ? "CONFIRMED: a machine, and its uplink is jammed while you watch it. Steady the aim, then fire"
+                                                      : "CONFIRMED: a machine. Steady the aim, then right-click to fire", 3.5f);
                     Sound.Alert("contact", 1f);
                 }
             }

@@ -267,7 +267,9 @@ namespace DroneSandbox
             yield return CampaignToVictory(game);
             yield return QualityCheck(game, rts);
             yield return WildlifeShots(game, rts);
-            yield return HuntMission(game, rts);
+            yield return HuntMission(game, rts, false);
+            yield return HuntMission(game, rts, true);
+            yield return SeekIgnored(game, rts);
             yield return OcclusionCheck(game);
             yield return SectorTour(game, rts);
 
@@ -639,18 +641,19 @@ namespace DroneSandbox
         // Silent Wings, played: the bot samples the birds in the first Scout's feed one by one (10 s each, zoomed in)
         // until one shows a clue, keeps that one until it's confirmed, shoots it down, and moves on; a second Scout
         // takes over if the first runs dry. Then home. It must win, and no crow may ever be confirmed.
-        IEnumerator HuntMission(SandboxGame game, RtsController rts)
+        IEnumerator HuntMission(SandboxGame game, RtsController rts, bool spotting)
         {
-            int hunt = Missions.All.FindIndex(m => m.huntRobots > 0);
+            int hunt = Missions.All.FindIndex(m => m.huntRobots > 0 && (m.spotterShelling > 0f) == spotting);
+            string name = spotting ? "Hide and Seek" : "Silent Wings", prefix = spotting ? "6" : "5";
             if (hunt < 0)
             {
-                log.WriteLine("Silent Wings: no hunt mission");
+                log.WriteLine($"{name}: no such mission");
                 errors++;
                 yield break;
             }
             game.StartMission(hunt);
             yield return new WaitForSecondsRealtime(0.5f);
-            yield return Shot("55_hunt_briefing");
+            yield return Shot(prefix + "5_hunt_briefing");
             game.CloseBriefing();
             var scouts = new List<Drone> { game.SpawnDrone(DroneType.Scout), game.SpawnDrone(DroneType.Scout) };
             int scoutIndex = 0;
@@ -697,6 +700,10 @@ namespace DroneSandbox
                 while (Time.time - look < 20f && Vector3.Distance(scout.transform.position, next.transform.position) > 60f) yield return null;
                 look = Time.time;
                 while (Time.time - look < 12f && e.Points == 0 && game.Result == MissionResult.None) yield return null;
+                if (e.Points == 0 && next.Robot)
+                    log.WriteLine($"  {name}: gave up on a robot at {Time.time - started:F0} s: {Vector3.Distance(scout.transform.position, next.transform.position):F0} m, " +
+                                  $"watched {e.Watched:F1} s, close {e.Close:F1} s, hover {e.HoverWatched:F1} s, mingling {next.Mingling}, occluded {e.Occluded}, " +
+                                  $"tracked {Mimic.Tracked == next}, feed on the scout {DroneFeed.Instance.Source == scout}, zoom {DroneFeed.Instance.Zoom:F1}");
                 if (e.Points == 0) continue;
                 // A clue: stay on it.
                 while (!e.Confirmed && !next.Down && !next.Escaped && Time.time - look < 90f && game.Result == MissionResult.None) yield return null;
@@ -705,7 +712,7 @@ namespace DroneSandbox
                 {
                     rts.LookAt(scout.transform.position, 55f, 30f);
                     yield return new WaitForSeconds(0.4f);
-                    yield return Shot("56_hunt_confirmed_feed");
+                    yield return Shot(prefix + "6_hunt_confirmed_feed");
                     feedShot = true;
                 }
                 float aiming = Time.time;
@@ -723,10 +730,52 @@ namespace DroneSandbox
             for (float t = 0f; t < 90f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSeconds(0.5f);
             float until = Time.realtimeSinceStartup + 10f;
             while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until) yield return null;
-            yield return Shot("57_hunt_result");
-            log.WriteLine($"Silent Wings: {game.Result} ({game.ResultReason}), robots {game.TargetsDestroyed}/{game.TargetsTotal} in {hunted:F0} s, " +
-                          $"{samples} birds sampled, {misses} misses, {spooks} spooked, scouts used {scoutIndex + 1}, crows confirmed {falseConfirms}, stars {game.Stars}");
+            yield return Shot(prefix + "7_hunt_result");
+            log.WriteLine($"{name}: {game.Result} ({game.ResultReason}), robots {game.TargetsDestroyed}/{game.TargetsTotal} in {hunted:F0} s, " +
+                          $"{samples} birds sampled, {misses} misses, {spooks} spooked, scouts used {scoutIndex + 1}, crows confirmed {falseConfirms}, stars {game.Stars}" +
+                          (spotting ? $", salvos {game.Salvo}, base {game.BaseIntegrity:0}%" : ""));
             if (game.Result != MissionResult.Won || falseConfirms > 0) errors++;
+        }
+
+        // Hide and Seek with nobody hunting, at 8x: the salvos must grow by half each minute and the base fall at the
+        // sixth, about six minutes in. A shot of the base under fire at the fifth.
+        IEnumerator SeekIgnored(SandboxGame game, RtsController rts)
+        {
+            int seek = Missions.All.FindIndex(m => m.spotterShelling > 0f);
+            if (seek < 0) yield break;
+            game.StartMission(seek);
+            game.CloseBriefing();
+            rts.LookAt(game.basePosition, 85f, 30f);
+            Time.timeScale = 8f;
+            var integrity = new List<string>();
+            int seen = 0;
+            bool shot = false;
+            while (game.Result == MissionResult.None && game.MissionTime < 480f)
+            {
+                if (game.Salvo > seen)
+                {
+                    seen = game.Salvo;
+                    integrity.Add($"{game.BaseIntegrity:0}");
+                }
+                if (!shot && game.Salvo == 4 && game.NextSalvoAt - game.MissionTime < 6f)
+                {
+                    Time.timeScale = 1f;
+                    yield return new WaitForSeconds(4f);
+                    yield return Shot("63_seek_ring_and_strip");
+                    yield return new WaitForSeconds(2.6f);
+                    yield return Shot("64_seek_salvo_lands");
+                    shot = true;
+                    Time.timeScale = 8f;
+                }
+                yield return null;
+            }
+            Time.timeScale = 1f;
+            log.WriteLine($"Hide and Seek, nobody hunting: {game.Result} ({game.ResultReason}) at {game.MissionTime:F0} s, after salvo {game.Salvo}; " +
+                          $"integrity after each: {string.Join(", ", integrity)}");
+            if (game.Result != MissionResult.Failed || game.Salvo != 6) errors++;
+            float until = Time.realtimeSinceStartup + 10f;
+            while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until) yield return null;
+            yield return Shot("65_seek_lost");
         }
 
         // Does the treetop line-of-sight check (Canopy.Blocks) agree with the picture? 50 views of a 1 m sphere (a bird

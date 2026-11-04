@@ -289,6 +289,8 @@ namespace DroneSandbox
                 case MissionPhase.Recon:
                     return $"<color=#FFC15A><b>1 RECON</b></color>  Find the targets: <b>{located + game.TargetsDestroyed}/{game.TargetsTotal}</b> located" +
                            (game.ConvoyEta >= 0f ? $"  <color=#FFC15A>exits in ~{game.ConvoyEta:0} s</color>" : "");
+                case MissionPhase.Strike when game.IsSpotting:
+                    return $"<color=#FF7848><b>HIDE & SEEK</b></color>  Spotters down: <b>{game.TargetsDestroyed}/{game.TargetsTotal}</b>";
                 case MissionPhase.Strike when game.IsHunt:
                     return $"<color=#FF7848><b>HUNT</b></color>  Spy robots down: <b>{game.TargetsDestroyed}/{game.TargetsTotal}</b>";
                 case MissionPhase.Strike:

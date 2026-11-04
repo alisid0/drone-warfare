@@ -35,6 +35,7 @@ namespace DroneSandbox
         Flock mingle;                               // a robot passing as one of this flock for a while
         float mingleUntil, nextMingle;
         public Flock Flock => flock;
+        public bool Mingling => mingle != null;
         Transform wingL, wingR, handL, handR, body;
         float flap, flapRate, burstUntil, glideUntil, wingSign;
         float handLag = 0.9f, sideSkew;             // how far the wrist trails the shoulder; left-right unevenness

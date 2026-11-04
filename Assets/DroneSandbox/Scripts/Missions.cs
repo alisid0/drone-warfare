@@ -38,6 +38,7 @@ namespace DroneSandbox
         public int branchAt;
         public bool nightjar;              // a Nightjar operation: one is provided, its targets are hardened, and losing it fails
         public int huntRobots;             // > 0: a Mimic hunt - this many spy robots hide among the crows (see Mimic)
+        public float spotterShelling;      // > 0: Hide and Seek - the robots spot for the guns; a first salvo's damage per robot
 
         // The mission's own drones (the tech shop can add more; see SandboxGame.MissionStock).
         public int Stock(DroneType type)
@@ -188,6 +189,19 @@ namespace DroneSandbox
                 scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 10f, huntRobots = 2,
                 cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
                 escapeFailure = "A spy robot got away with its pictures.",
+            });
+
+            // Mimic (prototype): Hide and Seek, against the clock. The same two robots are spotting for the Dravin guns,
+            // and every minute they stay on the air the shelling of the forward base grows by half again.
+            list.Add(new Mission
+            {
+                name = "Hide and Seek",
+                briefing = "Two of the crows are spotting for the Dravin guns. Every minute they stay on the air, the shelling of the " +
+                           "forward base grows by half again: it lasts about six minutes. A confirmed robot is jammed while you keep it " +
+                           "in view (and for 45 s after); only bringing it down stops it for good. Find them as in Silent Wings.",
+                scouts = 2, strikes = 0, kamikazes = 0, par = 2, startHour = 15.5f, huntRobots = 2, spotterShelling = 3f,
+                cameraFocus = MapLayout.BasePosition + new Vector3(15f, 0f, 15f), cameraYaw = 30f, cameraDistance = 90f,
+                escapeFailure = "A spotter got away with the base's position.",
             });
 
             // An Interdiction: one of two identical tankers carries the fuel. Telling them apart takes a Scout inside

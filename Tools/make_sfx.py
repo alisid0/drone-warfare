@@ -58,6 +58,8 @@ SOUNDS = [
     ("servo", "Close continuous whine of a tiny precision electric servo motor flapping mechanical wings: thin high-pitched electronic hum with a perfectly regular rhythmic ticking, steady." + NV, 6, True, 0.85, -26, -3, False, None),
     ("robot down", "A small flying robot hit by a single precise shot: sharp crack, electrical sparks fizzing, plastic and carbon parts snapping, then light debris tumbling to the ground." + NV, 2.5, False, 0.85, -18, -1, False, None),
     ("data burst", "A short digital radio data burst from a small transmitter: quick chirping modem squeal and static click, very brief." + NV, 1, False, 0.85, -24, -2, False, None),
+    ("shell incoming", "An artillery shell incoming from far away: a rising, descending high whistle over about three seconds, getting louder and closer, ending just before impact. Outdoors, open countryside." + NV, 3.5, False, 0.85, -20, -1, True, None),
+    ("salvo incoming", "Several artillery shells whistling in overhead at once from a distance, overlapping descending shrieks growing louder, cut off right before they land. Open air." + NV, 3.5, False, 0.85, -20, -1, True, None),
 ]
 
 
@@ -70,7 +72,7 @@ MIX_LUFS = {
     "ricochet 1": -20, "ricochet 2": -20, "ricochet 3": -20, "drone down": -12,
     "motor Scout": -16, "motor Strike": -15, "motor Kamikaze": -15, "motor Bomber": -16,
     "wind": -23, "birds": -21, "crickets": -20,
-    "crow 1": -20, "crow 2": -20, "crow 3": -19, "wings": -24, "servo": -24, "robot down": -14, "data burst": -20,
+    "crow 1": -20, "crow 2": -20, "crow 3": -19, "wings": -24, "servo": -24, "robot down": -14, "data burst": -20, "shell incoming": -16, "salvo incoming": -16,
 }
 
 

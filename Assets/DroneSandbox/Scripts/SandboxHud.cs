@@ -334,6 +334,31 @@ namespace DroneSandbox
                 GUI.Label(new Rect(m.x - 70f * Scale, m.y - 10f * Scale, 140f * Scale, 20f * Scale), "<b>SEARCH AREA</b>", targetLabel);
         }
 
+        // Hide and Seek: when the next salvo lands, how hard (the robots still spotting), and the base's integrity.
+        void DrawShelling(Rect r)
+        {
+            float s = Scale;
+            Fill(r, PanelColor);
+            float left = Mathf.Max(0f, game.NextSalvoAt - game.MissionTime);
+            int spotters = game.Spotters;
+            bool close = left < 15f && spotters > 0;
+            Color warn = close ? Hostile : DravinOrange;
+            if (close && Mathf.Repeat(Time.unscaledTime, 0.8f) < 0.4f) Fill(r, new Color(Hostile.r, Hostile.g, Hostile.b, 0.18f));
+            GUI.Label(new Rect(r.x + 10f * s, r.y + 4f * s, r.width - 20f * s, 20f * s),
+                $"<b>NEXT SALVO {Clock(left)}</b>   " + (spotters > 0 ? $"expected <b>{game.ExpectedDamage:0}</b>   {spotters} spotting" : "no spotter on the air"),
+                Tinted(label, spotters > 0 ? warn : Teal));
+            var bar = new Rect(r.x + 10f * s, r.y + 29f * s, r.width - 80f * s, 8f * s);
+            Fill(bar, new Color(1f, 1f, 1f, 0.12f));
+            float integrity = game.BaseIntegrity / 100f;
+            Fill(new Rect(bar.x, bar.y, bar.width * integrity, bar.height), integrity > 0.5f ? Teal : integrity > 0.25f ? DravinOrange : Hostile);
+            if (spotters > 0)
+            {
+                float after = Mathf.Max(0f, game.BaseIntegrity - game.ExpectedDamage) / 100f;
+                Fill(new Rect(bar.x + bar.width * after, bar.y, bar.width * (integrity - after), bar.height), new Color(Hostile.r, Hostile.g, Hostile.b, close ? 0.9f : 0.5f));
+            }
+            GUI.Label(new Rect(bar.xMax + 8f * s, r.y + 23f * s, 70f * s, 20f * s), $"base <b>{game.BaseIntegrity:0}%</b>", label);
+        }
+
         void DrawDragBox()
         {
             if (!rts.IsDragging) return;
@@ -357,6 +382,7 @@ namespace DroneSandbox
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s), Objective(), label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
                     $"Drones used <b>{game.DronesUsed}</b>/{m.par}   lost <b>{game.dronesLost}</b>     {Clock(game.MissionTime)}", label);
+                if (game.IsSpotting && game.Phase != MissionPhase.Extract) DrawShelling(new Rect(r.x, r.yMax + 4f * s, r.width, 46f * s));
             }
             else
             {

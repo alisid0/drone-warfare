@@ -133,6 +133,12 @@ namespace DroneSandbox
 
         void DrawThreats()
         {
+            // Hide and Seek: in the last 15 s before a directed salvo, the base it will land on is ringed in red.
+            if (game.IsSpotting && game.Phase != MissionPhase.Extract && game.Spotters > 0 && game.NextSalvoAt - game.MissionTime < 15f)
+            {
+                float pulse = 0.75f + 0.25f * Mathf.Sin(Time.unscaledTime * 6f);
+                GroundLoop(game.basePosition, SandboxGame.ShellRadius, new Color(Hostile.r, Hostile.g, Hostile.b, pulse), 4.5f * Scale);
+            }
             float s = Scale;
             foreach (var e in game.enemies)
             {

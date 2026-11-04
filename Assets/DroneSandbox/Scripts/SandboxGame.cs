@@ -69,6 +69,7 @@ namespace DroneSandbox
         float escortSweepUntil;
         public bool IsShadow => Mode == GameMode.Mission && Mission != null && Mission.shadowSeconds > 0f;
         public bool IsHunt => Mode == GameMode.Mission && Mission != null && Mission.huntRobots > 0;
+        public bool IsSpotting => IsHunt && Mission.spotterShelling > 0f;
         string DoneText => IsShadow ? "Column watched." : IsHunt ? "Spy robots down." : "All targets destroyed.";
         // Drones don't open fire on their own (a Shadow mission: one stray burst at the column ends it).
         public static bool WeaponsTight => Instance != null && Instance.IsShadow;
@@ -571,6 +572,10 @@ namespace DroneSandbox
             }
             TargetsTotal = Mission.huntRobots;
             Phase = MissionPhase.Strike;
+            BaseIntegrity = 100f;
+            Salvo = 0;
+            NextSalvoAt = SalvoInterval;
+            warned = whistled = false;
         }
 
         // The hunt's rules: every robot down and it's time to go home; one that gets away fails the mission; out of
@@ -589,10 +594,85 @@ namespace DroneSandbox
                 BeginExtract();
                 return;
             }
+            if (IsSpotting)
+            {
+                Shelling();
+                if (Result != MissionResult.None) return;
+            }
             bool armed = false;
             foreach (var d in drones) if (d != null && Mimic.ShotsLeftFor(d) > 0) armed = true;
             foreach (int left in stock) armed |= left > 0;
             if (!armed) Finish(false, "Out of shots and drones with spy robots still flying.");
+        }
+
+        // ---- Hide and Seek: the robots spot for the Dravin guns ----
+
+        public const float SalvoInterval = 60f, ShellRadius = 35f;
+        public float BaseIntegrity { get; private set; } = 100f;
+        public int Salvo { get; private set; }               // salvos fired so far
+        public float NextSalvoAt { get; private set; }       // mission time of the next one
+        bool warned, whistled;
+        float nextSmoke;
+
+        // Salvo n's damage for each robot spotting for it: half as much again every minute (3, 4.5, 6.8, 10, 15, 23),
+        // so with both robots on the air the base falls at the sixth.
+        public float SalvoDamage(int n) => Mission.spotterShelling * Mathf.Pow(1.5f, n - 1);
+        public int Spotters => Wildlife.Birds.FindAll(Mimic.Spotting).Count;
+        public float ExpectedDamage => SalvoDamage(Salvo + 1) * Spotters;
+
+        // Once a minute the guns shell the forward base, as hard as the robots still on the air can direct them: a
+        // warning 15 s before (with the base ringed on the map), the shells heard coming in the last few seconds,
+        // then impacts across the base. Below half, the base smokes.
+        void Shelling()
+        {
+            float left = NextSalvoAt - MissionTime;
+            if (!warned && left < 15f && Spotters > 0)
+            {
+                warned = true;
+                ShowMessage($"INCOMING in 15 s: expected damage {ExpectedDamage:0}. Find the spotters, or keep them jammed", 4f);
+                Sound.Alert("warning", 1f);
+            }
+            if (!whistled && left < 3.4f)
+            {
+                whistled = true;
+                Sound.At(Salvo >= 2 ? "salvo incoming" : "shell incoming", basePosition + Vector3.up * 25f, 1f, 0.05f);
+            }
+            if (BaseIntegrity < 50f && Time.time > nextSmoke)
+            {
+                nextSmoke = Time.time + 0.2f;
+                float severity = 1f - BaseIntegrity / 50f;
+                foreach (var at in new[] { new Vector3(-8f, 2f, 6f), new Vector3(10f, 2f, -4f), new Vector3(2f, 2f, 14f) })
+                    if (Random.value < 0.5f + severity * 0.5f) Effects.DamageSmoke(basePosition + at, severity);
+            }
+            if (left > 0f) return;
+            Salvo++;
+            NextSalvoAt += SalvoInterval;
+            warned = whistled = false;
+            float damage = SalvoDamage(Salvo) * Spotters;
+            if (damage <= 0f)
+            {
+                ShowMessage("The salvo falls wide: no spotter on the air to direct it", 3f);
+                StartCoroutine(Impacts(3, false));
+                return;
+            }
+            BaseIntegrity = Mathf.Max(0f, BaseIntegrity - damage);
+            StartCoroutine(Impacts(Mathf.Min(2 + Salvo, 8), true));
+            ShowMessage($"Salvo {Salvo}: the base takes {damage:0}. Integrity {BaseIntegrity:0}%", 3.5f);
+            if (BaseIntegrity <= 0f) Finish(false, "The forward base is out of action: the spotters had it ranged.");
+        }
+
+        // Shells landing a few tenths of a second apart: across the base when they're directed, wide of it when not.
+        IEnumerator Impacts(int shells, bool onTarget)
+        {
+            for (int i = 0; i < shells; i++)
+            {
+                Vector2 off = Random.insideUnitCircle * ShellRadius;
+                if (!onTarget) off = (off.sqrMagnitude > 1f ? off.normalized : Vector2.up) * Random.Range(ShellRadius * 1.5f, ShellRadius * 3f);
+                var at = basePosition + new Vector3(off.x, 0f, off.y);
+                at.y = Ground.HeightAt(at);
+                Effects.Explosion(at, 6f);
+                yield return new WaitForSeconds(Random.Range(0.12f, 0.45f));
+            }
         }
 
         // A hidden enemy shows itself once any of your drones flies within SpotDistance of it.
