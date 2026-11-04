@@ -214,13 +214,14 @@ namespace DroneSandbox
             for (int edge = 0; edge < 4; edge++)
             {
                 if (rng.NextDouble() > (edge % 2 == 0 ? 0.35 : 0.2)) continue;
-                Vector2 normal = edge switch { 0 => plot.Across, 1 => plot.along, 2 => -plot.Across, _ => -plot.along };
-                Vector2 tangent = new Vector2(-normal.y, normal.x);
-                float halfSpan = edge % 2 == 0 ? plot.halfLength : plot.halfWidth;
-                float offset = (edge % 2 == 0 ? plot.halfWidth : plot.halfLength) + 1.8f;
+                bool side = edge % 2 == 0; // a long side, or an end
+                float sign = edge < 2 ? 1f : -1f;
+                Vector2 outward = side ? plot.Across * sign : plot.along * sign;
+                float halfSpan = side ? plot.halfLength : plot.halfWidth;
                 for (float s = -halfSpan; s <= halfSpan; s += Range(rng, 2.4f, 3.4f))
                 {
-                    Vector2 p = plot.center + normal * offset + tangent * s + Random2(rng) * 0.5f;
+                    Vector2 rim = side ? plot.Point(s, sign * plot.halfWidth) : plot.Point(sign * plot.halfLength, s);
+                    Vector2 p = rim + outward * 1.8f + Random2(rng) * 0.5f;
                     if (!HedgeSpot(p)) continue;
                     var pos = new Vector3(p.x, 0f, p.y);
                     if (rng.NextDouble() < 0.12)

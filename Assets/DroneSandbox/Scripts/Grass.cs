@@ -42,9 +42,10 @@ namespace DroneSandbox
                     float x = -size / 2f + (xi + 0.5f) * cell, z = -size / 2f + (zi + 0.5f) * cell;
                     var p = new Vector2(x, z);
                     // Reeds in beds along the lake's edge and the riverbanks.
-                    float lake = MapLayout.LakeDistance(x, z), bank = river.Distance(x, z) - MapLayout.RiverHalfWidth;
+                    float lake = MapLayout.LakeDistance(x, z), bank = river.Distance(x, z) - MapLayout.RiverWidthAt(x, z);
                     bool waterside = (lake > -3f && lake < 1f) || (bank > -1.5f && bank < 1f && !MapLayout.InGorge(p, 0f));
-                    if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > 0.5f && !MapLayout.NearDam(p, 2f))
+                    bool pond = lake < 1f && MapLayout.ReservoirDistance(x, z) > lake + 0.01f; // ponds are mostly ringed with reeds
+                    if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > (pond ? 0.32f : 0.5f) && !MapLayout.NearDam(p, 2f))
                         reeds[zi, xi] = Mathf.PerlinNoise(x * 0.4f, z * 0.4f) > 0.45f ? 2 : 1;
                     if (data.GetSteepness((xi + 0.5f) / Resolution, (zi + 0.5f) / Resolution) > 30f) continue;
                     if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f) continue;

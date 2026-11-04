@@ -163,9 +163,10 @@ namespace DroneSandbox
             surface.smoothnessFadeStart = 150f;
             surface.smoothnessFadeDistance = 800f;
             // Brighter in colour than the reservoir's: seen from above, a basin of clear water otherwise reads black.
-            surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.24f, 0.36f, 0.22f);
-            surface.scatteringColor = lakes ? new Color(0.05f, 0.3f, 0.32f) : new Color(0.12f, 0.2f, 0.1f);
-            surface.absorptionDistance = lakes ? 9f : 3f;
+            // Pools are murky, olive-brown with silt and weed, as farm and marsh ponds look in aerial photographs.
+            surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.33f, 0.4f, 0.24f);
+            surface.scatteringColor = lakes ? new Color(0.05f, 0.3f, 0.32f) : new Color(0.22f, 0.28f, 0.14f);
+            surface.absorptionDistance = lakes ? 9f : 1.6f;
         }
 
         // A 2 m grid over every pool, at that pool's own level, kept wherever it's near the water.
@@ -180,7 +181,7 @@ namespace DroneSandbox
             for (int k = 0; k < ponds.Count; k++)
             {
                 var pond = ponds[k];
-                float reach = pond.radius * 1.35f + 4f;
+                float reach = pond.radius * 2f + 4f; // stretched ponds reach further along their axis
                 int n = Mathf.CeilToInt(reach * 2f / cell);
                 var index = new Dictionary<int, int>();
                 int Vertex(int i, int j)

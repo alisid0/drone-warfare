@@ -194,14 +194,22 @@ namespace DroneSandbox
                 float radius = isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f);
                 float spacing = isOuter ? 5.6f : 4.6f;
                 int seed = rng.Next();
-                for (float x = -radius; x <= radius; x += spacing)
+                // Each wood is stretched along its own axis and lopsided.
+                float axis = (seed % 360) * Mathf.Deg2Rad, stretch = 1f + (seed / 360 % 100) / 100f * 1.4f;
+                float cos = Mathf.Cos(axis), sin = Mathf.Sin(axis), reach = radius * 1.1f * Mathf.Sqrt(stretch) + 7f;
+                for (float x = -reach; x <= reach; x += spacing)
                 {
-                    for (float z = -radius; z <= radius; z += spacing)
+                    for (float z = -reach; z <= reach; z += spacing)
                     {
                         Vector2 p = c + new Vector2(x, z) + new Vector2(Range(rng, -1.6f, 1.6f), Range(rng, -1.6f, 1.6f));
-                        // Ragged edges: the radius wobbles with direction.
-                        float wobble = 0.75f + 0.35f * Mathf.PerlinNoise(seed % 1000 + Mathf.Atan2(z, x) * 1.3f, 0.5f);
-                        if (new Vector2(x, z).magnitude > radius * wobble || !MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
+                        float du = (x * cos + z * sin) / Mathf.Sqrt(stretch), dv = (z * cos - x * sin) * Mathf.Sqrt(stretch);
+                        float angle = Mathf.Atan2(dv, du), r = Mathf.Sqrt(du * du + dv * dv);
+                        float edge = radius * (0.7f + 0.22f * Mathf.PerlinNoise(seed % 1000 + angle * 1.6f, 0.5f)
+                                                    + 0.18f * Mathf.PerlinNoise(seed % 997 + angle * 4.3f, 3.7f));
+                        // A soft edge: past it the trees thin out over 7 m, and there are glades inside.
+                        if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / 7f) continue;
+                        if (r > edge + 7f || Mathf.PerlinNoise(p.x * 0.07f + seed % 211, p.y * 0.07f + 5f) < 0.28f) continue;
+                        if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
                         Place(PickTree(rng, isOuter), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
                         Undergrowth.NoteTree(p);
                     }

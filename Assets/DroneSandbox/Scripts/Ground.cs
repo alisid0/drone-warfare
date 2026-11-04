@@ -174,15 +174,16 @@ namespace DroneSandbox
                     float d = river.Query(x, z, out float water, out _);
                     if (d > hw + 45f || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
                     float h = world[zi, xi];
-                    if (d <= hw)
+                    float wet = MapLayout.RiverWidthAt(x, z); // the water's own width here, inside the full channel
+                    if (d <= wet)
                     {
-                        float k = d / hw;
+                        float k = d / wet;
                         h = Mathf.Min(h, water - 0.3f - 1.5f * (1f - k * k)); // river bed
                     }
                     else
                     {
-                        h = Mathf.Min(h, water + 0.3f + (d - hw) * 0.5f); // banks no steeper than this
-                        if (d < hw + 2.5f) h = Mathf.Max(h, water + 0.12f); // and never below the water right at the edge
+                        h = Mathf.Min(h, water + 0.3f + (d - wet) * 0.5f); // banks no steeper than this
+                        if (d < wet + 2.5f) h = Mathf.Max(h, water + 0.12f); // and never below the water right at the edge
                     }
                     world[zi, xi] = h;
                 }
@@ -518,8 +519,14 @@ namespace DroneSandbox
                     if (lake < 3f)
                     {
                         float shore = 1f - Mathf.SmoothStep(0f, 1f, (lake - 0.5f) / 2.5f);
-                        rock = Mathf.Max(rock, shore * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.15f + 50f, z * 0.15f) * 1.6f - 0.3f));
-                        dirt = Mathf.Max(dirt, shore);
+                        if (MapLayout.ReservoirDistance(x, z) <= lake + 0.01f)
+                        {
+                            rock = Mathf.Max(rock, shore * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.15f + 50f, z * 0.15f) * 1.6f - 0.3f));
+                            dirt = Mathf.Max(dirt, shore);
+                        }
+                        // A pond's edge is lush grass and reeds, trodden to mud only in patches (where things come to
+                        // drink), not a ring of bare earth.
+                        else dirt = Mathf.Max(dirt, shore * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.18f + 7f, z * 0.18f + 3f) - 0.5f) * 4f));
                     }
                     // A few worn patches.
                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
