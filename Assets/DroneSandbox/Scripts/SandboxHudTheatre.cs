@@ -55,6 +55,7 @@ namespace DroneSandbox
                 case Situation.EngineerColumn: case Situation.TroopRotation:
                     return "MOVING COLUMN: catch it before it's gone";
                 case Situation.DecoyField:
+                case Situation.IdentificationHunt:
                     return "DECEPTION: decoys among the real thing";
                 default:
                     return "LOGISTICS: depots and parked vehicles";

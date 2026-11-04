@@ -11,6 +11,7 @@ namespace DroneSandbox
         CommandPost, RepairYard, FuelDepot, RadarStation, ArmouredColumn, RocketBattery, TankLaager, ObservationPost,
         MortarLine, NightResupply, LogisticsHub, RiverFerry, EngineerColumn, DecoyField, RailSupply, AirfieldStrike,
         RetreatingColumn, DugInTanks, AirDefenceBelt, WoodlandDump, CommandConvoy, Breakthrough,
+        IdentificationHunt,
     }
 
     public enum Daylight { Dawn, Day, Dusk, Night }
@@ -25,6 +26,7 @@ namespace DroneSandbox
             "Tank Laager", "Observation Post", "Mortar Line", "Night Resupply", "Logistics Hub", "River Ferry", "Engineer Column",
             "Decoy Field", "Rail Supply", "Airfield Strike", "Retreating Column", "Dug-in Tanks", "Air Defence Belt",
             "Supply Dump in the Woods", "Command Convoy", "Breakthrough",
+            "Identification Hunt",
         };
 
         public static string Name(Situation s) => Names[(int)s];
@@ -44,6 +46,9 @@ namespace DroneSandbox
                     return (t.features & SectorFeature.Rail) != 0;
                 case Situation.AirfieldStrike:
                     return (t.features & SectorFeature.Airstrip) != 0;
+                case Situation.IdentificationHunt:
+                    return t.roads != RoadStyle.Tracks || t.villages >= 2
+                        || (t.features & (SectorFeature.Industry | SectorFeature.Rail | SectorFeature.Airstrip)) != 0;
                 default:
                     return true;
             }
@@ -369,6 +374,36 @@ namespace DroneSandbox
                             "The attack broke through.");
                         break;
                     }
+                    case Situation.IdentificationHunt:
+                    {
+                        Vector2 c = Open(RoadNear(EnemySide(15f, 40f)), 18f);
+                        int count = rng.Next(3, 6), targets = rng.Next(1, 3), remaining = targets;
+                        // Keep each group all empties or all inflatables: the recon messages distinguish them per mission.
+                        bool empty = rng.Next(2) == 0;
+                        EnemyType type = empty ? EnemyType.Tanker : EnemyType.Truck;
+                        for (int i = 0; i < count; i++)
+                        {
+                            Vector2 p = Open(c, 18f);
+                            // Choose without replacement, so neither the first contact nor the parking order gives it away.
+                            bool target = rng.Next(count - i) < remaining;
+                            if (target) remaining--;
+                            m.units.Add(new MissionUnit
+                            {
+                                type = type, position = V3(p), yaw = R(0f, 360f), target = target,
+                                decoy = !target, empty = !target && empty,
+                            });
+                        }
+                        // One hit per target, plus one spare for a mistaken strike; no AA interrupts the observation.
+                        Stock(2, 0, targets + 1, targets + 1);
+                        m.contactRadius = 20f;
+                        string vehicles = empty ? "fuel tankers" : "supply trucks";
+                        string real = targets == 1 ? "one is a real target" : "two are real targets";
+                        string falseTargets = empty ? "empty" : "inflatable decoys";
+                        Brief($"{count} similar Dravin {vehicles} are parked together beside the road, but only {real}; the rest are {falseTargets}. " +
+                            "Fly a Scout over the contact circles and watch each vehicle for a couple of seconds to confirm which ones are real before striking. " +
+                            "Spend Kamikazes only on the real targets, then bring the Scouts home. You have one spare Kamikaze.");
+                        break;
+                    }
                 }
                 Camera();
                 return m;
@@ -414,7 +449,8 @@ namespace DroneSandbox
                 int n = 0;
                 foreach (var u in m.units)
                 {
-                    if (!u.target) continue;
+                    // Frame the whole hunt group, so the opening camera does not point out the real targets.
+                    if (!u.target && (situation != Situation.IdentificationHunt || !u.decoy)) continue;
                     Vector3 p = u.convoy > 0 && m.convoyRoute != null ? m.convoyRoute[Mathf.Min(m.convoyRoute.Count - 1, 24)] : u.position;
                     if (u.type == EnemyType.Command) p = plan.enemyHqPosition;
                     sum += p;
@@ -473,8 +509,9 @@ namespace DroneSandbox
                 if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 1f) return false;
                 if (MapLayout.OnWorks(p, 0f) || Vector2.Distance(p, basePos) < MapLayout.BaseRadius + 25f) return false;
                 if (Undergrowth.UnderTrees(p, 7f)) return false; // seen from a drone, not lost under a canopy
+                float spacing = situation == Situation.IdentificationHunt ? 12f : 5f; // inspect look-alikes separately, outside one blast
                 foreach (var u in m.units) // and not parked on top of another unit
-                    if ((new Vector2(u.position.x, u.position.z) - p).sqrMagnitude < 5f * 5f) return false;
+                    if ((new Vector2(u.position.x, u.position.z) - p).sqrMagnitude < spacing * spacing) return false;
                 return !MapLayout.NearFlatSite(p, 1f) || Vector2.Distance(p, hqPos) < MapLayout.HqRadius + 25f;
             }
 
