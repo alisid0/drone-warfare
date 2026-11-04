@@ -83,6 +83,10 @@ namespace DroneSandbox
                 Vector3 toTarget = (Source.AttackTarget.AimPoint - eye).normalized;
                 look = Source.IsKamikaze ? toTarget : Vector3.Slerp(look, toTarget, 0.7f).normalized;
             }
+            // A tracked bird (Mimic): the gimbal stays on it while it's in sight.
+            var bird = Mimic.Tracked;
+            if (bird != null && !bird.Down && Vector3.Distance(eye, bird.transform.position) < 150f)
+                look = (bird.transform.position - eye).normalized;
             float fov = Source.type == DroneType.Scout ? 75f : Source.type == DroneType.Kamikaze ? 85f : Source.type == DroneType.Strike ? 60f : 70f;
             feed.fieldOfView = fov / Mathf.Clamp(Zoom, 1f, 3f);
             Quaternion want = Quaternion.LookRotation(look, Vector3.up);

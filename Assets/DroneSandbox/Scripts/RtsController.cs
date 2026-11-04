@@ -191,6 +191,19 @@ namespace DroneSandbox
             bool overHud = hud.IsPointerOverHud(mouse);
             // Over the drone feed, what's under the cursor in the drone's picture counts as hovered.
             HoveredEnemy = overHud ? hud.FeedPick(mouse) : PickEnemy(mouse);
+            // A bird in the feed (Mimic): a left click tracks it, a right click shadows it or, once it's confirmed as
+            // a machine, fires on it.
+            Bird bird = overHud && HoveredEnemy == null ? hud.FeedPickBird(mouse) : null;
+            if (bird != null && GameInput.LeftDown)
+            {
+                Mimic.Track(bird);
+                return;
+            }
+            if (bird != null && GameInput.RightDown && selected.Count > 0)
+            {
+                Mimic.Act(bird, selected[0]);
+                return;
+            }
             // A left click on something in the feed swings the map camera onto it.
             if (GameInput.LeftDown && overHud && HoveredEnemy != null)
             {

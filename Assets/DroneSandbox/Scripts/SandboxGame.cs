@@ -68,6 +68,8 @@ namespace DroneSandbox
         public float ShadowNoticeRange => (Time.time < escortSweepUntil ? 34f : 26f) * Recon.WeatherFactor;
         float escortSweepUntil;
         public bool IsShadow => Mode == GameMode.Mission && Mission != null && Mission.shadowSeconds > 0f;
+        public bool IsHunt => Mode == GameMode.Mission && Mission != null && Mission.huntRobots > 0;
+        string DoneText => IsShadow ? "Column watched." : IsHunt ? "Spy robots down." : "All targets destroyed.";
         // Drones don't open fire on their own (a Shadow mission: one stray burst at the column ends it).
         public static bool WeaponsTight => Instance != null && Instance.IsShadow;
 
@@ -253,6 +255,7 @@ namespace DroneSandbox
             BriefingOpen = true;
             Time.timeScale = 0f;
             rts.LookAt(Mission.cameraFocus, Mission.cameraDistance, Mission.cameraYaw);
+            if (IsHunt) SetUpHunt();
         }
 
         public void CloseBriefing()
@@ -383,7 +386,7 @@ namespace DroneSandbox
         // A mission's own drones plus what the tech shop adds: the supply contract's extra drones and the Nightjar.
         public static int MissionStock(Mission mission, DroneType type)
         {
-            if (mission.shadowSeconds > 0f && type != DroneType.Scout) return 0; // a Shadow mission is eyes only
+            if ((mission.shadowSeconds > 0f || mission.huntRobots > 0) && type != DroneType.Scout) return 0; // Shadow and hunt missions are Scouts only
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) || mission.nightjar ? 1 : 0;
             return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + (type == DroneType.Kamikaze ? Theatre.SupplyBonus : 0);
         }
@@ -398,12 +401,14 @@ namespace DroneSandbox
 
         static int BestStars(string key) => Progress.Get(key + ".stars");
 
-        public static bool Unlocked(int missionIndex) => missionIndex == 0 || BestStars(missionIndex - 1) > 0;
+        public static bool Unlocked(int missionIndex) => missionIndex == 0 || BestStars(missionIndex - 1) > 0
+            || Missions.All[missionIndex].huntRobots > 0; // the Mimic prototype is open from the start
 
         // Removes every unit, shot and effect, and resets the counters, ready for a new mode.
         void ClearUnits()
         {
             StopAllCoroutines();
+            Wildlife.Clear();
             foreach (var d in drones) if (d != null) Destroy(d.gameObject);
             foreach (var e in enemies) if (e != null) Destroy(e.gameObject);
             drones.Clear();
@@ -470,6 +475,11 @@ namespace DroneSandbox
             SpotHidden();
             WatchBranch();
             WatchConvoy();
+            if (IsHunt && Phase != MissionPhase.Extract)
+            {
+                Hunt();
+                return;
+            }
             if (IsShadow && Phase != MissionPhase.Extract)
             {
                 bool watched = false, spotted = false;
@@ -522,7 +532,7 @@ namespace DroneSandbox
             if (Phase == MissionPhase.Extract)
             {
                 int home = CountHome(out int flying);
-                string done = IsShadow ? "Column watched." : "All targets destroyed.";
+                string done = DoneText;
                 // A Shadow mission's intel has to come home with a Scout.
                 if (IsShadow && home == 0 && (flying == 0 || MissionTime >= ExtractEndsAt)) Finish(false, "No scout got the intel home.");
                 else if (home >= flying) Finish(true, flying > 0 ? done + " Every drone home." : done);
@@ -532,6 +542,57 @@ namespace DroneSandbox
             bool dronesLeft = drones.Count > 0;
             foreach (int left in stock) dronesLeft |= left > 0;
             if (!dronesLeft && TargetsDestroyed < TargetsTotal) Finish(false, IsShadow ? "Every scout lost - the column went on unwatched." : "Out of drones.");
+        }
+
+        // ---- Mimic hunts ----
+
+        // Crows over the base and the village road, and the spy robots among them, each flying its loop round what
+        // it's watching: one 55 m out from the base, the next over the village, the next between.
+        void SetUpHunt()
+        {
+            Wildlife.Clear();
+            Vector3 b = basePosition;
+            Vector3 village = MapLayout.Villages.Count > 0 ? new Vector3(MapLayout.Villages[0].x, 0f, MapLayout.Villages[0].y) : b + new Vector3(70f, 0f, 70f);
+            Vector3 toVillage = village - b;
+            toVillage.y = 0f;
+            toVillage = toVillage.sqrMagnitude > 1f ? toVillage.normalized : Vector3.forward;
+            Vector3 overlook = b + toVillage * 55f + Vector3.Cross(Vector3.up, toVillage) * 25f;
+            Wildlife.AddFlock(b + new Vector3(35f, 0f, 25f), 30f, 4, 101);
+            Wildlife.AddFlock(overlook, 30f, 2, 104);
+            Wildlife.AddFlock(village + new Vector3(-20f, 0f, 10f), 30f, 3, 102);
+            Wildlife.AddFlock((b + village) / 2f, 35f, 3, 103);
+            Vector3[] posts = { overlook, village, (b + village) / 2f };
+            for (int k = 0; k < Mission.huntRobots; k++)
+            {
+                Vector3 c = posts[k % posts.Length];
+                float r = 26f + 4f * k;
+                var route = new List<Vector3> { c + new Vector3(-r, 0f, r * 0.8f), c + new Vector3(r, 0f, r), c + new Vector3(r * 0.9f, 0f, -r), c + new Vector3(-r, 0f, -r * 0.7f) };
+                Wildlife.AddRobot(route, 11f + 2f * k, 201 + k); // crow speed, and slower than a Scout
+            }
+            TargetsTotal = Mission.huntRobots;
+            Phase = MissionPhase.Strike;
+        }
+
+        // The hunt's rules: every robot down and it's time to go home; one that gets away fails the mission; out of
+        // drones or out of shots with robots still flying fails it too.
+        void Hunt()
+        {
+            var robots = Wildlife.Birds.FindAll(r => r != null && r.Robot);
+            if (robots.Exists(r => r.Escaped))
+            {
+                Finish(false, Mission.escapeFailure);
+                return;
+            }
+            TargetsDestroyed = robots.FindAll(r => r.Down).Count;
+            if (robots.Count > 0 && TargetsDestroyed >= robots.Count)
+            {
+                BeginExtract();
+                return;
+            }
+            bool armed = false;
+            foreach (var d in drones) if (d != null && Mimic.ShotsLeftFor(d) > 0) armed = true;
+            foreach (int left in stock) armed |= left > 0;
+            if (!armed) Finish(false, "Out of shots and drones with spy robots still flying.");
         }
 
         // A hidden enemy shows itself once any of your drones flies within SpotDistance of it.
@@ -720,12 +781,13 @@ namespace DroneSandbox
             CountHome(out int flying);
             if (flying == 0)
             {
-                Finish(true, IsShadow ? "Column watched." : "All targets destroyed.");
+                Finish(true, DoneText);
                 return;
             }
             Phase = MissionPhase.Extract;
             ExtractEndsAt = MissionTime + ExtractSeconds;
             ShowMessage(IsShadow ? $"EXTRACT: we have what we need. Bring your drones home (B) within {ExtractSeconds:0} s."
+                : IsHunt ? $"EXTRACT: the spy robots are down. Bring your drones home (B) within {ExtractSeconds:0} s."
                 : $"EXTRACT: targets destroyed. Bring your drones home (B) within {ExtractSeconds:0} s.", 5f);
             Sound.Alert("objective", 0.3f);
         }

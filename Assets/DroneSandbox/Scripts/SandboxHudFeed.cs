@@ -43,6 +43,32 @@ namespace DroneSandbox
             return best;
         }
 
+        // The bird nearest the cursor in the drone's picture, if the cursor is over the feed (Mimic).
+        public Bird FeedPickBird(Vector2 screenPosition)
+        {
+            var f = DroneFeed.Instance;
+            if (!FeedShowing || f.Source == null || f.FeedCamera == null) return null;
+            Rect r = FeedPanel();
+            var g = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+            if (!r.Contains(g)) return null;
+            float u = (g.x - r.x) / r.width, v = 1f - (g.y - r.y) / r.height;
+            Bird best = null;
+            float bestPixels = 26f * Scale;
+            foreach (var b in Wildlife.Birds)
+            {
+                if (b == null || b.Down || !b.gameObject.activeInHierarchy) continue;
+                Vector3 at = f.FeedCamera.WorldToViewportPoint(b.transform.position);
+                if (at.z <= 0f || at.z > 150f) continue;
+                float pixels = new Vector2((at.x - u) * r.width, (at.y - v) * r.height).magnitude;
+                if (pixels < bestPixels)
+                {
+                    best = b;
+                    bestPixels = pixels;
+                }
+            }
+            return best;
+        }
+
         bool FeedShowing
         {
             get
@@ -112,6 +138,31 @@ namespace DroneSandbox
                 }
             }
 
+            // Birds in the picture (Mimic): a faint mark on each within 150 m, the tracked one bracketed with what
+            // we know of it.
+            if (cam != null && Mimic.Active)
+            {
+                foreach (var b in Wildlife.Birds)
+                {
+                    if (b == null || b.Down || !b.gameObject.activeInHierarchy) continue;
+                    Vector3 v = cam.WorldToViewportPoint(b.transform.position);
+                    if (v.z <= 0f || v.z > 150f || v.x < 0.03f || v.x > 0.97f || v.y < 0.06f || v.y > 0.97f) continue;
+                    var p = new Vector2(r.x + v.x * r.width, r.y + (1f - v.y) * r.height);
+                    var ev = Mimic.Of(b);
+                    if (b != Mimic.Tracked)
+                    {
+                        Dot(p, 2f * s, ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : new Color(1f, 1f, 1f, 0.6f));
+                        continue;
+                    }
+                    Color colour = ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : Color.white;
+                    float half = Mathf.Clamp(60f / Mathf.Max(4f, v.z), 7f, 26f) * s;
+                    Brackets(p, half, colour, Mathf.Max(1f, s));
+                    var tag = Tinted(small, colour);
+                    tag.fontSize = Mathf.RoundToInt(9f * s);
+                    GUI.Label(new Rect(p.x - half, p.y - half - 13f * s, 200f * s, 12f * s), $"<b>{ev.Status}</b>  {v.z:0} m", tag);
+                }
+            }
+
             // A crosshair, and the corners of the frame.
             Vector2 c = r.center;
             var line = new Color(1f, 1f, 1f, 0.7f);
@@ -140,6 +191,76 @@ namespace DroneSandbox
             {
                 var warn = Tinted(centered, Hostile);
                 GUI.Label(new Rect(r.x, r.y + 6f * s, r.width, 18f * s), "<b>UNDER FIRE</b>", warn);
+            }
+
+            // The hunt (Mimic): above the feed, what we know of the tracked contact at a glance: how sure we are, which
+            // kinds of evidence are in (lit), how long it's been watched, and once it's confirmed, how steady the aim is.
+            if (Mimic.Active)
+            {
+                var tracked = Mimic.Tracked;
+                var ev = tracked != null ? Mimic.Of(tracked) : null;
+                var panel = new Rect(r.x - 3f * s, r.y - 80f * s, r.width + 6f * s, 58f * s);
+                Fill(panel, new Color(Ink.r, Ink.g, Ink.b, 0.85f));
+                float x0 = panel.x + 6f * s, w0 = panel.width - 12f * s;
+                var quiet = Tinted(small, Teal);
+                quiet.fontSize = Mathf.RoundToInt(10f * s);
+                if (ev == null)
+                {
+                    GUI.Label(new Rect(x0, panel.y + 4f * s, w0, 16f * s), "<b>HUNT</b>   click a bird in the feed to track it", Tinted(small, Color.white));
+                    GUI.Label(new Rect(x0, panel.y + 22f * s, w0, 16f * s), "Some of these crows are machines: watch one until it gives itself away", quiet);
+                }
+                else
+                {
+                    Color state = ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : Color.white;
+                    if (ev.Confirmed) Fill(new Rect(panel.x, panel.y, panel.width, 18f * s), new Color(Hostile.r, Hostile.g, Hostile.b, 0.3f));
+                    GUI.Label(new Rect(x0, panel.y + 2f * s, w0, 16f * s), $"<b>{ev.Status}</b>", Tinted(small, state));
+                    var shots = Tinted(quiet, Color.white);
+                    shots.alignment = TextAnchor.UpperRight;
+                    GUI.Label(new Rect(x0, panel.y + 3f * s, w0 - 100f * s, 16f * s), $"shots {Mimic.ShotsLeftFor(d)}/{Mimic.Shots}", shots);
+                    // How sure we are: a bar at the right of the first row.
+                    var sure = new Rect(panel.xMax - 96f * s, panel.y + 7f * s, 90f * s, 5f * s);
+                    Fill(sure, new Color(1f, 1f, 1f, 0.12f));
+                    Fill(new Rect(sure.x, sure.y, sure.width * ev.Confidence, sure.height), state);
+                    // The five kinds of evidence, lit as they come in.
+                    string[] kinds = { "MOVE", "MECH", "SOUND", "HEAT", "RADIO" };
+                    float chipWidth = 42f * s, cx = x0;
+                    var chip = Tinted(small, Color.white);
+                    chip.fontSize = Mathf.RoundToInt(9f * s);
+                    chip.alignment = TextAnchor.MiddleCenter;
+                    for (int k = 0; k < kinds.Length; k++)
+                    {
+                        var box = new Rect(cx, panel.y + 21f * s, chipWidth - 4f * s, 14f * s);
+                        bool lit = (ev.Kinds & (1 << k)) != 0;
+                        if (lit) Fill(box, ev.Confirmed ? Hostile : DravinOrange);
+                        else Outline(box, new Color(1f, 1f, 1f, 0.3f), 1f);
+                        chip.normal.textColor = lit ? Ink : new Color(1f, 1f, 1f, 0.45f);
+                        GUI.Label(box, $"<b>{kinds[k]}</b>", chip);
+                        cx += chipWidth;
+                    }
+                    GUI.Label(new Rect(cx + 4f * s, panel.y + 21f * s, panel.xMax - cx - 10f * s, 14f * s),
+                        $"watched {Mathf.Min(ev.Watched, Evidence.MinWatch):0}/{Evidence.MinWatch:0} s" + (ev.Points > 0 && !ev.Sustained ? "  need a steady clue" : ""), quiet);
+                    // The last row: the aim once it's confirmed, otherwise the latest clue.
+                    var row = new Rect(x0, panel.y + 39f * s, w0, 16f * s);
+                    if (ev.Confirmed)
+                    {
+                        bool ready = Mimic.WouldHit(tracked, d);
+                        GUI.Label(row, "<b>AIM</b>", Tinted(small, Color.white));
+                        var aim = new Rect(x0 + 32f * s, row.y + 5f * s, 70f * s, 6f * s);
+                        Fill(aim, new Color(1f, 1f, 1f, 0.12f));
+                        Fill(new Rect(aim.x, aim.y, aim.width * ev.Aim, aim.height), ready ? Teal : DravinOrange);
+                        GUI.Label(new Rect(aim.xMax + 8f * s, row.y, panel.xMax - aim.xMax - 14f * s, 16f * s),
+                            ready ? "<b>STEADY: right-click to fire</b>" : Mimic.AimAdvice(tracked, d),
+                            Tinted(quiet, ready ? Teal : DravinOrange));
+                    }
+                    else GUI.Label(row, (ev.Found.Count > 0 ? ev.Found[ev.Found.Count - 1] : "no clues yet") + "     right-click to shadow it", quiet);
+                }
+                // A robot on the run, whichever one it is: how long before it's gone.
+                foreach (var b in Wildlife.Birds)
+                {
+                    if (b == null || !b.Robot || !b.Spooked || b.Down || b.Escaped) continue;
+                    GUI.Label(new Rect(r.x, r.y + 24f * s, r.width, 18f * s), $"<b>CONTACT RUNNING: gone in {b.EscapeLeft:0} s</b>", Tinted(centered, Hostile));
+                    break;
+                }
             }
         }
 

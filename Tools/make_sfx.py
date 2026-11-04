@@ -50,6 +50,14 @@ SOUNDS = [
     ("wind", "Gentle countryside wind passing over open farmland, grasses and distant tree canopies. Soft broad moving air, faint leaves rustling, natural steady atmosphere with no strong gusts." + NV, 25, True, 0.65, -31, -3, True, None),
     ("birds", "Sparse European farmland birds heard across open fields in daylight. Occasional distant skylark, blackbird and small songbird calls, natural spacing with long quiet intervals." + NV, 30, True, 0.7, -31, -3, True, None),
     ("crickets", "Calm rural European night atmosphere. Sparse crickets and grass insects chirping softly from different distances, light natural pauses, no constant loud buzzing." + NV, 25, True, 0.7, -32, -3, True, None),
+    # Mimic: crows over the valley, and the spy robots built to pass for them.
+    ("crow 1", "A single carrion crow calling twice from a nearby tree in open countryside: harsh, hoarse caw caw, short natural outdoor echo." + NV, 2, False, 0.85, -22, -2, False, None),
+    ("crow 2", "Two carrion crows calling to each other across a field: a rough croaking caw answered by another further away, natural spacing." + NV, 3, False, 0.8, -22, -2, False, None),
+    ("crow 3", "A small group of crows taking off from a field together: several flapping wings and a few loud caws, quickly moving away." + NV, 3, False, 0.8, -21, -2, False, None),
+    ("wings", "Close continuous wingbeats of a large black bird flying past slowly: soft rhythmic feathered whooshing, natural irregular pace." + NV, 6, True, 0.75, -26, -3, False, None),
+    ("servo", "Close continuous whine of a tiny precision electric servo motor flapping mechanical wings: thin high-pitched electronic hum with a perfectly regular rhythmic ticking, steady." + NV, 6, True, 0.85, -26, -3, False, None),
+    ("robot down", "A small flying robot hit by a single precise shot: sharp crack, electrical sparks fizzing, plastic and carbon parts snapping, then light debris tumbling to the ground." + NV, 2.5, False, 0.85, -18, -1, False, None),
+    ("data burst", "A short digital radio data burst from a small transmitter: quick chirping modem squeal and static click, very brief." + NV, 1, False, 0.85, -24, -2, False, None),
 ]
 
 
@@ -62,6 +70,7 @@ MIX_LUFS = {
     "ricochet 1": -20, "ricochet 2": -20, "ricochet 3": -20, "drone down": -12,
     "motor Scout": -16, "motor Strike": -15, "motor Kamikaze": -15, "motor Bomber": -16,
     "wind": -23, "birds": -21, "crickets": -20,
+    "crow 1": -20, "crow 2": -20, "crow 3": -19, "wings": -24, "servo": -24, "robot down": -14, "data burst": -20,
 }
 
 

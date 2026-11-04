@@ -266,6 +266,8 @@ namespace DroneSandbox
             yield return PlayMissions(game, rts);
             yield return CampaignToVictory(game);
             yield return QualityCheck(game, rts);
+            yield return WildlifeShots(game, rts);
+            yield return HuntMission(game, rts);
             yield return SectorTour(game, rts);
 
             log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
@@ -560,6 +562,170 @@ namespace DroneSandbox
             }
             log.WriteLine($"Graphics quality: High {fps[2]:F0} fps, Medium {fps[1]:F0} fps, Low {fps[0]:F0} fps over the sandbox's wide view");
             Settings.Quality = 2;
+        }
+
+        // Mimic: crows and spy robots over the sandbox, from close by and from the game camera; then the hunt, played
+        // by a bot that knows only what the drone's camera shows: it shadows a crow for 20 s (which must stay merely
+        // observed), then shadows the robot zoomed in until the clues confirm it, and shoots it down.
+        IEnumerator WildlifeShots(SandboxGame game, RtsController rts)
+        {
+            game.StartSandbox();
+            Vector3 home = game.basePosition + new Vector3(30f, 0f, 30f);
+            Wildlife.AddFlock(home, 25f, 5, 11);
+            Wildlife.AddFlock(home + new Vector3(-60f, 0f, 20f), 25f, 3, 12);
+            var route = new List<Vector3> { game.basePosition + new Vector3(-20f, 0f, 25f), game.basePosition + new Vector3(15f, 0f, 30f),
+                                            game.basePosition + new Vector3(25f, 0f, -5f), game.basePosition + new Vector3(-10f, 0f, -20f) };
+            var robot = Wildlife.AddRobot(route, 14f, 21);
+            yield return new WaitForSeconds(6f);
+            var crow = Wildlife.Birds.Find(b => b != null && !b.Robot);
+
+            // Close-ups from photo mode's free camera, with time stopped so the birds hold still.
+            var photo = PhotoMode.Instance;
+            if (photo != null)
+            {
+                photo.Enter();
+                Time.timeScale = 0f;
+                foreach (var (name, b) in new[] { ("50_crow_close", crow), ("51_robot_close", robot) })
+                {
+                    Vector3 c = b.transform.position;
+                    photo.PlaceLooking(c - b.transform.forward * 2.2f + b.transform.right * 1.4f + Vector3.up * 0.9f, c, 40f);
+                    yield return new WaitForSecondsRealtime(0.6f);
+                    yield return Shot(name);
+                }
+                Time.timeScale = 1f;
+                photo.Exit();
+            }
+            rts.LookAt(home, 70f, 30f);
+            yield return new WaitForSeconds(1f);
+            yield return Shot("52_birds_game_view");
+            log.WriteLine($"Wildlife: {Wildlife.Birds.Count} birds ({Wildlife.Birds.FindAll(b => b.Robot).Count} robots), robot hovering {robot.Hovering}, " +
+                          $"crow at {crow.transform.position.y - Ground.HeightAt(crow.transform.position):F0} m up");
+
+            var scout = game.SpawnDrone(DroneType.Scout);
+            rts.selected.Clear();
+            rts.selected.Add(scout);
+            DroneFeed.Instance.Zoom = 3f;
+            Mimic.Act(crow, scout);
+            yield return new WaitForSeconds(20f);
+            var crowSeen = Mimic.Of(crow);
+            log.WriteLine($"Hunt: a crow shadowed 20 s: {crowSeen.Status}, {crowSeen.Points} pts, watched {crowSeen.Watched:F0} s");
+
+            Mimic.Act(robot, scout);
+            float started = Time.time;
+            bool shotTaken = false;
+            while (Time.time - started < 120f && !Mimic.Of(robot).Confirmed) yield return null;
+            var seen = Mimic.Of(robot);
+            log.WriteLine($"Hunt: robot {seen.Status} after {Time.time - started:F0} s, {seen.Points} pts from {seen.KindCount} kinds: {string.Join("; ", seen.Found)}");
+            rts.LookAt(scout.transform.position, 60f, 30f);
+            yield return new WaitForSeconds(0.5f);
+            yield return Shot("53_hunt_confirmed");
+            while (!robot.Down && !robot.Escaped && Mimic.ShotsLeftFor(scout) > 0 && Time.time - started < 180f)
+            {
+                if (seen.Confirmed && Mimic.WouldHit(robot, scout))
+                {
+                    Mimic.Fire(robot, scout);
+                    shotTaken = true;
+                }
+                yield return new WaitForSeconds(0.2f);
+            }
+            yield return new WaitForSeconds(1.5f);
+            yield return Shot("54_hunt_down");
+            log.WriteLine($"Hunt: shot {(shotTaken ? "taken" : "never taken")}, robot down {robot.Down}, escaped {robot.Escaped}, shots left {Mimic.ShotsLeftFor(scout)}/{Mimic.Shots}, " +
+                          $"{Time.time - started:F0} s in all");
+            Wildlife.Clear();
+        }
+
+        // Silent Wings, played: the bot samples the birds in the first Scout's feed one by one (10 s each, zoomed in)
+        // until one shows a clue, keeps that one until it's confirmed, shoots it down, and moves on; a second Scout
+        // takes over if the first runs dry. Then home. It must win, and no crow may ever be confirmed.
+        IEnumerator HuntMission(SandboxGame game, RtsController rts)
+        {
+            int hunt = Missions.All.FindIndex(m => m.huntRobots > 0);
+            if (hunt < 0)
+            {
+                log.WriteLine("Silent Wings: no hunt mission");
+                errors++;
+                yield break;
+            }
+            game.StartMission(hunt);
+            yield return new WaitForSecondsRealtime(0.5f);
+            yield return Shot("55_hunt_briefing");
+            game.CloseBriefing();
+            var scouts = new List<Drone> { game.SpawnDrone(DroneType.Scout), game.SpawnDrone(DroneType.Scout) };
+            int scoutIndex = 0;
+            Drone scout = scouts[0];
+            rts.selected.Clear();
+            rts.selected.Add(scout);
+            DroneFeed.Instance.Zoom = 3f;
+            float started = Time.time;
+            var sampled = new HashSet<Bird>();
+            int samples = 0, misses = 0, spooks = 0;
+            bool feedShot = false;
+            while (game.Result == MissionResult.None && game.Phase != MissionPhase.Extract && Time.time - started < 420f)
+            {
+                if ((scout == null || !scout.IsAlive || Mimic.ShotsLeftFor(scout) <= 0) && scoutIndex + 1 < scouts.Count)
+                {
+                    scout = scouts[++scoutIndex];
+                    rts.selected.Clear();
+                    rts.selected.Add(scout);
+                }
+                // The nearest bird not yet looked at (or every bird again once all have been).
+                Bird next = null;
+                float best = float.MaxValue;
+                foreach (var b in Wildlife.Birds)
+                {
+                    if (b == null || b.Down || !b.gameObject.activeInHierarchy || sampled.Contains(b)) continue;
+                    float d = Vector3.Distance(scout.transform.position, b.transform.position);
+                    if (d < best)
+                    {
+                        best = d;
+                        next = b;
+                    }
+                }
+                if (next == null)
+                {
+                    sampled.Clear();
+                    yield return null;
+                    continue;
+                }
+                sampled.Add(next);
+                samples++;
+                Mimic.Act(next, scout);
+                float look = Time.time;
+                var e = Mimic.Of(next);
+                while (Time.time - look < 20f && Vector3.Distance(scout.transform.position, next.transform.position) > 60f) yield return null;
+                look = Time.time;
+                while (Time.time - look < 12f && e.Points == 0 && game.Result == MissionResult.None) yield return null;
+                if (e.Points == 0) continue;
+                // A clue: stay on it.
+                while (!e.Confirmed && !next.Down && !next.Escaped && Time.time - look < 90f && game.Result == MissionResult.None) yield return null;
+                if (!e.Confirmed) continue;
+                if (!feedShot)
+                {
+                    rts.LookAt(scout.transform.position, 55f, 30f);
+                    yield return new WaitForSeconds(0.4f);
+                    yield return Shot("56_hunt_confirmed_feed");
+                    feedShot = true;
+                }
+                float aiming = Time.time;
+                while (!next.Down && !next.Escaped && Mimic.ShotsLeftFor(scout) > 0 && game.Result == MissionResult.None && Time.time - aiming < 120f)
+                {
+                    if (Mimic.WouldHit(next, scout) && !Mimic.Fire(next, scout)) misses++;
+                    yield return new WaitForSeconds(0.2f);
+                }
+            }
+            var crows = Wildlife.Birds.FindAll(b => b != null && !b.Robot);
+            spooks = Wildlife.Birds.FindAll(b => b != null && b.Robot && b.Spooked).Count;
+            int falseConfirms = crows.FindAll(b => Mimic.Of(b).Confirmed).Count;
+            float hunted = Time.time - started;
+            game.Recall(new List<Drone>());
+            for (float t = 0f; t < 90f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSeconds(0.5f);
+            float until = Time.realtimeSinceStartup + 10f;
+            while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until) yield return null;
+            yield return Shot("57_hunt_result");
+            log.WriteLine($"Silent Wings: {game.Result} ({game.ResultReason}), robots {game.TargetsDestroyed}/{game.TargetsTotal} in {hunted:F0} s, " +
+                          $"{samples} birds sampled, {misses} misses, {spooks} spooked, scouts used {scoutIndex + 1}, crows confirmed {falseConfirms}, stars {game.Stars}");
+            if (game.Result != MissionResult.Won || falseConfirms > 0) errors++;
         }
 
         IEnumerator SectorTour(SandboxGame game, RtsController rts)
