@@ -45,6 +45,23 @@ namespace DroneSandbox
 
         static int Index(float worldCoord) => Mathf.Clamp(Mathf.FloorToInt((worldCoord + half) / Cell), 0, n - 1);
 
+        // Whether tree crowns stand between two points, roughly: on the 4 m grid, a crown fills the top two thirds of
+        // its tree. The last couple of metres are left out, so a bird perched on a tree is still in sight.
+        public static bool Blocks(Vector3 from, Vector3 to)
+        {
+            if (top == null) return false;
+            int steps = Mathf.CeilToInt(Vector3.Distance(from, to) / 2f);
+            for (int i = 1; i < steps - 1; i++)
+            {
+                Vector3 p = Vector3.Lerp(from, to, i / (float)steps);
+                float crown = top[Index(p.x), Index(p.z)];
+                if (crown == float.MinValue || p.y >= crown) continue;
+                float ground = Ground.HeightAt(p);
+                if (p.y > ground + (crown - ground) * 0.35f) return true;
+            }
+            return false;
+        }
+
         // The highest tree top within `radius` of p (minus infinity where there are no trees).
         public static float TopNear(Vector3 p, float radius = 4f)
         {

@@ -32,8 +32,13 @@ namespace DroneSandbox
         const float Speed = 10f;
 
         Flock flock;
-        Transform wingL, wingR, body;
+        Flock mingle;                               // a robot passing as one of this flock for a while
+        float mingleUntil, nextMingle;
+        public Flock Flock => flock;
+        Transform wingL, wingR, handL, handR, body;
         float flap, flapRate, burstUntil, glideUntil, wingSign;
+        float handLag = 0.9f, sideSkew;             // how far the wrist trails the shoulder; left-right unevenness
+        Quaternion handRestL, handRestR;
         float stateUntil, groundY, altitude;
         Vector3 groundSpot;
         System.Random rng;
@@ -91,6 +96,8 @@ namespace DroneSandbox
             {
                 if (t.name == "Wing_L") wingL = t;
                 else if (t.name == "Wing_R") wingR = t;
+                else if (t.name == "Hand_L") handRestL = (handL = t).localRotation;
+                else if (t.name == "Hand_R") handRestR = (handR = t).localRotation;
             }
             if (wingL != null) wingSign = Mathf.Sign(wingL.localPosition.x);
         }
@@ -120,7 +127,7 @@ namespace DroneSandbox
             {
                 Signals();
                 if (Spooked) Escape(dt);
-                else FlyRoute(dt);
+                else if (!Mingle(dt)) FlyRoute(dt);
             }
             else FlyWithFlock(dt);
             Wings(dt);
@@ -236,6 +243,39 @@ namespace DroneSandbox
             }
         }
 
+        // A crow moving over to another flock.
+        public void JoinFlock(Flock f)
+        {
+            if (f == null || f == flock) return;
+            flock?.Remove(this);
+            flock = f;
+            f.Add(this);
+        }
+
+        // Every minute or so a robot falls in with a flock passing within 90 m, as a crow would, for 15-25 s: no
+        // hovering, no loop, just another bird among them, until it peels off back to its patrol.
+        bool Mingle(float dt)
+        {
+            if (nextMingle == 0f) nextMingle = Time.time + Range(40f, 70f);
+            if (mingle == null && Time.time > nextMingle)
+            {
+                nextMingle = Time.time + Range(45f, 75f);
+                mingle = Wildlife.FlockNear(transform.position, 90f);
+                mingleUntil = Time.time + Range(15f, 25f);
+            }
+            if (mingle == null) return false;
+            if (Time.time > mingleUntil || mingle.Landing)
+            {
+                mingle = null;
+                return false;
+            }
+            Hovering = false;
+            Vector3 goal = mingle.Point(this);
+            goal.y = Ground.HeightAt(goal) + altitude;
+            Steer(goal, Speed, dt);
+            return true;
+        }
+
         // Round and round the same loop, holding still for a few seconds at each corner: a camera platform doing
         // its job, not a bird.
         void FlyRoute(float dt)
@@ -282,20 +322,25 @@ namespace DroneSandbox
         // ---- Wings ----
 
         // A crow flaps in bursts of a few seconds, each at its own pace around its usual beat, and glides between;
-        // a robot's motor never stops and never changes its beat. Grounded, the wings fold.
+        // a robot's motor never stops and never changes its beat. The wrist trails the shoulder, so the outer wing
+        // flexes down on the downstroke and folds in on the way up: by the same amount on every beat, both sides at
+        // once, on a robot; a little differently each burst, and never quite evenly left and right, on a crow.
+        // Grounded, the wings fold.
         void Wings(float dt)
         {
             if (wingL == null || wingR == null) return;
-            float angle, fold = 1f;
+            float angle, fold = 1f, hand = 0f;
             if (state == State.Grounded)
             {
                 angle = -12f;
                 fold = 0.35f;
+                hand = -25f;
             }
             else if (Robot)
             {
                 flap += dt * RobotFlapRate * 2f * Mathf.PI;
                 angle = Hovering ? 30f * Mathf.Sin(flap) + 18f : 38f * Mathf.Sin(flap) + 6f;
+                hand = 20f * Mathf.Sin(flap - 0.9f) - 4f;
             }
             else
             {
@@ -304,13 +349,18 @@ namespace DroneSandbox
                     burstUntil = Time.time + Range(1.5f, 4f);
                     glideUntil = burstUntil + (state == State.Flying ? Range(0.8f, 2.5f) : 0f);
                     flapRate = Mathf.Clamp(flapRate + Range(-0.35f, 0.35f), 2.8f, 4.6f);
+                    handLag = Range(0.6f, 1.2f);
+                    sideSkew = Range(-4f, 4f);
                 }
                 bool gliding = Time.time > burstUntil && state == State.Flying;
                 if (!gliding) flap += dt * flapRate * 2f * Mathf.PI;
                 angle = gliding ? Mathf.Lerp(38f * Mathf.Sin(flap) + 6f, 7f, 0.9f) : 38f * Mathf.Sin(flap) + 6f;
+                hand = gliding ? 2f : 24f * Mathf.Sin(flap - handLag) - 4f;
             }
-            wingL.localRotation = Quaternion.Euler(0f, 0f, wingSign * angle);
-            wingR.localRotation = Quaternion.Euler(0f, 0f, -wingSign * angle);
+            wingL.localRotation = Quaternion.Euler(0f, 0f, wingSign * (angle + sideSkew * 0.5f));
+            wingR.localRotation = Quaternion.Euler(0f, 0f, -wingSign * (angle - sideSkew * 0.5f));
+            if (handL != null) handL.localRotation = Quaternion.AngleAxis(wingSign * hand, Vector3.forward) * handRestL;
+            if (handR != null) handR.localRotation = Quaternion.AngleAxis(-wingSign * hand, Vector3.forward) * handRestR;
             var s = new Vector3(fold, 1f, 1f);
             wingL.localScale = s;
             wingR.localScale = s;
@@ -370,6 +420,7 @@ namespace DroneSandbox
         }
 
         public void Add(Bird b) => birds.Add(b);
+        public void Remove(Bird b) => birds.Remove(b);
 
         public void Tick()
         {
@@ -422,10 +473,13 @@ namespace DroneSandbox
         public static readonly List<Bird> Birds = new List<Bird>();
         static readonly List<Flock> flocks = new List<Flock>();
         static Transform root;
+        static float nextShuffle;
+        static readonly System.Random shuffle = new System.Random(77);
 
         public static void Clear()
         {
             Mimic.Reset();
+            nextShuffle = 0f;
             foreach (var b in Birds) if (b != null) Object.Destroy(b.gameObject);
             Birds.Clear();
             flocks.Clear();
@@ -483,6 +537,38 @@ namespace DroneSandbox
         public static void Tick()
         {
             foreach (var f in flocks) f.Tick();
+            // Every 12-25 s about a third of the crows move over to the nearest other flock within 150 m, so the bird
+            // being watched may well leave with others: keeping track of one means following it.
+            if (flocks.Count > 1 && Time.time > nextShuffle)
+            {
+                if (nextShuffle > 0f)
+                    foreach (var b in Birds)
+                    {
+                        if (b == null || b.Robot || b.Down || shuffle.NextDouble() > 0.35) continue;
+                        b.JoinFlock(NearestOther(b.Flock, b.transform.position, 150f));
+                    }
+                nextShuffle = Time.time + 12f + (float)shuffle.NextDouble() * 13f;
+            }
+        }
+
+        // The nearest flock in the air (not landed) within `range` of p.
+        public static Flock FlockNear(Vector3 p, float range) => NearestOther(null, p, range);
+
+        static Flock NearestOther(Flock not, Vector3 p, float range)
+        {
+            Flock best = null;
+            float bestDistance = range;
+            foreach (var f in flocks)
+            {
+                if (f == not || f.Landing) continue;
+                float d = Vector2.Distance(new Vector2(f.Centre.x, f.Centre.z), new Vector2(p.x, p.z));
+                if (d < bestDistance)
+                {
+                    best = f;
+                    bestDistance = d;
+                }
+            }
+            return best;
         }
     }
 }

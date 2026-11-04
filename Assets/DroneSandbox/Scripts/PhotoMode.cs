@@ -216,6 +216,15 @@ namespace DroneSandbox
             float distance = 300f;
             var ray = new Ray(cam.transform.position, cam.transform.forward);
             if (Ground.Raycast(ray, out Vector3 hit)) distance = Vector3.Distance(cam.transform.position, hit);
+            // Something nearer in the middle of the frame takes the focus: a unit, or a bird (which has no collider).
+            if (Physics.Raycast(ray, out RaycastHit unit, distance, ~0, QueryTriggerInteraction.Ignore)) distance = unit.distance;
+            foreach (var b in Wildlife.Birds)
+            {
+                if (b == null || !b.gameObject.activeInHierarchy) continue;
+                Vector3 to = b.transform.position - ray.origin;
+                float along = Vector3.Dot(to, ray.direction);
+                if (along > 0.5f && along < distance && (to - ray.direction * along).magnitude < 0.8f) distance = along;
+            }
             focusDistance = Mathf.Lerp(focusDistance, Mathf.Clamp(distance, 2f, 300f), 0.25f);
             if (focus != null) SetRanges(focus, focusDistance);
         }

@@ -21,6 +21,8 @@ namespace DroneSandbox
         public float HoverWatched;              // seconds watched holding still in the air
         public float Aim;                       // 0-1, how steady the shot is (see Mimic.WouldHit)
         public bool Announced;                  // the confirmation has been called out
+        public bool Occluded;                   // trees between the feed's drone and it right now
+        public readonly float[] KindAt = new float[5]; // when each kind of clue last came in (the panel flashes it)
         public const float MinWatch = 8f;       // no confirmation from a glance
 
         public int KindCount { get { int n = 0; for (int k = Kinds; k != 0; k &= k - 1) n++; return n; } }
@@ -37,6 +39,7 @@ namespace DroneSandbox
             Found.Add(what);
             Points += points;
             Kinds |= 1 << (int)kind;
+            KindAt[(int)kind] = Time.time;
             Sustained |= sustained;
             return true;
         }
@@ -108,19 +111,20 @@ namespace DroneSandbox
             Fire(b, drone);
         }
 
-        // Would a shot from this drone hit right now? Only with the aim fully steady, and past 25 m only at a robot
-        // holding still. What the aim bar shows is what happens.
+        // Would a shot from this drone hit right now? Only with the aim fully steady and a clear line (never through
+        // the trees), and past 25 m only at a robot holding still. What the aim bar shows is what happens.
         public static bool WouldHit(Bird b, Drone drone)
         {
             if (b == null || drone == null) return false;
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
-            return Of(b).Aim >= 1f && d <= 40f && (d < 25f || b.Hovering);
+            return Of(b).Aim >= 1f && d <= 40f && (d < 25f || b.Hovering) && !Canopy.Blocks(drone.transform.position, b.transform.position);
         }
 
         // What's keeping the shot from being a sure one, for the hunt panel.
         public static string AimAdvice(Bird b, Drone drone)
         {
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
+            if (Canopy.Blocks(drone.transform.position, b.transform.position)) return "OBSTRUCTED: trees in the way";
             if (d > 40f) return $"out of range ({d:0} m)";
             if (d >= 25f && !b.Hovering) return $"{d:0} m: closer, or wait for a hover";
             return "steadying: match its speed";
@@ -155,6 +159,7 @@ namespace DroneSandbox
             if (hit)
             {
                 b.ShootDown();
+                game?.Events.Add((new Vector2(b.transform.position.x, b.transform.position.z), true)); // on the debrief map
                 Sound.At("robot down", b.transform.position, 1f, 0.03f);
                 game?.ShowMessage("Spy robot down", 2.5f);
             }
@@ -193,8 +198,10 @@ namespace DroneSandbox
                     if (b == Tracked && e.Add(Clue.Electronic, 2, "radio burst traced to it", true)) Announce(b, "Signal intercept: the data burst came from this one");
                     else if (b != Tracked) game.ShowMessage("Signal intercept: a data burst nearby. One of these crows is transmitting", 3f);
                 }
-                // A drone right on top of a robot gives the game away: within 10 m for 2 s and it bolts.
-                if (b.Robot && !b.Spooked && game != null)
+                // The drone tracking a robot can give itself away: closer than 10 m for 2 s and the robot notices it
+                // and bolts. (One that happens to fly past a drone busy with something else doesn't.)
+                if (b.Robot && !b.Spooked && game != null && b != Tracked) e.TooClose = 0f;
+                else if (b.Robot && !b.Spooked && game != null)
                 {
                     bool close = game.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, b.transform.position) < 10f);
                     e.TooClose = close ? e.TooClose + dt : 0f;
@@ -213,12 +220,13 @@ namespace DroneSandbox
                     Vector3 v = cam.WorldToViewportPoint(b.transform.position);
                     d = Vector3.Distance(source.transform.position, b.transform.position);
                     inView = v.z > 0f && v.x >= 0f && v.x <= 1f && v.y >= 0f && v.y <= 1f && d <= 150f;
+                    e.Occluded = inView && Canopy.Blocks(source.transform.position, b.transform.position);
                 }
                 // The aim steadies on a bird in view within 40 m: quicker within 25 m, on a bird holding still, from a
                 // drone matching its speed (holding still with a hovering one, or flying with it), and slower on one
                 // that's running; it slips away otherwise.
                 float drift = (sourceVelocity - b.Velocity).magnitude;
-                float rate = !inView || d > 40f ? -1f
+                float rate = !inView || e.Occluded || d > 40f ? -1f
                     : (d < 25f ? 1f / 1.5f : 1f / 3.5f) * (b.Hovering ? 2f : 1f) * (drift < 4f ? 1f : 0.35f) * (b.Spooked ? 0.5f : 1f);
                 e.Aim = Mathf.Clamp01(e.Aim + rate * dt);
                 if (!inView) continue;

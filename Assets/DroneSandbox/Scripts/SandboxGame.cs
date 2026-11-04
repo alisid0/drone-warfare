@@ -567,7 +567,7 @@ namespace DroneSandbox
                 Vector3 c = posts[k % posts.Length];
                 float r = 26f + 4f * k;
                 var route = new List<Vector3> { c + new Vector3(-r, 0f, r * 0.8f), c + new Vector3(r, 0f, r), c + new Vector3(r * 0.9f, 0f, -r), c + new Vector3(-r, 0f, -r * 0.7f) };
-                Wildlife.AddRobot(route, 11f + 2f * k, 201 + k); // crow speed, and slower than a Scout
+                Wildlife.AddRobot(route, 18f + 3f * k, 201 + k); // up with the crows, above the treetops
             }
             TargetsTotal = Mission.huntRobots;
             Phase = MissionPhase.Strike;

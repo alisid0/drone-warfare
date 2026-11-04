@@ -9,7 +9,9 @@ wingspan, a little big for a crow so it reads from a drone's camera.
 
 Each model is a root empty with:
 - the body ("Body_<material>": body, head, beak, tail, tucked feet);
-- "Wing_L" and "Wing_R": pivots at the shoulders, each holding its wing, so the game can flap them;
+- "Wing_L" and "Wing_R": pivots at the shoulders, each holding the inner wing and "Hand_L"/"Hand_R", the outer
+  wing (the primaries) with its origin at the wrist, so the game can flap them and flex the wing as it beats (the
+  hand is a mesh, not a pivot holding one: three levels down, the FBX export would turn it on its side);
 - on the robot only, what gives it away at close range: "Servo_L"/"Servo_R" housings at the shoulders (material
   Servo, which the game makes glint), a seam down the back and lens eyes. Everything else, the silhouette and the
   colours, is the same as the real bird's, because from any distance the two must look alike.
@@ -23,6 +25,7 @@ from common import (box, cone, export_model, material, mesh_object, pivot, rende
                     set_parent, sphere)
 
 import bpy  # noqa: E402
+from mathutils import Matrix, Vector  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT_DIR = os.path.abspath(args[0] if args else ".")
@@ -46,29 +49,47 @@ def solidify(obj, thickness):
     return obj
 
 
-# One wing, spreading along +X from the shoulder, its leading edge forward (-Y): a broad arm, then the long
-# fingered primaries a crow spreads at the tip. Slightly cambered (raised along the middle of the chord).
-WING = [
-    (0.00, -0.055), (0.10, -0.075), (0.22, -0.075), (0.33, -0.060), (0.41, -0.035),
-    (0.47, -0.005), (0.445, 0.015), (0.485, 0.030), (0.445, 0.048), (0.475, 0.066), (0.425, 0.080),
-    (0.445, 0.100), (0.380, 0.112), (0.300, 0.128), (0.190, 0.138), (0.090, 0.128), (0.020, 0.100), (0.00, 0.070),
+# One wing, spreading along +X from the shoulder, its leading edge forward (-Y), in two parts that meet at the
+# wrist (x = 0.22): the broad arm, and the hand with the long fingered primaries a crow spreads at the tip.
+# Slightly cambered (raised along the middle of the chord).
+WRIST = 0.22
+ARM = [
+    (0.00, -0.055), (0.10, -0.075), (WRIST, -0.075), (WRIST, 0.135), (0.190, 0.138), (0.090, 0.128),
+    (0.020, 0.100), (0.00, 0.070),
+]
+HAND = [
+    (WRIST, -0.075), (0.33, -0.060), (0.41, -0.035), (0.47, -0.005), (0.445, 0.015), (0.485, 0.030),
+    (0.445, 0.048), (0.475, 0.066), (0.425, 0.080), (0.445, 0.100), (0.380, 0.112), (0.300, 0.128), (WRIST, 0.135),
 ]
 
 
-def wing(name, side, shoulder, parent):
+def wing_surface(name, outline, middle, side, shoulder, parent):
+    """A fan of triangles round `middle`, spanning the outline, as a thin solid."""
     sx, sy, sz = shoulder
-    verts = []
-    for x, y in WING:
+    def lift(x, y):
         camber = 0.012 * math.sin(math.pi * min(1.0, max(0.0, (y + 0.075) / 0.21)))
-        verts.append((sx + side * x, sy + y, sz + camber + 0.02 * (x / 0.48) ** 2))  # bends up a little to the tip
-    verts.append((sx + side * 0.16, sy + 0.03, sz + 0.016))  # the middle, for a fan of triangles
+        return sz + camber + 0.02 * (x / 0.48) ** 2  # bends up a little to the tip
+    verts = [(sx + side * x, sy + y, lift(x, y)) for x, y in outline]
+    mx, my = middle
+    verts.append((sx + side * mx, sy + my, lift(mx, my) + 0.004))
     centre = len(verts) - 1
     faces = []
-    for i in range(len(WING)):
-        a, b = i, (i + 1) % len(WING)
+    for i in range(len(outline)):
+        a, b = i, (i + 1) % len(outline)
         faces.append((centre, a, b) if side > 0 else (centre, b, a))
     obj = mesh_object(name, verts, faces, M["feather"], parent, smooth=True)
     return solidify(obj, 0.008)
+
+
+def wing(label, side, shoulder, parent):
+    """The inner wing on the shoulder pivot, and the outer wing beside it with its origin at the wrist."""
+    sx, sy, sz = shoulder
+    wing_surface(f"Feathers_{label}", ARM, (0.11, 0.03), side, shoulder, parent)
+    hand = wing_surface(f"Hand_{label}", HAND, (0.33, 0.04), side, shoulder, parent)
+    wrist = Vector((sx + side * WRIST, sy + 0.03, sz + 0.012 + 0.02 * (WRIST / 0.48) ** 2))
+    hand.data.transform(Matrix.Translation(-wrist))
+    hand.location = wrist
+    return hand
 
 
 def tail(parent):
@@ -92,7 +113,7 @@ def build_bird(name, robot):
     for side, label in ((1, "L"), (-1, "R")):
         at = (side * 0.05, -0.035, 0.03)
         shoulder = pivot(f"Wing_{label}", at, rig)
-        wing(f"Feathers_{label}", side, at, shoulder)
+        wing(label, side, at, shoulder)
         if robot:
             # A servo housing where the wing meets the body, mostly hidden under the feathers.
             bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.012, depth=0.022,

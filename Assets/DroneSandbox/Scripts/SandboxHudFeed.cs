@@ -155,11 +155,12 @@ namespace DroneSandbox
                         continue;
                     }
                     Color colour = ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : Color.white;
-                    float half = Mathf.Clamp(60f / Mathf.Max(4f, v.z), 7f, 26f) * s;
+                    float half = Mathf.Clamp(60f / Mathf.Max(4f, v.z), 12f, 26f) * s;
                     Brackets(p, half, colour, Mathf.Max(1f, s));
                     var tag = Tinted(small, colour);
                     tag.fontSize = Mathf.RoundToInt(9f * s);
-                    GUI.Label(new Rect(p.x - half, p.y - half - 13f * s, 200f * s, 12f * s), $"<b>{ev.Status}</b>  {v.z:0} m", tag);
+                    Fill(new Rect(p.x - half - 2f * s, p.y - half - 13f * s, (ev.Occluded ? 78f : 30f) * s, 12f * s), new Color(Ink.r, Ink.g, Ink.b, 0.65f));
+                    GUI.Label(new Rect(p.x - half, p.y - half - 13f * s, 200f * s, 12f * s), $"<b>{v.z:0} m</b>" + (ev.Occluded ? "  OCCLUDED" : ""), tag);
                 }
             }
 
@@ -212,15 +213,13 @@ namespace DroneSandbox
                 else
                 {
                     Color state = ev.Confirmed ? Hostile : ev.Suspicious ? DravinOrange : Color.white;
-                    if (ev.Confirmed) Fill(new Rect(panel.x, panel.y, panel.width, 18f * s), new Color(Hostile.r, Hostile.g, Hostile.b, 0.3f));
+                    if (ev.Confirmed) Fill(new Rect(panel.x, panel.y, panel.width, 18f * s), new Color(Hostile.r, Hostile.g, Hostile.b, 0.16f));
                     GUI.Label(new Rect(x0, panel.y + 2f * s, w0, 16f * s), $"<b>{ev.Status}</b>", Tinted(small, state));
-                    var shots = Tinted(quiet, Color.white);
-                    shots.alignment = TextAnchor.UpperRight;
-                    GUI.Label(new Rect(x0, panel.y + 3f * s, w0 - 100f * s, 16f * s), $"shots {Mimic.ShotsLeftFor(d)}/{Mimic.Shots}", shots);
-                    // How sure we are: a bar at the right of the first row.
-                    var sure = new Rect(panel.xMax - 96f * s, panel.y + 7f * s, 90f * s, 5f * s);
-                    Fill(sure, new Color(1f, 1f, 1f, 0.12f));
-                    Fill(new Rect(sure.x, sure.y, sure.width * ev.Confidence, sure.height), state);
+                    // What's in, against what confirmation needs: 3 points from 2 kinds.
+                    var count = Tinted(quiet, Color.white);
+                    count.alignment = TextAnchor.UpperRight;
+                    GUI.Label(new Rect(x0, panel.y + 3f * s, w0, 16f * s),
+                        $"EVIDENCE  <b>{ev.Points}</b>/3 pts   <b>{ev.KindCount}</b>/2 types", count);
                     // The five kinds of evidence, lit as they come in.
                     string[] kinds = { "MOVE", "MECH", "SOUND", "HEAT", "RADIO" };
                     float chipWidth = 42f * s, cx = x0;
@@ -230,8 +229,8 @@ namespace DroneSandbox
                     for (int k = 0; k < kinds.Length; k++)
                     {
                         var box = new Rect(cx, panel.y + 21f * s, chipWidth - 4f * s, 14f * s);
-                        bool lit = (ev.Kinds & (1 << k)) != 0;
-                        if (lit) Fill(box, ev.Confirmed ? Hostile : DravinOrange);
+                        bool lit = (ev.Kinds & (1 << k)) != 0, fresh = lit && Time.time - ev.KindAt[k] < 0.6f;
+                        if (lit) Fill(box, fresh ? Color.white : ev.Confirmed ? Hostile : DravinOrange);
                         else Outline(box, new Color(1f, 1f, 1f, 0.3f), 1f);
                         chip.normal.textColor = lit ? Ink : new Color(1f, 1f, 1f, 0.45f);
                         GUI.Label(box, $"<b>{kinds[k]}</b>", chip);
@@ -248,11 +247,15 @@ namespace DroneSandbox
                         var aim = new Rect(x0 + 32f * s, row.y + 5f * s, 70f * s, 6f * s);
                         Fill(aim, new Color(1f, 1f, 1f, 0.12f));
                         Fill(new Rect(aim.x, aim.y, aim.width * ev.Aim, aim.height), ready ? Teal : DravinOrange);
-                        GUI.Label(new Rect(aim.xMax + 8f * s, row.y, panel.xMax - aim.xMax - 14f * s, 16f * s),
-                            ready ? "<b>STEADY: right-click to fire</b>" : Mimic.AimAdvice(tracked, d),
-                            Tinted(quiet, ready ? Teal : DravinOrange));
+                        string advice = Mimic.AimAdvice(tracked, d);
+                        GUI.Label(new Rect(aim.xMax + 8f * s, row.y, panel.xMax - aim.xMax - 70f * s, 16f * s),
+                            ready ? "<b>CLEAR SHOT: right-click to fire</b>" : advice,
+                            Tinted(quiet, ready ? Teal : advice.StartsWith("OBSTRUCTED") ? Hostile : DravinOrange));
                     }
-                    else GUI.Label(row, (ev.Found.Count > 0 ? ev.Found[ev.Found.Count - 1] : "no clues yet") + "     right-click to shadow it", quiet);
+                    else GUI.Label(new Rect(x0, row.y, w0 - 60f * s, row.height), (ev.Found.Count > 0 ? ev.Found[ev.Found.Count - 1] : "no clues yet") + "     right-click to shadow it", quiet);
+                    var shots = Tinted(quiet, Color.white);
+                    shots.alignment = TextAnchor.UpperRight;
+                    GUI.Label(row, $"shots {Mimic.ShotsLeftFor(d)}/{Mimic.Shots}", shots);
                 }
                 // A robot on the run, whichever one it is: how long before it's gone.
                 foreach (var b in Wildlife.Birds)
