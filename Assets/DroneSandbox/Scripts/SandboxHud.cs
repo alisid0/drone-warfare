@@ -130,6 +130,7 @@ namespace DroneSandbox
             {
                 if (ShopOpen) DrawShop();
                 else if (TheatreOpen) DrawTheatre();
+                else if (ControlsOpen) DrawControls();
                 else if (SettingsOpen) DrawSettings();
                 else DrawMenu();
                 return;

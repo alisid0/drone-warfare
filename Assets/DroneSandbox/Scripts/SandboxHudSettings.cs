@@ -5,6 +5,7 @@ namespace DroneSandbox
     // The settings screen, from the main menu: a row of choices per setting, the current one lit.
     public partial class SandboxHud
     {
+        // Draw comfort settings and the entry to keyboard controls using the same menu layout.
         void DrawSettings()
         {
             float s = Scale;
@@ -32,7 +33,9 @@ namespace DroneSandbox
                 System.Array.IndexOf(Settings.Volumes, Settings.Volume));
             if (volume >= 0) Settings.Volume = Settings.Volumes[volume];
 
-            var back = new Rect(r.x + (r.width - 200f * s) / 2f, r.yMax - 60f * s, 200f * s, 42f * s);
+            if (GUI.Button(new Rect(r.x + 30f * s, r.yMax - 60f * s, 200f * s, 42f * s), "<b>Controls</b>", button))
+                OpenControls();
+            var back = new Rect(r.xMax - 230f * s, r.yMax - 60f * s, 200f * s, 42f * s);
             bool escape = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape;
             if (GUI.Button(back, "<b>Back</b>  (Esc)", button) || escape)
             {
