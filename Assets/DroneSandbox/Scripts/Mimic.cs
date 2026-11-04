@@ -177,6 +177,8 @@ namespace DroneSandbox
             Of(b).Aim = 0f;
             if (hit)
             {
+                if (game != null && game.IsHunt && !game.BriefingOpen && game.Result == MissionResult.None && b.Robot && b.Spooked && !b.Escaped)
+                    Achievements.Unlock("runner");
                 b.ShootDown();
                 game?.Events.Add((new Vector2(b.transform.position.x, b.transform.position.z), true)); // on the debrief map
                 Sound.At("robot down", b.transform.position, 1f, 0.03f);

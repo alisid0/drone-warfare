@@ -392,6 +392,7 @@ namespace DroneSandbox
             stock[(int)type]++;
             supportFor[(int)type]++;
             SupportSpent++;
+            Achievements.Unlock("support");
             return true;
         }
 
@@ -790,6 +791,7 @@ namespace DroneSandbox
                 Progress.Set(Mission.key + ".stars", Stars);
                 Progress.Save();
             }
+            Achievements.MissionFinished(this);
             if (Hotspot != null)
             {
                 if (won) Theatre.Won(Hotspot, dronesLost);

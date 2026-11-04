@@ -189,6 +189,7 @@ namespace DroneSandbox
         // completes the campaign.
         public static void Won(Hotspot h, int dronesLost)
         {
+            Achievements.CampaignResult(h, true);
             Record(dronesLost);
             Outcome = News = "";
             if (h.final)
@@ -231,6 +232,7 @@ namespace DroneSandbox
         // A lost operation costs a half-win and ends the turn (the offers change: there's no retrying it).
         public static void Lost(Hotspot h, int dronesLost)
         {
+            Achievements.CampaignResult(h, false);
             Record(dronesLost);
             Outcome = News = "";
             if (h.final || Done(h))
@@ -341,6 +343,7 @@ namespace DroneSandbox
             var threat = ThreatSpot;
             if (threat != null && turn >= ThreatDue)
             {
+                Achievements.ThreatIgnored();
                 if (!setback) Change(-1);
                 var others = Hotspots.FindAll(h => !h.final && !Done(h) && h != threat);
                 var alerted = others.Count > 0 ? others[new System.Random(Seed + turn * 31).Next(others.Count)] : null;
