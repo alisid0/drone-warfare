@@ -496,23 +496,62 @@ namespace DroneSandbox
         {
             var hud = game.GetComponent<SandboxHud>();
             Theatre.NewCampaign();
-            int credited = 0, lostOne = 0;
-            for (int guard = 0; guard < 200 && !Theatre.FinalOpen; guard++)
+            int credited = 0, lostOne = 0, answered = 0, ignored = 0, alertedSeen = 0, chargesAtStart = Theatre.Charges;
+            Hotspot ignoring = null;
+            var turnsLog = new List<string>();
+            bool shotThreat = false;
+            for (int guard = 0; guard < 60 && !Theatre.FinalOpen; guard++)
             {
-                var open = Theatre.Hotspots.Find(h => !h.final && !Theatre.Done(h));
-                if (open == null) break;
+                var offers = Theatre.Offers;
+                if (offers.Count < 3 || offers.Exists(o => !Theatre.Offered(o.spot))) { log.WriteLine($"Campaign: turn {Theatre.Turn} has {offers.Count} offers"); errors++; }
+                var rewards = new HashSet<Theatre.Reward>(offers.ConvertAll(o => o.reward));
+                if (rewards.Count != offers.Count || !offers.Exists(o => o.spot.heat < 0.6f)) { log.WriteLine($"Campaign: turn {Theatre.Turn} offers break the rules"); errors++; }
+                var threat = Theatre.ThreatSpot;
+                if (threat != null && !offers.Exists(o => o.spot == threat)) { log.WriteLine("Campaign: the threat isn't on offer"); errors++; }
+                if (Theatre.AlertedSpot != null) alertedSeen++;
+                if (threat != null && !shotThreat)
+                {
+                    shotThreat = true;
+                    game.OpenMenu();
+                    hud.TheatreOpen = true;
+                    yield return new WaitForSecondsRealtime(0.6f);
+                    yield return Shot("33a_campaign_threat");
+                    hud.TheatreOpen = false;
+                }
+                int before = Theatre.Standing;
+                // The first threat is dealt with; the second is left alone (another offer taken, both its turns) until it
+                // lapses; the rest are dealt with. Otherwise the easiest offer.
+                Hotspot pick = offers[0].spot;
+                foreach (var o in offers) if (o.spot.heat < pick.heat) pick = o.spot;
+                if (threat != null && answered > 0 && ignored == 0 && (ignoring == null || ignoring == threat))
+                {
+                    ignoring = threat;
+                    pick = offers.Find(o => o.spot != threat).spot;
+                    if (Theatre.ThreatDue <= Theatre.Turn) ignored++;
+                }
+                else if (threat != null)
+                {
+                    pick = threat;
+                    answered++;
+                }
                 if (credited == 4 && lostOne == 0)
                 {
-                    Theatre.Lost(open, 2);
+                    Theatre.Lost(pick, 2);
                     lostOne++;
-                    continue;
                 }
-                Theatre.Won(open, 0);
-                credited++;
+                else
+                {
+                    Theatre.Won(pick, 0);
+                    credited++;
+                }
+                turnsLog.Add($"{Theatre.Standing - before:+0;-0}");
             }
             var final = Theatre.Hotspots.Find(h => h.final);
-            log.WriteLine($"Campaign: {credited} sectors credited, {lostOne} lost, front advance {Theatre.Advance:F3}, final open {Theatre.FinalOpen}, " +
-                          $"final {(final != null ? final.sectorName + " / " + final.situation : "missing")}");
+            log.WriteLine($"Campaign: {Theatre.Turn - 1} turns, {credited} won, {lostOne} lost, threats answered {answered}, ignored {ignored}, turns with an alerted sector {alertedSeen}, " +
+                          $"progress {Theatre.Standing}/{Theatre.ProgressForFinal}, charges {chargesAtStart} at the start, {Theatre.Charges} now, intel +{Theatre.Stacks(Theatre.Bonus.Intel)}, " +
+                          $"rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}, front advance {Theatre.Advance:F3}, final open {Theatre.FinalOpen}, " +
+                          $"final {(final != null ? final.sectorName + " / " + final.situation : "missing")}; per turn {string.Join(" ", turnsLog)}");
+            if (!Theatre.FinalOpen || chargesAtStart != 2 || ignored == 0 || answered == 0) errors++;
             game.OpenMenu();
             hud.TheatreOpen = true;
             yield return new WaitForSecondsRealtime(0.6f);
@@ -522,6 +561,13 @@ namespace DroneSandbox
 
             game.PlayHotspot(final);
             while (game.Loading) yield return null;
+            // A support charge spent in the briefing: one more drone of a type the mission has.
+            int strikes = game.StockLeft(DroneType.Strike), charges = Theatre.Charges;
+            bool spent = game.SpendSupport(DroneType.Strike);
+            log.WriteLine($"Campaign briefing: spent a charge {spent}, Strikes {strikes} -> {game.StockLeft(DroneType.Strike)}, charges {charges} -> {Theatre.Charges}");
+            if (spent != (charges > 0 && strikes > 0) || (spent && game.StockLeft(DroneType.Strike) != strikes + 1)) errors++;
+            yield return new WaitForSecondsRealtime(0.4f);
+            yield return Shot("33b_campaign_briefing");
             game.CloseBriefing();
             yield return new WaitForSeconds(1f);
             foreach (var e in game.enemies.FindAll(e => e != null && e.isTarget)) e.TakeDamage(100000f);

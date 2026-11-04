@@ -109,6 +109,8 @@ namespace DroneSandbox
 
         public void OpenMenu()
         {
+            if (Mode == GameMode.Mission && Hotspot != null && Result == MissionResult.None && !BriefingOpen && MissionTime > 0f)
+                Theatre.Lost(Hotspot, dronesLost); // walking away from a campaign operation under way loses it
             ClearUnits();
             Mode = GameMode.Menu;
             Mission = null;
@@ -185,6 +187,8 @@ namespace DroneSandbox
             if (Mission.key == null) Mission.key = $"mission{index}";
             Atmosphere.SetWeather(hotspot != null ? hotspot.weather : Weather.Clear);
             for (int t = 0; t < stock.Length; t++) stock[t] = MissionStock(Mission, (DroneType)t);
+            SupportSpent = 0;
+            EnemyUnit.Wariness = Theatre.IsAlerted(hotspot) ? 1.3f : 1f;
             rts.Orbit(false);
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
 
@@ -371,6 +375,18 @@ namespace DroneSandbox
                 pauseVolume.weight = Mathf.MoveTowards(pauseVolume.weight, Paused ? 1f : 0f, Time.unscaledDeltaTime / 0.15f);
         }
 
+        // A support charge spent in a campaign mission's briefing: one more drone of a type the mission already offers
+        // (not the Nightjar).
+        public int SupportSpent { get; private set; }
+
+        public bool SpendSupport(DroneType type)
+        {
+            if (Hotspot == null || !BriefingOpen || type == DroneType.Bomber || MissionStock(Mission, type) <= 0 || !Theatre.SpendCharge()) return false;
+            stock[(int)type]++;
+            SupportSpent++;
+            return true;
+        }
+
         public void RetryMission()
         {
             if (MissionIndex >= 0) StartMission(MissionIndex);
@@ -389,7 +405,7 @@ namespace DroneSandbox
         {
             if ((mission.shadowSeconds > 0f || mission.huntRobots > 0) && type != DroneType.Scout) return 0; // Shadow and hunt missions are Scouts only
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) || mission.nightjar ? 1 : 0;
-            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + (type == DroneType.Kamikaze ? Theatre.SupplyBonus : 0);
+            return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0);
         }
 
         // The Nightjar's launch button shows in free play, and in missions once it's bought.

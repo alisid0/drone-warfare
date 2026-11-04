@@ -24,15 +24,20 @@ namespace DroneSandbox
     // The theatre of war: the whole fictional front, about 1,200 km of the Norvane-Dravin border, drawn as a 2D
     // map. Hotspots glow along the front line where the enemy is active; each one opens a sector built from its
     // seed. The campaign has a seed of its own (made the first time) and a round that goes up every third win:
-    // the front line moves your way, and a new set of hotspots flares up. A lost fight pushes the front back a
-    // little. Win WinsForFinal sectors and the final operation opens: a strike on the Dravin front command; destroy
-    // it and the campaign is complete (the ground offensive breaks through: the drones open the way, they don't
-    // win the war on their own). Saved through Progress.
+    // the front line moves your way, and a new set of hotspots flares up.
+    // The campaign is played in turns, one operation each (the 1.0 design, agreed with ChatGPT): three of the
+    // hotspots are on offer, each for a different reward (Intel, Support or Ground). Progress is counted in
+    // half-wins: a win +2 (+3 for Ground), a loss -1, an ignored Dravin threat -1, but never more than -1 in a turn,
+    // nor below 0. At most one threat is announced at a time, on offer for two turns; left alone, it costs ground and
+    // puts another hotspot on alert. At ProgressForFinal the final operation opens: a strike on the Dravin front
+    // command; destroy it and the campaign is complete (the ground offensive breaks through: the drones open the
+    // way, they don't win the war on their own). Support charges (start 2, at most 3) buy an extra drone before a
+    // mission. Saved through Progress.
     public static class Theatre
     {
         public const int HotspotCount = 11;
         public const float FrontKilometres = 1200f;
-        public const int WinsForFinal = 12;
+        public const int ProgressForFinal = 24; // half-wins: twelve clean wins
 
         static List<Hotspot> hotspots;
         static int builtRound = -1;
@@ -62,12 +67,15 @@ namespace DroneSandbox
         public static int Losses => Progress.Get("theatre.losses");
         public static int DronesLost => Progress.Get("theatre.dronesLost");
         public static int Fights => Progress.Get("theatre.fights");
-        public static bool FinalOpen => Wins >= WinsForFinal && !Victory;
+        public static int Turn => Mathf.Max(1, Progress.Get("theatre.turn"));
+        public static int Standing => Progress.Get("theatre.progress");  // progress toward the final, in half-wins
+        public static bool FinalOpen => Standing >= ProgressForFinal && !Victory;
         public static bool Victory => Progress.Get("theatre.victory") == 1;
+        public static string Outcome = "", News = ""; // what the last operation did for the campaign, and what the turn brought
 
         // How far the front has moved your way: 0 at the start, the full 0.12 (the Dravin lines) once the final
-        // operation opens. A loss gives back half a win's ground.
-        public static float Advance => Mathf.Clamp((Wins - 0.5f * Losses) * 0.12f / WinsForFinal, -0.04f, 0.12f);
+        // operation opens.
+        public static float Advance => Mathf.Clamp(Standing * 0.12f / ProgressForFinal, 0f, 0.12f);
 
         // The front line's height on the map (0-1) at x (0-1).
         public static float Front(float x)
@@ -80,9 +88,21 @@ namespace DroneSandbox
         {
             get
             {
+                Start();
                 if (hotspots == null || builtRound != Round || builtFinal != FinalOpen) Build();
                 return hotspots;
             }
+        }
+
+        // A campaign's first look: two support charges to begin with. A save from before turns gets its progress from
+        // the sectors it had won.
+        static void Start()
+        {
+            if (Progress.Get("campaign.started") != 0) return;
+            Progress.Set("campaign.started", 1);
+            Progress.Set("campaign.charges", 2);
+            if (Standing == 0 && Wins > 0) Progress.Set("theatre.progress", Mathf.Max(0, 2 * Wins - Losses));
+            Progress.Save();
         }
 
         static void Build()
@@ -132,66 +152,220 @@ namespace DroneSandbox
 
         public static bool Done(Hotspot h) => Victory || Progress.Get(h.Key + ".won") > 0; // the war won, all of it is
 
-        // ---- What winning buys (campaign bonuses, saved) ----
+        // ---- What winning buys (saved) ----
 
-        public enum Bonus { Intel, Supply, Rearm }
+        // Each turn's three operations offer one reward each: Intel (sharper reports), Support (a support charge) or
+        // Ground (the front moves further, and a forward strip comes closer: faster rearming).
+        public enum Reward { Intel, Support, Ground }
+        public enum Bonus { Intel, Rearm }
+        public const int MaxStacks = 2, MaxCharges = 3;
 
-        // What a sector's fight gives you for the rest of the war: beating air defences, jammers or decoys sharpens
-        // the reports (tighter contact circles); hitting logistics or columns frees up a Kamikaze for every
-        // mission; armour, artillery and airfield sectors give a forward strip (faster rearming).
-        public static Bonus BonusOf(Situation s)
-        {
-            switch (s)
-            {
-                case Situation.AAScreen: case Situation.AirDefenceBelt: case Situation.RadarStation: case Situation.JammingNode:
-                case Situation.DroneLaunchSite: case Situation.DecoyField: case Situation.ObservationPost:
-                    return Bonus.Intel;
-                case Situation.ArmouredColumn: case Situation.TankLaager: case Situation.DugInTanks: case Situation.Breakthrough:
-                case Situation.HiddenArtillery: case Situation.MortarLine: case Situation.RocketBattery: case Situation.AirfieldStrike:
-                    return Bonus.Rearm;
-                default:
-                    return Bonus.Supply;
-            }
-        }
-
-        static readonly int[] MaxStacks = { 3, 2, 2 };
-
-        public static int Stacks(Bonus b) => Progress.Get("campaign." + b);
-        public static float IntelFactor => 1f - 0.15f * Stacks(Bonus.Intel);   // contact circles in briefings
-        public static int SupplyBonus => Stacks(Bonus.Supply);                 // extra Kamikazes per mission
+        public static int Stacks(Bonus b) => Mathf.Min(MaxStacks, Progress.Get("campaign." + b));
+        public static int Charges => Progress.Get("campaign.charges");
+        static bool IntelBoosted => Progress.Get("campaign.intelBoostTurn") == Turn; // a Support reward won at full charges
+        public static float IntelFactor => 1f - 0.15f * (Stacks(Bonus.Intel) + (IntelBoosted ? 1 : 0)); // contact circles in briefings
         public static float RearmFactor => 1f - 0.15f * Stacks(Bonus.Rearm);   // Strike and Nightjar reload time
 
-        public static string BonusText(Bonus b) => b == Bonus.Intel ? "sharper reports (contact circles 15% tighter)"
-            : b == Bonus.Supply ? "+1 Kamikaze in every mission" : "a forward strip (rearming 15% faster)";
+        public static string RewardText(Reward r) => r == Reward.Intel ? "sharper reports (contact circles 15% tighter)"
+            : r == Reward.Support ? (Charges >= MaxCharges ? "charges full, so a one-turn intel boost instead" : "+1 support charge")
+            : "the front moves further (+3 progress, not +2) and rearming gets 15% faster";
+        public static bool RewardMaxed(Reward r) => r == Reward.Intel && Stacks(Bonus.Intel) >= MaxStacks;
 
-        public static bool BonusMaxed(Bonus b) => Stacks(b) >= MaxStacks[(int)b];
+        static void Stack(Bonus b) => Progress.Set("campaign." + b, Mathf.Min(MaxStacks, Stacks(b) + 1));
+        static void AddCharge() => Progress.Set("campaign.charges", Mathf.Min(MaxCharges, Charges + 1));
+        static void Change(int halfWins) => Progress.Set("theatre.progress", Mathf.Max(0, Standing + halfWins));
 
-        // A win cools the hotspot, pushes the front, banks the sector's bonus and brings the next round of fighting;
-        // the final operation done completes the campaign.
+        // A support charge spent before a mission: one more drone of a type it already offers (SandboxGame).
+        public static bool SpendCharge()
+        {
+            if (Charges <= 0) return false;
+            Progress.Set("campaign.charges", Charges - 1);
+            Progress.Save();
+            return true;
+        }
+
+        // A win banks its offer's reward and progress, deals with the threat if it was the one, and ends the turn;
+        // every second win brings a support charge, every third a new round (the hotspots move). The final
+        // operation done completes the campaign.
         public static void Won(Hotspot h, int dronesLost)
         {
             Record(dronesLost);
+            Outcome = News = "";
             if (h.final)
             {
                 Progress.Set("theatre.victory", 1);
                 Progress.Save();
                 return;
             }
-            if (Done(h)) return; // replayed after winning it: nothing more to gain
-            var bonus = BonusOf(h.situation);
-            Progress.Set("campaign." + bonus, Mathf.Min(MaxStacks[(int)bonus], Stacks(bonus) + 1));
+            if (Done(h))
+            {
+                Progress.Save(); // replayed after winning it: nothing more to gain
+                return;
+            }
+            var reward = RewardOf(h);
+            bool full = Charges >= MaxCharges;
+            Change(reward == Reward.Ground ? 3 : 2);
+            if (reward == Reward.Intel) Stack(Bonus.Intel);
+            else if (reward == Reward.Support && full) Progress.Set("campaign.intelBoostTurn", Turn + 1);
+            else if (reward == Reward.Support) AddCharge();
+            else Stack(Bonus.Rearm);
+            Outcome = $"Campaign: +{(reward == Reward.Ground ? 3 : 2)} progress ({Mathf.Min(Standing, ProgressForFinal)}/{ProgressForFinal})  \u00b7  " +
+                      (reward == Reward.Intel ? "sharper reports" : reward == Reward.Support ? (full ? "an intel boost next turn" : "+1 support charge") : "faster rearming");
+            if (IsThreat(h))
+            {
+                SetSpot("theatre.threat", null);
+                Progress.Set("theatre.nextThreat", Turn + 2);
+                News = $"Threat dealt with at {h.sectorName}.";
+            }
             Progress.Set(h.Key + ".won", 1);
             Progress.Set("theatre.wins", Wins + 1);
-            // Every third win starts a new round: the hotspots move.
+            if (Wins % 2 == 0 && Charges < MaxCharges)
+            {
+                AddCharge();
+                Outcome += "  \u00b7  +1 support charge for two wins";
+            }
             if (Wins % 3 == 0) Progress.Set("theatre.round", Round + 1);
-            Progress.Save();
+            EndTurn(false);
         }
 
-        // A lost fight gives the Dravin back a little ground (not below where the war started, give or take).
+        // A lost operation costs a half-win and ends the turn (the offers change: there's no retrying it).
         public static void Lost(Hotspot h, int dronesLost)
         {
             Record(dronesLost);
-            if (!h.final && !Done(h)) Progress.Set("theatre.losses", Losses + 1);
+            Outcome = News = "";
+            if (h.final || Done(h))
+            {
+                Progress.Save();
+                return;
+            }
+            Progress.Set("theatre.losses", Losses + 1);
+            Change(-1);
+            Outcome = $"Campaign: -1 progress ({Standing}/{ProgressForFinal})";
+            EndTurn(true);
+        }
+
+        // ---- Turns: three operations on offer, and the Dravin threat ----
+
+        static List<(Hotspot spot, Reward reward)> offers;
+        static int offersTurn = -1, offersRound = -1;
+        static bool offersFinal;
+
+        // This turn's three operations, each with a different reward, from the hotspots not yet won (the same three
+        // until the turn is played). The announced threat and an alerted hotspot are always among them, and at least
+        // one is of low or medium difficulty, so a player who's behind can always move forward.
+        public static List<(Hotspot spot, Reward reward)> Offers
+        {
+            get
+            {
+                if (offers == null || offersTurn != Turn || offersRound != Round || offersFinal != FinalOpen) BuildOffers();
+                return offers;
+            }
+        }
+
+        static void BuildOffers()
+        {
+            offersTurn = Turn;
+            offersRound = Round;
+            offersFinal = FinalOpen;
+            offers = new List<(Hotspot, Reward)>();
+            var rng = new System.Random(Seed * 17 + Turn * 104729);
+            var open = Hotspots.FindAll(h => !h.final && !Done(h));
+            var picks = new List<Hotspot>();
+            foreach (var must in new[] { ThreatSpot, AlertedSpot })
+                if (must != null && open.Contains(must) && !picks.Contains(must)) picks.Add(must);
+            var pool = open.FindAll(h => !picks.Contains(h));
+            for (int i = pool.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (pool[i], pool[j]) = (pool[j], pool[i]);
+            }
+            if (!picks.Exists(h => h.heat < 0.6f))
+            {
+                var easy = pool.Find(h => h.heat < 0.6f);
+                if (easy != null)
+                {
+                    picks.Add(easy);
+                    pool.Remove(easy);
+                }
+            }
+            foreach (var h in pool)
+            {
+                if (picks.Count >= 3) break;
+                picks.Add(h);
+            }
+            var rewards = new List<Reward> { Reward.Intel, Reward.Support, Reward.Ground };
+            for (int i = rewards.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (rewards[i], rewards[j]) = (rewards[j], rewards[i]);
+            }
+            for (int i = 0; i < picks.Count; i++) offers.Add((picks[i], rewards[i]));
+        }
+
+        public static bool Offered(Hotspot h) => h != null && (h.final ? FinalOpen : Offers.Exists(o => o.spot == h));
+
+        public static Reward RewardOf(Hotspot h)
+        {
+            foreach (var o in Offers) if (o.spot == h) return o.reward;
+            return Reward.Ground;
+        }
+
+        // The announced threat: a busy hotspot of this round where the Dravin are building up, on offer this turn and
+        // the next. And a hotspot on alert after an ignored threat, for up to two turns.
+        public static Hotspot ThreatSpot => SpotAt("theatre.threat");
+        public static int ThreatDue => Progress.Get("theatre.threatDue");
+        public static bool IsThreat(Hotspot h) => h != null && h == ThreatSpot;
+        public static Hotspot AlertedSpot => Turn <= Progress.Get("theatre.alertedUntil") ? SpotAt("theatre.alerted") : null;
+        public static bool IsAlerted(Hotspot h) => h != null && h == AlertedSpot;
+
+        // A hotspot saved as its place in its round's list (plus one: 0 for none), with that round: a new round moves
+        // the hotspots, and the threat and the alert go with them.
+        static Hotspot SpotAt(string key)
+        {
+            int i = Progress.Get(key) - 1;
+            if (i < 0 || Progress.Get(key + "Round") != Round) return null;
+            var list = Hotspots;
+            return i < list.Count ? list[i] : null;
+        }
+
+        static void SetSpot(string key, Hotspot h)
+        {
+            Progress.Set(key, h != null ? Hotspots.IndexOf(h) + 1 : 0);
+            Progress.Set(key + "Round", Round);
+        }
+
+        // After every campaign operation: a threat still there at the end of its last turn costs a half-win (within
+        // the turn's cap of one lost) and puts another hotspot on alert. Then the turn moves on, and once the front
+        // has had a quiet turn (and from the third turn), the Dravin announce a new threat.
+        static void EndTurn(bool setback)
+        {
+            int turn = Turn;
+            var threat = ThreatSpot;
+            if (threat != null && turn >= ThreatDue)
+            {
+                if (!setback) Change(-1);
+                var others = Hotspots.FindAll(h => !h.final && !Done(h) && h != threat);
+                var alerted = others.Count > 0 ? others[new System.Random(Seed + turn * 31).Next(others.Count)] : null;
+                SetSpot("theatre.alerted", alerted);
+                Progress.Set("theatre.alertedUntil", turn + 2);
+                SetSpot("theatre.threat", null);
+                Progress.Set("theatre.nextThreat", turn + 2);
+                News = $"Threat ignored at {threat.sectorName}: the front gives ground" + (alerted != null ? $", and {alerted.sectorName} is ALERTED." : ".");
+                if (!setback) Outcome += (Outcome.Length > 0 ? "  \u00b7  " : "Campaign: ") + "-1 progress for the ignored threat";
+            }
+            turn++;
+            Progress.Set("theatre.turn", turn);
+            if (ThreatSpot == null && turn >= Mathf.Max(3, Progress.Get("theatre.nextThreat")) && !FinalOpen)
+            {
+                var candidates = Hotspots.FindAll(h => !h.final && !Done(h) && h.heat >= 0.45f && !IsAlerted(h));
+                if (candidates.Count > 0)
+                {
+                    var t = candidates[new System.Random(Seed * 7 + turn).Next(candidates.Count)];
+                    SetSpot("theatre.threat", t);
+                    Progress.Set("theatre.threatDue", turn + 1);
+                    News += (News.Length > 0 ? "  " : "") + $"New threat: the Dravin are building up at {t.sectorName}.";
+                }
+            }
             Progress.Save();
         }
 
@@ -210,10 +384,12 @@ namespace DroneSandbox
             Progress.Forget("hotspot.");
             seed = 0;
             hotspots = null;
+            offers = null;
             builtRound = -1;
+            Outcome = News = "";
             mapAdvance = -1f;
             Progress.Set("theatre.seed", Random.Range(1, 1000000));
-            Progress.Save();
+            Start(); // two support charges, from the first briefing on
         }
 
         // ---- The map picture ----

@@ -20,6 +20,7 @@ namespace DroneSandbox
         public const float JamRadius = 24f;     // drones inside a jammer's circle lose their link
         public const float AlertSeconds = 30f;  // how long a unit stays on alert after the last trouble
         public const float AlertShare = 42f;    // units this close to one that's hit or destroyed go on alert too
+        public static float Wariness = 1f;      // an ALERTED campaign sector (Theatre): drones noticed further off, the alarm spreading wider
 
         public EnemyType type;
         public bool isTarget;          // a mission objective
@@ -622,7 +623,7 @@ namespace DroneSandbox
             float range = type == EnemyType.Radar ? RadarCoverage + 10f
                 : type == EnemyType.AAGun ? CurrentRange + 6f
                 : IsMobile ? 26f : 20f;
-            range *= Mathf.Lerp(1f, 0.7f, dark) * Recon.WeatherFactor;
+            range *= Mathf.Lerp(1f, 0.7f, dark) * Recon.WeatherFactor * Wariness;
             if (distance > range) return;
             Alert(drone.transform.position);
             if (type == EnemyType.Radar)
@@ -668,7 +669,7 @@ namespace DroneSandbox
                 if (e == null || e == this || !e.IsAlive) continue;
                 Vector3 offset = e.transform.position - transform.position;
                 offset.y = 0f;
-                if (offset.magnitude <= AlertShare) e.Alert(threat, false);
+                if (offset.magnitude <= AlertShare * Wariness) e.Alert(threat, false);
             }
         }
 

@@ -73,11 +73,18 @@ namespace DroneSandbox
         }
 
         // A badge on the theatre map: control colour, country glyph, and an activity ring.
-        void HotspotBadge(Vector2 c, Hotspot h, bool done, bool chosenOne, bool hovered)
+        // Not on offer this turn (dim): faded, no activity ring.
+        void HotspotBadge(Vector2 c, Hotspot h, bool done, bool chosenOne, bool hovered, bool dim = false)
         {
             float s = Scale;
-            float size = (24f + 12f * h.heat) * s * (hovered ? 1.15f : 1f) * (h.final ? 1.4f : 1f);
+            float size = (24f + 12f * h.heat) * s * (hovered ? 1.15f : 1f) * (h.final ? 1.4f : 1f) * (dim ? 0.8f : 1f);
             Color control = done ? Teal : DravinOrange;
+            if (dim)
+            {
+                Stamp(BadgeTexture(), c, size * 0.5f, new Color(control.r, control.g, control.b, 0.35f));
+                Stamp(CountryGlyph(CountryOf(h.kind)), c, size * 0.32f, new Color(Ink.r, Ink.g, Ink.b, 0.5f));
+                return;
+            }
             if (h.final && !done)
             {
                 // The final operation: a steady red ring round its badge and its name over it (under it, it ran into
