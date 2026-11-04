@@ -131,8 +131,10 @@ namespace DroneSandbox
                 if (ShopOpen) DrawShop();
                 else if (TheatreOpen) DrawTheatre();
                 else if (ControlsOpen) DrawControls();
+                else if (AchievementsOpen) DrawAchievements();
                 else if (SettingsOpen) DrawSettings();
                 else DrawMenu();
+                DrawAchievementToast();
                 return;
             }
 
@@ -155,6 +157,7 @@ namespace DroneSandbox
             DrawHelp();
             GUI.enabled = true;
             DrawMessage();
+            DrawAchievementToast();
             DrawCoach();
             DrawPauseBanner();
             DrawTelemetry();
@@ -640,7 +643,7 @@ namespace DroneSandbox
                 SettingsOpen = true;
             GUI.Label(new Rect(shop.xMax - 130f * s, shop.y, 116f * s, shop.height), $"<b>{Tech.Points}</b> points",
                 Tinted(new GUIStyle(label) { alignment = TextAnchor.MiddleRight }, TargetColor));
-            GUI.Label(new Rect(r.x, r.yMax - 40f * s, r.width, 24f * s), "Finish a mission to unlock the next one.", Tinted(centered, small.normal.textColor));
+            if (GUI.Button(new Rect(r.x + 30f * s, r.yMax - 42f * s, r.width - 60f * s, 28f * s), "Achievements", button)) AchievementsOpen = true;
         }
 
         // Buy new drones and upgrades with points earned in missions. Purchases are kept between missions.
