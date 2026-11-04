@@ -373,7 +373,8 @@ namespace DroneSandbox
                 case EnemyType.Tank:
                 case EnemyType.APC:
                     Move(dt);
-                    TrackNearestDrone(30f, 40f, dt);
+                    var escortTarget = TrackNearestDrone(30f, 40f, dt);
+                    if (type == EnemyType.APC) Escort(escortTarget, dt);
                     break;
                 case EnemyType.Truck:
                 case EnemyType.Tanker:
@@ -431,7 +432,7 @@ namespace DroneSandbox
 
         void Suppress(float hit)
         {
-            if (type != EnemyType.AAGun) return;
+            if (type != EnemyType.AAGun && type != EnemyType.APC) return;
             float now = Time.time;
             if (hit >= 25f)
             {
@@ -450,6 +451,23 @@ namespace DroneSandbox
             if (!was) SandboxGame.Instance.OnSuppressed(this, seconds);
         }
         public bool OnRoute => route != null;
+        public List<Vector3> Route => route;
+
+        // Seconds until this vehicle reaches the end of its route at its normal pace (counting any wait to set off).
+        public float SecondsToRouteEnd()
+        {
+            if (route == null || moveSpeed <= 0f) return 0f;
+            float metres = 0f;
+            Vector3 at = transform.position;
+            for (int i = routeIndex; i < route.Count; i++)
+            {
+                Vector3 step = route[i] - at;
+                step.y = 0f;
+                metres += step.magnitude;
+                at = route[i];
+            }
+            return Mathf.Max(0f, departAt - Time.time) + metres / moveSpeed;
+        }
 
         // Takes the other road at a fork: `path` matches the current route up to `fork`. False if it's already past.
         public bool Divert(List<Vector3> path, int fork)
@@ -841,6 +859,21 @@ namespace DroneSandbox
                 turret.localRotation = Quaternion.RotateTowards(turret.localRotation, aim, turnSpeed * dt);
             }
             return target;
+        }
+
+        // An APC's machine gun: once alerted it fires on a drone that comes within 16 m (short bursts, half of them
+        // hitting), so diving on a convoy it escorts costs something. Pinned like an AA gun by fire.
+        void Escort(Unit nearest, float dt)
+        {
+            cooldown -= dt;
+            if (!Alerted || nearest == null || Suppressed || cooldown > 0f) return;
+            if (Vector3.Distance(nearest.AimPoint, AimPoint) > 16f) return;
+            cooldown = 0.6f;
+            Vector3 muzzle = AimPoint + Vector3.up * 0.8f;
+            Projectile.Bullet(muzzle, nearest, team, 4f, 0.5f, new Color(1f, 0.6f, 0.3f));
+            Sound.At("gunshot", muzzle, 0.5f);
+            Effects.Spark(muzzle);
+            LastShotTime = Time.time;
         }
 
         void Defend(float dt)

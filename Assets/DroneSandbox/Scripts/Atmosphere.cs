@@ -172,8 +172,11 @@ namespace DroneSandbox
 
         // Weather on top of the usual sky: more cloud for overcast, dark storm clouds and thicker haze for rain,
         // a low thick fog for fog. Clear takes the overrides away.
+        public static Weather Current { get; private set; } = Weather.Clear;
+
         public static void SetWeather(Weather weather)
         {
+            Current = weather;
             if (weatherVolume == null)
             {
                 var profile = ScriptableObject.CreateInstance<VolumeProfile>();

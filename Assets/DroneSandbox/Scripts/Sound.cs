@@ -3,14 +3,16 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Plays the game's sounds (all made by Synth).
+    // Plays the game's sounds: recorded effects from Resources/Sounds where there are any (made with ElevenLabs:
+    // "explosion 1", "explosion 2"... are variants of "explosion"), and Synth's for the rest and for the interface.
     // - Listening: the ears sit partway down the camera's line of sight, a little above the ground being looked
     //   at, so what's on screen is loud and off-screen fights are faint.
     // - Mix, in four groups: ambience about -24 dB, combat -12 dB, warnings -8 dB and the interface -14 dB.
     //   Motors duck a few dB while a warning plays.
     // - Combat sounds come from a pool of sources placed where things happen. Each drone carries its own motor
     //   loop, pitched by how hard it's flying.
-    // - Ambience: wind all the time, birds by day and crickets at night, following DayNight.
+    // - Ambience: wind all the time, birds by day and crickets at night, following DayNight; rain and now and then
+    //   thunder while it's raining (only with recorded clips).
     public class Sound : MonoBehaviour
     {
         public static Sound Instance { get; private set; }
@@ -26,7 +28,8 @@ namespace DroneSandbox
         readonly List<AudioSource> motors = new List<AudioSource>();
         AudioSource[] pool;
         int nextSource;
-        AudioSource ui, wind, birds, crickets;
+        AudioSource ui, wind, birds, crickets, rain;
+        float nextThunder;
         Transform ears;
         Camera cam;
         RtsController rts;
@@ -71,6 +74,8 @@ namespace DroneSandbox
             Add("motor Strike", Synth.Motor("Strike motor", 138f));
             Add("motor Kamikaze", Synth.Motor("Kamikaze motor", 215f));
             Add("motor Bomber", Synth.Motor("Nightjar motor", 92f));
+            int recorded = LoadRecorded();
+            if (recorded > 0) Debug.Log($"Sound: {recorded} recorded clips in use");
 
             pool = new AudioSource[28];
             for (int i = 0; i < pool.Length; i++)
@@ -82,12 +87,33 @@ namespace DroneSandbox
             ui = ears.gameObject.AddComponent<AudioSource>();
             ui.spatialBlend = 0f;
             ui.ignoreListenerPause = true; // clicks and pips still sound during a tactical pause
-            wind = Loop(Synth.Wind(), GroupVolume[(int)Group.Ambient] * 1.6f);
-            birds = Loop(Synth.Birds(), 0f);
-            crickets = Loop(Synth.Crickets(), 0f);
+            wind = Loop(First("wind") ?? Synth.Wind(), GroupVolume[(int)Group.Ambient] * 1.6f);
+            birds = Loop(First("birds") ?? Synth.Birds(), 0f);
+            crickets = Loop(First("crickets") ?? Synth.Crickets(), 0f);
+            if (First("rain") is AudioClip rainClip) rain = Loop(rainClip, 0f);
         }
 
         void Add(string name, params AudioClip[] variants) => clips[name] = variants;
+
+        AudioClip First(string name) => clips.TryGetValue(name, out var found) && found.Length > 0 ? found[0] : null;
+
+        // The recorded clips in Resources/Sounds, each replacing the synthesized sound of its name (a trailing
+        // number marks a variant). Returns how many there were.
+        int LoadRecorded()
+        {
+            var found = new Dictionary<string, List<AudioClip>>();
+            var all = Resources.LoadAll<AudioClip>("Sounds");
+            foreach (var clip in all)
+            {
+                string name = clip.name.Trim();
+                int space = name.LastIndexOf(' ');
+                if (space > 0 && int.TryParse(name.Substring(space + 1), out _)) name = name.Substring(0, space);
+                if (!found.TryGetValue(name, out var list)) found[name] = list = new List<AudioClip>();
+                list.Add(clip);
+            }
+            foreach (var pair in found) clips[pair.Key] = pair.Value.ToArray();
+            return all.Length;
+        }
 
         static AudioSource World3D(AudioSource source, float near, float far)
         {
@@ -124,6 +150,14 @@ namespace DroneSandbox
             float quiet = SandboxGame.Instance != null && SandboxGame.Instance.Mode == GameMode.Menu ? 0.6f : 1f;
             birds.volume = Mathf.MoveTowards(birds.volume, ambient * 1.3f * Mathf.Clamp01(day * 1.5f - 0.2f) * quiet, Time.unscaledDeltaTime);
             crickets.volume = Mathf.MoveTowards(crickets.volume, ambient * 0.9f * Mathf.Clamp01(1f - day * 2f) * quiet, Time.unscaledDeltaTime);
+            bool raining = Atmosphere.Current == Weather.Rain;
+            if (rain != null) rain.volume = Mathf.MoveTowards(rain.volume, raining ? ambient * 2.4f * quiet : 0f, Time.unscaledDeltaTime * 0.5f);
+            // Thunder now and then in rain.
+            if (raining && clips.ContainsKey("thunder") && Time.unscaledTime > nextThunder)
+            {
+                if (nextThunder > 0f && Ready("thunder", 8f)) ui.PlayOneShot(Pick("thunder"), ambient * 3.2f * quiet);
+                nextThunder = Time.unscaledTime + Random.Range(14f, 38f);
+            }
 
             float duck = Time.unscaledTime < duckUntil ? Db(-4f) : 1f;
             motors.RemoveAll(m => m == null);

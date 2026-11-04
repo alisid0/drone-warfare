@@ -233,7 +233,9 @@ namespace DroneSandbox
             for (int i = 0; i < segments; i++)
             {
                 float a = 2f * Mathf.PI * i / segments;
-                vertices[i + 1] = new Vector3(Mathf.Sin(a) * radius, 0.03f, Mathf.Cos(a) * radius);
+                // A ragged edge, kept inside the walls: gravel spread by hand and worn back by vehicles.
+                float r = radius * Mathf.Min(1f, 0.82f + 0.6f * (Ground.SiteEdge(Mathf.Sin(a) * radius, Mathf.Cos(a) * radius) - 0.95f) + 0.08f);
+                vertices[i + 1] = new Vector3(Mathf.Sin(a) * r, 0.03f, Mathf.Cos(a) * r);
                 uvs[i + 1] = new Vector2(vertices[i + 1].x, vertices[i + 1].z); // metres, like the models
                 triangles[i * 3] = 0;
                 triangles[i * 3 + 1] = i + 1;

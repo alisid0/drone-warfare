@@ -198,6 +198,8 @@ namespace DroneSandbox
                 units[real] = b;
             }
             Diverted = false;
+            // A forked route: which exit the column means to take changes from try to try (four times in ten, north).
+            convoyPlan = Mission.convoyBranch != null && Random.value < 0.4f ? Mission.convoyBranch : Mission.convoyRoute;
             foreach (var u in units)
             {
                 Vector3 position = u.position;
@@ -232,8 +234,9 @@ namespace DroneSandbox
                 if (building != null) enemy.AttachStructure(building);
                 if (u.convoy > 0)
                 {
-                    enemy.Drive(Mission.convoyRoute, routeStart + 1, Mission.convoySpeed);
+                    enemy.Drive(convoyPlan ?? Mission.convoyRoute, routeStart + 1, Mission.convoySpeed);
                     enemy.departAt = Time.time + Mission.convoyDelay;
+                    if (Mission.convoyBranch != null) enemy.alertSeconds = 10f; // a fork convoy settles after a scare
                 }
                 else if (enemy.IsMobile) enemy.Park();
                 if (u.hidden)
@@ -466,6 +469,7 @@ namespace DroneSandbox
             RecordTracks();
             SpotHidden();
             WatchBranch();
+            WatchConvoy();
             if (IsShadow && Phase != MissionPhase.Extract)
             {
                 bool watched = false, spotted = false;
@@ -624,6 +628,22 @@ namespace DroneSandbox
 
         // Targets down: the drones still flying have a minute to get home (straight to the results if there are none).
         public bool Diverted { get; private set; }
+        List<Vector3> convoyPlan; // the route this try's column means to take
+
+        // Seconds until the column we can see now gets off the map at its normal pace, or -1 if we can't see it.
+        public float ConvoyEta { get; private set; } = -1f;
+
+        void WatchConvoy()
+        {
+            ConvoyEta = -1f;
+            if (Mode != GameMode.Mission || Mission == null || Mission.convoyRoute == null || IsShadow) return;
+            foreach (var e in enemies)
+                if (e != null && e.OnRoute && e.Observed && (e.isTarget || e.isDecoy))
+                {
+                    float eta = e.SecondsToRouteEnd();
+                    if (ConvoyEta < 0f || eta < ConvoyEta) ConvoyEta = eta;
+                }
+        }
 
         float lastPinnedMessage = -100f;
 
@@ -644,12 +664,15 @@ namespace DroneSandbox
                 if (e != null && e.OnRoute && e.Alerted) spooked = true;
             if (!spooked) return;
             Diverted = true;
+            // The other exit from the one it meant to take.
+            var other = convoyPlan == Mission.convoyBranch ? Mission.convoyRoute : Mission.convoyBranch;
             int turned = 0;
             foreach (var e in enemies)
-                if (e != null && e.Divert(Mission.convoyBranch, Mission.branchAt)) turned++;
+                if (e != null && e.Divert(other, Mission.branchAt)) turned++;
             if (turned > 0)
             {
-                ShowMessage("The column's spooked - it's turning north at the crossroads, for the far exit", 4.5f);
+                ShowMessage(other == Mission.convoyBranch ? "The column's spooked - it'll turn north at the crossroads, for the far exit"
+                    : "The column's spooked - it'll turn east at the crossroads instead", 4.5f);
                 Sound.Alert("contact", 0.5f);
             }
         }

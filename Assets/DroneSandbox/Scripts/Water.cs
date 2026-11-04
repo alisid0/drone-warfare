@@ -151,6 +151,20 @@ namespace DroneSandbox
             var ponds = MapLayout.Plan.ponds;
             bool lakes = false;
             foreach (var pond in ponds) if (pond.radius > 30f) lakes = true;
+            if (!lakes)
+            {
+                // Small pools: a still, glossy surface of murky olive water (HDRP's water system drew them nearly
+                // black from above, whatever their colour), reflecting the sky the way farm ponds do in aerial photos.
+                var pools = new GameObject("Pools");
+                pools.transform.SetParent(root, false);
+                pools.AddComponent<MeshFilter>().sharedMesh = PondMesh();
+                var renderer = pools.AddComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var still = Art.NewMaterial(new Color(0.3f, 0.38f, 0.32f));
+                still.SetFloat("_Smoothness", 0.92f);
+                renderer.sharedMaterial = still;
+                return;
+            }
             var first = ponds[0];
             var surface = Surface(lakes ? "Lakes" : "Pools", root, WaterSurfaceType.OceanSeaLake,
                 new Vector3(first.center.x, first.level, first.center.y), PondMesh());
@@ -164,9 +178,9 @@ namespace DroneSandbox
             surface.smoothnessFadeDistance = 800f;
             // Brighter in colour than the reservoir's: seen from above, a basin of clear water otherwise reads black.
             // Pools are murky, olive-brown with silt and weed, as farm and marsh ponds look in aerial photographs.
-            surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.33f, 0.4f, 0.24f);
-            surface.scatteringColor = lakes ? new Color(0.05f, 0.3f, 0.32f) : new Color(0.22f, 0.28f, 0.14f);
-            surface.absorptionDistance = lakes ? 9f : 1.6f;
+            surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.37f, 0.46f, 0.4f); // shallows (94, 118, 101)
+            surface.scatteringColor = lakes ? new Color(0.05f, 0.3f, 0.32f) : new Color(0.23f, 0.33f, 0.31f); // deep (58, 83, 79)
+            surface.absorptionDistance = lakes ? 9f : 1f;
         }
 
         // A 2 m grid over every pool, at that pool's own level, kept wherever it's near the water.

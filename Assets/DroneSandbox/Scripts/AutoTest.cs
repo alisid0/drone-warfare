@@ -832,23 +832,30 @@ namespace DroneSandbox
                 int loadedSlot = loaded != null ? tankers.IndexOf(loaded) : -1;
                 int looked = 0;
                 bool struck = false, divertShot = false;
-                for (float t = 0f; t < 110f && game.Result == MissionResult.None; t += 0.5f)
+                float etaSeen = -1f;
+                for (float t = 0f; t < 200f && game.Result == MissionResult.None; t += 0.5f)
                 {
+                    if (etaSeen < 0f && game.ConvoyEta >= 0f) etaSeen = game.ConvoyEta;
                     if (eye != null && looked < tankers.Count)
                     {
                         var next = tankers[looked];
                         if (next == null || next.Intel == Intel.Confirmed) looked++;
-                        else eye.MoveTo(next.transform.position);
+                        else eye.MoveTo(Ground.OnGround(next.MarkerPosition)); // where we last saw it, not where it is
                     }
-                    else if (!struck && loaded != null)
+                    else if (!struck)
                     {
-                        struck = true;
-                        for (int i = 0; i < 2; i++)
+                        // Only what the player could know: the tanker that hasn't shown itself to be the empty one.
+                        var pick = tankers.Find(tk => tk != null && tk.IsAlive && tk.Intel == Intel.Confirmed && !tk.ExposedDecoy);
+                        if (pick != null)
                         {
-                            var d = game.SpawnDrone(DroneType.Strike);
-                            if (d != null) d.Attack(loaded);
+                            struck = true;
+                            for (int i = 0; i < 2; i++)
+                            {
+                                var d = game.SpawnDrone(DroneType.Strike);
+                                if (d != null) d.Attack(pick);
+                            }
+                            if (eye != null) eye.MoveTo(game.basePosition);
                         }
-                        if (eye != null) eye.MoveTo(game.basePosition);
                     }
                     if (game.Phase == MissionPhase.Extract)
                         foreach (var d in game.drones)
@@ -862,14 +869,14 @@ namespace DroneSandbox
                     }
                     yield return new WaitForSecondsRealtime(0.5f);
                 }
-                log.WriteLine($"Last Delivery (look, then strike): loaded tanker was #{loadedSlot + 1} of {tankers.Count}, confirmed {looked}, diverted {game.Diverted}, " +
+                log.WriteLine($"Last Delivery (look, then strike): loaded tanker was #{loadedSlot + 1} of {tankers.Count}, confirmed {looked}, diverted {game.Diverted}, first ETA shown {etaSeen:F0} s, " +
                               $"result {game.Result} ({game.ResultReason}), drones used {game.DronesUsed}, {game.MissionTime:F0} s");
                 yield return Shot("13c_last_delivery_result");
 
                 game.StartMission(delivery);
                 game.CloseBriefing();
                 Time.timeScale = 4f;
-                for (float t = 0f; t < 45f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSecondsRealtime(0.5f);
+                for (float t = 0f; t < 60f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSecondsRealtime(0.5f);
                 Time.timeScale = 1f;
                 log.WriteLine($"Last Delivery (nobody stops it): result {game.Result} ({game.ResultReason}) at {game.MissionTime:F0} s");
             }

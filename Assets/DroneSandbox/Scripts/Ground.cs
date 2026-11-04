@@ -268,7 +268,13 @@ namespace DroneSandbox
                     float level = ponds[i].level, h = world[zi, xi];
                     float bumps = (Mathf.PerlinNoise(x * 0.09f + 17f, z * 0.09f + 41f) - 0.5f) * 1.5f;
                     if (s < 0f)
-                        h = Mathf.Min(h, level - Mathf.Min(ponds[i].radius > 60f ? 7f : 3.5f, 0.3f - s * 0.22f) + bumps * 0.25f);
+                    {
+                        // A shallow shelf for the first 3 m out from the shore (down to half a metre), then sloping
+                        // to the deepest: a pond you can see the bottom of near its edges, as farm ponds are.
+                        float deepest = ponds[i].radius > 60f ? 7f : 1.7f;
+                        float depth = -s < 3f ? 0.08f - s * 0.14f : Mathf.Min(deepest, 0.5f + (-s - 3f) * 0.2f);
+                        h = Mathf.Min(h, level - depth + bumps * 0.15f);
+                    }
                     else
                     {
                         float bank = level + 0.25f + s * 0.12f + bumps * Mathf.Clamp01(s / 10f);
@@ -375,6 +381,15 @@ namespace DroneSandbox
             return h;
         }
 
+        // Where a bare site's worn ground stops, as a share of its radius in the direction (dx, dz): ragged, from
+        // about 0.75 to 1.2, so a compound's trodden earth spills out in places and grass creeps in at others.
+        public static float SiteEdge(float dx, float dz)
+        {
+            float a = Mathf.Atan2(dz, dx);
+            return 0.95f + 0.12f * Mathf.Sin(3f * a + 1.3f) + 0.07f * Mathf.Sin(5f * a + 0.4f) + 0.04f * Mathf.Sin(9f * a + 2.2f)
+                   + 0.12f * (Mathf.PerlinNoise(dx * 0.15f + 40f, dz * 0.15f + 9f) - 0.5f);
+        }
+
         // 0 inside a flat site, easing up to 1 a little outside it.
         static float FlatMask(float x, float z, out bool bare)
         {
@@ -385,7 +400,7 @@ namespace DroneSandbox
                 float d = Vector2.Distance(new Vector2(x, z), new Vector2(s.center.x, s.center.z));
                 float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / (s.radius * 0.6f + 6f));
                 if (m < mask) mask = m;
-                if (s.bare && d < s.radius * 0.9f) bare = true;
+                if (s.bare && d < s.radius * SiteEdge(x - s.center.x, z - s.center.z)) bare = true;
             }
             return mask;
         }
@@ -525,7 +540,13 @@ namespace DroneSandbox
                             dirt = Mathf.Max(dirt, shore);
                         }
                         // A pond's edge is lush grass and reeds, trodden to mud only in patches (where things come to
-                        // drink), not a ring of bare earth.
+                        // drink), not a ring of bare earth; under the water a pale bed of silt and gravel shows
+                        // through the shallows.
+                        else if (lake < 0f)
+                        {
+                            rock = Mathf.Max(rock, 0.45f);
+                            dirt = Mathf.Max(dirt, 0.8f);
+                        }
                         else dirt = Mathf.Max(dirt, shore * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.18f + 7f, z * 0.18f + 3f) - 0.5f) * 4f));
                     }
                     // A few worn patches.

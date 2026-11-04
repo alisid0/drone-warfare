@@ -182,8 +182,10 @@ namespace DroneSandbox
                 name = "Last Delivery",
                 briefing = "The last fuel for the Dravin forward depot is coming up the south road: two tankers, one loaded, one empty, " +
                            "and from above they look the same. Stop the loaded one before it gets through. A Scout inside 26 m can tell " +
-                           "them apart, but the column will notice - spooked before the crossroads, it turns north for the far exit.",
-                scouts = 1, strikes = 2, kamikazes = 2, par = 3, startHour = 16.5f, contactRadius = 20f, convoySpeed = 3f, convoyStart = 62,
+                           "them apart, but the column will notice. It sets off in 30 s and takes one of two exits at the crossroads; " +
+                           "spooked before it gets there, it takes the other.",
+                scouts = 1, strikes = 2, kamikazes = 2, par = 3, startHour = 16.5f, contactRadius = 20f, convoySpeed = 2.5f, convoyStart = 48,
+                convoyDelay = 30f,
                 cameraFocus = new Vector3(5f, 0f, -45f), cameraYaw = 20f, cameraDistance = 115f,
                 escapeFailure = "The loaded tanker got through - their depot has its fuel.",
             };

@@ -287,9 +287,11 @@ namespace DroneSandbox
             switch (game.Phase)
             {
                 case MissionPhase.Recon:
-                    return $"<color=#FFC15A><b>1 RECON</b></color>  Find the targets: <b>{located + game.TargetsDestroyed}/{game.TargetsTotal}</b> located";
+                    return $"<color=#FFC15A><b>1 RECON</b></color>  Find the targets: <b>{located + game.TargetsDestroyed}/{game.TargetsTotal}</b> located" +
+                           (game.ConvoyEta >= 0f ? $"  <color=#FFC15A>exits in ~{game.ConvoyEta:0} s</color>" : "");
                 case MissionPhase.Strike:
-                    return $"<color=#FF7848><b>2 STRIKE</b></color>  Destroy the targets: <b>{game.TargetsDestroyed}/{game.TargetsTotal}</b>";
+                    return $"<color=#FF7848><b>2 STRIKE</b></color>  Destroy the targets: <b>{game.TargetsDestroyed}/{game.TargetsTotal}</b>" +
+                           (game.ConvoyEta >= 0f ? $"  <color=#FFC15A>exits in ~{game.ConvoyEta:0} s</color>" : "");
                 default:
                     int home = game.CountHome(out int flying);
                     return $"<color=#49DFCF><b>3 EXTRACT</b></color>  Drones home <b>{home}/{flying}</b>  " +
