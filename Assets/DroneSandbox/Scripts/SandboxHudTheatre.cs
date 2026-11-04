@@ -80,9 +80,10 @@ namespace DroneSandbox
             Color control = done ? Teal : DravinOrange;
             if (h.final && !done)
             {
-                // The final operation: a steady red ring round its badge and its name under it.
+                // The final operation: a steady red ring round its badge and its name over it (under it, it ran into
+                // the hotspots on the front line).
                 Ring(c, size * 0.95f, new Color(Hostile.r, Hostile.g, Hostile.b, 0.9f));
-                GUI.Label(new Rect(c.x - 60f * s, c.y + size * 0.6f, 120f * s, 18f * s), "<b>FINAL OPERATION</b>",
+                GUI.Label(new Rect(c.x - 60f * s, c.y - size * 0.6f - 18f * s, 120f * s, 18f * s), "<b>FINAL OPERATION</b>",
                     Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, Hostile));
             }
             if (!done)

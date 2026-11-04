@@ -87,7 +87,7 @@ namespace DroneSandbox
                 Set(FrameSettingsField.Volumetrics, q >= 2);
                 Set(FrameSettingsField.VolumetricClouds, q >= 1);
             }
-            QualitySettings.lodBias = q == 0 ? 0.6f : q == 1 ? 0.8f : 1f;
+            QualitySettings.lodBias = q == 0 ? 1f : q == 1 ? 1.5f : 2f; // the project's own setting (2) at High
             if (Ground.Current != null) Ground.Current.detailObjectDensity = GrassDensity;
         }
 
