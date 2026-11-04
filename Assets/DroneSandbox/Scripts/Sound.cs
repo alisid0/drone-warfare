@@ -243,15 +243,27 @@ namespace DroneSandbox
             {
                 var data = new float[clip.samples * clip.channels];
                 clip.GetData(data, 0);
-                int n = Mathf.Min(data.Length, (int)(maxSeconds * clip.frequency));
-                for (int i = 0; i < n; i++) samples.Add(data[i]);
-                samples.AddRange(new float[(int)(0.45f * clip.frequency)]);
+                // Mono at the reel's rate (recorded clips can be stereo, and at another rate).
+                int channels = clip.channels;
+                int frames = Mathf.Min(clip.samples, (int)(maxSeconds * clip.frequency));
+                int outFrames = (int)((long)frames * Synth.Rate / clip.frequency);
+                for (int i = 0; i < outFrames; i++)
+                {
+                    int f = (int)((long)i * clip.frequency / Synth.Rate);
+                    float sum = 0f;
+                    for (int c = 0; c < channels; c++) sum += data[f * channels + c];
+                    samples.Add(sum / channels);
+                }
+                samples.AddRange(new float[(int)(0.45f * Synth.Rate)]);
             }
             foreach (var name in order)
                 foreach (var clip in Instance.clips[name]) Append(clip, name.StartsWith("motor") ? 2f : 6f);
             Append(Instance.wind.clip, 5f);
             Append(Instance.birds.clip, 6f);
             Append(Instance.crickets.clip, 4f);
+            foreach (var name in new[] { "rain", "thunder" })
+                if (Instance.clips.TryGetValue(name, out var extra))
+                    foreach (var clip in extra) Append(clip, 5f);
 
             using (var w = new System.IO.BinaryWriter(System.IO.File.Create(path)))
             {

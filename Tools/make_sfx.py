@@ -11,6 +11,9 @@ import re
 import subprocess
 import sys
 import urllib.request
+import wave
+
+import numpy as np
 
 RAW = os.path.join(os.environ.get("TEMP", "."), "dwprev", "sfx", "raw")  # paid-for originals, kept out of the repo
 OUT = r"C:\Users\ali10\Documents\DroneWarfare\Assets\DroneSandbox\Resources\Sounds"
@@ -29,9 +32,9 @@ SOUNDS = [
     ("explosion 3", "A small armoured vehicle takes a direct explosive hit outdoors. Heavy metallic thump, compact pressure blast, rattling steel fragments and debris settling." + NV, 3, False, 0.85, -18, -1, False, None),
     ("big explosion 1", "A fuel tanker catches fire and erupts into a large outdoor explosion. Deep initial blast, roaring flame, rupturing metal and two smaller delayed fuel bursts. Long decay." + NV, 6, False, 0.85, -17, -1, False, None),
     ("big explosion 2", "An ammunition storage vehicle detonates outdoors. One powerful initial explosion followed by several irregular smaller sharp detonations, metallic debris and fading smoke roar." + NV, 7, False, 0.85, -17, -1, False, None),
-    ("gunshot 1", "One isolated small-calibre automatic weapon shot from a compact drone outdoors. Very short dry mechanical crack, tight metallic snap, almost no reverb or tail. No burst." + NV, 0.5, False, 0.9, -22, -2, False, 0.14),
-    ("gunshot 2", "Single small-calibre gunshot, sharp dry pop with a slightly deeper mechanical body. Close, controlled transient, minimal outdoor echo, no burst or additional shots." + NV, 0.5, False, 0.9, -22, -2, False, 0.14),
-    ("gunshot 3", "One light automatic weapon shot, crisp metallic report, short muzzle blast, dry mechanical tail. Compact and punchy, no sustained firing, no long reverberation." + NV, 0.5, False, 0.9, -22, -2, False, 0.14),
+    ("gunshot 1", "One isolated small-calibre automatic weapon shot from a compact drone outdoors. Very short dry mechanical crack, tight metallic snap, almost no reverb or tail. No burst." + NV, 0.5, False, 0.9, -22, -5, False, 0.14),
+    ("gunshot 2", "Single small-calibre gunshot, sharp dry pop with a slightly deeper mechanical body. Close, controlled transient, minimal outdoor echo, no burst or additional shots." + NV, 0.5, False, 0.9, -22, -5, False, 0.14),
+    ("gunshot 3", "One light automatic weapon shot, crisp metallic report, short muzzle blast, dry mechanical tail. Compact and punchy, no sustained firing, no long reverberation." + NV, 0.5, False, 0.9, -22, -5, False, 0.14),
     ("cannon 1", "One isolated 23 mm-class anti-aircraft autocannon shot outdoors. Heavy, hard metallic cannon crack with a deep pressure thump and very short open-air decay. No burst." + NV, 0.7, False, 0.9, -19, -1, False, 0.6),
     ("cannon 2", "Single medium-calibre anti-aircraft cannon firing across an open field. Sharp concussive blast, solid mechanical clank, deep punch and short distant reflection. No burst." + NV, 0.8, False, 0.9, -19, -1, False, 0.7),
     ("missile", "A small missile launches from a flying drone. Sudden ignition snap followed by a short forceful rocket exhaust whoosh that quickly moves away and fades in open air. No explosion." + NV, 1.5, False, 0.85, -21, -2, False, None),
@@ -48,6 +51,18 @@ SOUNDS = [
     ("birds", "Sparse European farmland birds heard across open fields in daylight. Occasional distant skylark, blackbird and small songbird calls, natural spacing with long quiet intervals." + NV, 30, True, 0.7, -31, -3, True, None),
     ("crickets", "Calm rural European night atmosphere. Sparse crickets and grass insects chirping softly from different distances, light natural pauses, no constant loud buzzing." + NV, 25, True, 0.7, -32, -3, True, None),
 ]
+
+
+# Loudness targets matched to the game's mix (which was balanced on the synthesized sounds: the reel showed
+# ChatGPT's suggested levels came out 5-16 dB under it). Overrides the table above.
+MIX_LUFS = {
+    "rain": -22, "thunder 1": -18, "thunder 2": -14, "thunder 3": -18,
+    "explosion 1": -13, "explosion 2": -13, "explosion 3": -13, "big explosion 1": -11, "big explosion 2": -11,
+    "cannon 1": -14, "cannon 2": -14, "missile": -16, "whistle": -15,
+    "ricochet 1": -20, "ricochet 2": -20, "ricochet 3": -20, "drone down": -12,
+    "motor Scout": -16, "motor Strike": -15, "motor Kamikaze": -15, "motor Bomber": -16,
+    "wind": -23, "birds": -21, "crickets": -20,
+}
 
 
 def generate(key, name, prompt, seconds, loop, influence):
@@ -77,8 +92,11 @@ def loudness(path, chain):
     return float(j["input_i"]), float(j["input_tp"])
 
 
-def finish(raw, name, lufs, peak, stereo, trim):
+def finish(raw, name, lufs, peak, stereo, trim, loop):
     chain = []
+    if not loop and not trim:
+        # One-shots start on their hit: no lead-in silence to lag behind the picture.
+        chain.append("silenceremove=start_periods=1:start_threshold=-40dB")
     if trim:
         # A single crack: drop any lead-in silence, keep the first `trim` seconds and fade the end.
         chain.append("silenceremove=start_periods=1:start_threshold=-45dB")
@@ -88,12 +106,37 @@ def finish(raw, name, lufs, peak, stereo, trim):
         chain.append("pan=mono|c0=0.5*c0+0.5*c1")
     pre = ",".join(chain)
     i, tp = loudness(raw, pre)
-    gain = min(lufs - i, peak - tp)  # a plain gain (loops stay seamless), never past the peak ceiling
-    af = (pre + "," if pre else "") + f"volume={gain:.2f}dB"
+    lufs = MIX_LUFS.get(name, lufs)
+    if i == float("-inf") or loop:
+        gain = min(lufs - i, peak - tp)  # a plain gain (loops stay seamless), never past the peak ceiling
+        af = (pre + "," if pre else "") + f"volume={gain:.2f}dB"
+    else:
+        # One-shots reach their loudness with a fast limiter catching the peaks (punchier, never clipping).
+        gain = min(lufs - i, peak - tp + 6)  # at most 6 dB of limiting, so tails don't turn to hiss
+        af = (pre + "," if pre else "") + f"volume={gain:.2f}dB,alimiter=limit={10 ** (peak / 20):.3f}:attack=1:release=60:level=disabled"
     out = os.path.join(OUT, name + ".wav")
     subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", raw, "-af", af,
                     "-ar", "44100", "-c:a", "pcm_s16le", out], check=True)
+    if loop:
+        seam(out, 0.5)
     return i, tp, gain
+
+
+def seam(path, seconds):
+    """Makes a loop seamless whatever the generator gave: the last `seconds` are faded into the first ones and
+    dropped, so the end runs straight on into the start."""
+    with wave.open(path) as w:
+        params = w.getparams()
+        x = np.frombuffer(w.readframes(params.nframes), dtype=np.int16).astype(np.float32)
+    ch = params.nchannels
+    x = x.reshape(-1, ch)
+    n = min(int(seconds * params.framerate), len(x) // 10)
+    t = np.linspace(0.0, 1.0, n, endpoint=False)[:, None]
+    head = x[:n] * np.sqrt(t) + x[-n:] * np.sqrt(1.0 - t)  # equal-power crossfade
+    y = np.concatenate([head, x[n:-n]])
+    with wave.open(path, "wb") as w:
+        w.setparams(params)
+        w.writeframes(np.clip(y, -32768, 32767).astype(np.int16).tobytes())
 
 
 def main():
@@ -107,7 +150,7 @@ def main():
             continue
         try:
             raw, paid = generate(key, name, prompt, seconds, loop, influence)
-            i, tp, gain = finish(raw, name, lufs, peak, stereo, trim)
+            i, tp, gain = finish(raw, name, lufs, peak, stereo, trim, loop)
             print(f"{name:16s} {'new' if paid else 'kept'}  in {i:6.1f} LUFS / {tp:5.1f} dBTP  gain {gain:+5.1f} dB")
         except urllib.error.HTTPError as e:
             print(f"{name:16s} FAILED {e.code}: {e.read()[:200]!r}")
