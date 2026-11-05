@@ -168,6 +168,9 @@ namespace DroneSandbox
         public string name;
         public int worldSeed = 7, fieldSeed = 11;
 
+        // Exact world inputs for streamed sectors; null keeps the hand-made and recipe-only plans unchanged.
+        public WorldSectorData world;
+
         public Vector3 basePosition, enemyHqPosition;
         public readonly List<(EnemyType type, Vector3 position)> defences = new List<(EnemyType, Vector3)>();
         public Rect enemyArea;
