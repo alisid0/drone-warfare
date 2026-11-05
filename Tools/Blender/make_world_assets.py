@@ -3,6 +3,7 @@
 blender --background --factory-startup --python Tools/Blender/make_world_assets.py -- Models [previews] [names]
 Names may be comma-separated model names or group names: airfield, industrial, rail, town, recon.
 Each FBX contains direct-child _LOD0/1/2 meshes; metre UVs and the existing PBR material names.
+Append --previews-only to refresh review images without rewriting FBXs or the manifest.
 """
 import importlib
 import json
@@ -19,6 +20,8 @@ from world_asset_common import PROJECT, export_asset, mesh_from_kit, palette, pr
 def main():
     """Exports selected models, records measured statistics and renders optional review images."""
     args = sys.argv[sys.argv.index('--')+1:]
+    previews_only = '--previews-only' in args
+    args = [arg for arg in args if arg != '--previews-only']
     out = Path(args[0]).resolve()
     out.mkdir(parents=True, exist_ok=True)
     preview = str(Path(args[1]).resolve()) if len(args) > 1 and args[1] not in ('', '-') else None
@@ -41,8 +44,9 @@ def main():
                 mesh_from_kit(k, name + f'_LOD{lod}', r)
                 if group == 'recon':
                     module.propeller(m, lod, r)
-            reports[name] = export_asset(r, out, prop=group == 'recon')
-            report_path.write_bytes((json.dumps(reports, indent=2, sort_keys=True)+'\n').replace('\n','\r\n').encode())
+            if not previews_only:
+                reports[name] = export_asset(r, out, prop=group == 'recon')
+                report_path.write_bytes((json.dumps(reports, indent=2, sort_keys=True)+'\n').replace('\n','\r\n').encode())
             if preview:
                 previews(r, preview, turntable=group == 'recon')
 

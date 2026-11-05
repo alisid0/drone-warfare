@@ -206,6 +206,7 @@ def figure(loc):
     k = Kit()
     m = material('PreviewFigure', (.9, .25, .025))
     for x in (-.12, .12):
+        k.box(m, (.18, .28, .12), (x, -.035, .06))
         k.bar(m, (x, 0, .1), (x, 0, .87), .085, n=6)
     k.box(m, (.42, .25, .55), (0, 0, 1.13))
     for s in (-1, 1):
@@ -214,6 +215,8 @@ def figure(loc):
     r = root('PreviewScaleFigure_1.8m')
     mesh_from_kit(k, 'ScaleFigure', r)
     r.location = loc
+    lo, hi = bounds(list(r.children))
+    assert abs(hi.z-lo.z-1.8) < .0001, 'Scale figure must be exactly 1.8 m tall'
     return r
 
 
@@ -232,7 +235,7 @@ def previews(r, directory, turntable=False):
         o.hide_render = not o.name.endswith('_LOD0')
     lo, hi = bounds([o for o in meshes if not o.hide_render])
     size, centre = hi-lo, (lo+hi)/2
-    scale_figure = figure((hi.x + max(.8, size.x * .035), lo.y, min(0, lo.z)))
+    scale_figure = figure((hi.x + max(.8, size.x * .035), lo.y, min(-.02, lo.z-.05)))
     preview_materials()
     scene = bpy.context.scene
     scene.render.engine = 'CYCLES'
