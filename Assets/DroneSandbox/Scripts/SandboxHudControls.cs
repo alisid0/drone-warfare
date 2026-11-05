@@ -39,8 +39,8 @@ namespace DroneSandbox
             (GameKey.Photo, "Toggle photo mode"),
             (GameKey.Rise, "Photo: rise"),
             (GameKey.Sink, "Photo: descend"),
-            (GameKey.TimeBack, "Photo: time backward"),
-            (GameKey.TimeForward, "Photo: time forward"),
+            (GameKey.TimeBack, "Slower time (photo: time backward)"),
+            (GameKey.TimeForward, "Faster time (photo: time forward)"),
             (GameKey.Screenshot, "Photo: save screenshot")
         };
 

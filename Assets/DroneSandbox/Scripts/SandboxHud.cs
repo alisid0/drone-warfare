@@ -29,6 +29,7 @@ namespace DroneSandbox
             "Shift + right-click  -  queue a waypoint",
             "Ctrl + right-click  -  attack-move (engage on the way)",
             "Tab  -  tactical pause     F  -  centre on selection",
+            "]  /  [  -  fast-forward to 2x or 4x, and back (drops to 1x when a drone is threatened)",
             "B  -  bring selected (or all) drones home",
             "Double-click a drone  -  follow it with the camera",
             "G  -  coordinated strike: drones with attack orders hit together",

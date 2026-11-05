@@ -158,6 +158,8 @@ namespace DroneSandbox
                 foreach (var d in selected) d.Stop();
             if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
             if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
+            if (GameInput.Pressed(GameKey.TimeForward)) game.ChangeSpeed(1);
+            if (GameInput.Pressed(GameKey.TimeBack)) game.ChangeSpeed(-1);
             if (GameInput.Pressed(GameKey.Telemetry)) hud.ToggleTelemetry();
             if (GameInput.Pressed(GameKey.Sync)) game.CoordinateStrike(selected);
             // C: look at the fight - halfway between the first selected drone and what it's attacking.

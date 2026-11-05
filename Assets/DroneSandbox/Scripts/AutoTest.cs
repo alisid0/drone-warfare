@@ -206,6 +206,16 @@ namespace DroneSandbox
             log.WriteLine($"Orders: paused {game.Paused}, timeScale {Time.timeScale}, first drone '{(game.drones.Count > 0 ? game.drones[0].Status : "-")}'");
             game.TogglePause();
 
+            // Fast-forward: ] twice is 4x, and a threat drops it straight back to 1x.
+            string busy = game.Threat();
+            game.ChangeSpeed(1);
+            game.ChangeSpeed(1);
+            float fast = Time.timeScale;
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Shot("06c_fast_forward");
+            game.SlowDown("test threat");
+            log.WriteLine($"Fast-forward: {fast}x, then {Time.timeScale}x after a threat{(busy != null ? $" (refused: {busy})" : "")}");
+
             // A coordinated strike: three drones at three different enemies, timed to hit together.
             var strikers = game.drones.FindAll(d => d != null && !d.IsBomber);
             var marks = new List<EnemyUnit>(game.enemies.FindAll(e => e != null && e.IsAlive && !e.Hidden));
@@ -869,7 +879,8 @@ namespace DroneSandbox
             bool shot = false;
             foreach (var e in group)
             {
-                if (game.Result != MissionResult.None) break;
+                // Once the real ones are down the mission moves to extraction; checking more look-alikes would leave the Scout behind.
+                if (game.Result != MissionResult.None || game.Phase == MissionPhase.Extract) break;
                 if (e == null || !e.IsAlive) continue;
                 if (scout == null || !scout.IsAlive)
                 {
@@ -878,9 +889,10 @@ namespace DroneSandbox
                 }
                 if (scout == null) break;
                 scout.MoveTo(e.ContactPosition);
-                for (float t = 0f; t < 25f && scout != null && e != null && Vector3.Distance(scout.transform.position, e.transform.position) > Scale.D(14f); t += 0.25f)
+                // Both waits stop if the mission ends: time freezes for the results panel and WaitForSeconds would never return.
+                for (float t = 0f; t < 25f && scout != null && e != null && game.Result == MissionResult.None && Vector3.Distance(scout.transform.position, e.transform.position) > Scale.D(14f); t += 0.25f)
                     yield return new WaitForSeconds(0.25f);
-                for (float t = 0f; t < 6f && e != null && e.Intel < Intel.Identified && !e.ExposedDecoy; t += 0.25f) yield return new WaitForSeconds(0.25f);
+                for (float t = 0f; t < 6f && e != null && game.Result == MissionResult.None && e.Intel < Intel.Identified && !e.ExposedDecoy; t += 0.25f) yield return new WaitForSeconds(0.25f);
                 if (e == null) continue;
                 if (!shot)
                 {
@@ -1282,6 +1294,7 @@ namespace DroneSandbox
                 var column = game.enemies.FindAll(e => e.isTarget);
                 var lead = column.Count > 0 ? column[0] : null;
                 bool extractShot = false;
+                int detectionsSeen = 0;
                 // Which side of the road to keep to (right of travel, or left): the one that stays furthest from the
                 // AA guns all along the route.
                 float GunClearance(Vector3 at)
@@ -1331,7 +1344,35 @@ namespace DroneSandbox
                         if (alive == 0) break;
                         middle /= alive;
                         Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized * shadowSide;
-                        shadow.MoveTo(middle + side * Scale.D(38f));
+                        // Keep halfway between the column's notice range and our sight, measured from its nearest
+                        // vehicle rather than its middle (on a bend the ends swing in), and back straight off if inside.
+                        float notice = game.ShadowNoticeRange, keep = (notice + Recon.IdentifyRange * Recon.WeatherFactor) / 2f;
+                        Vector3 station = middle + side * Scale.D(38f);
+                        for (int pass = 0; pass < 3; pass++)
+                            foreach (var e in column)
+                            {
+                                if (e == null || !e.IsAlive) continue;
+                                Vector3 away = station - e.transform.position;
+                                away.y = 0f;
+                                if (away.magnitude < keep) station = e.transform.position + away.normalized * keep;
+                            }
+                        float closest = float.MaxValue;
+                        Vector3 closestAt = middle;
+                        foreach (var e in column)
+                        {
+                            if (e == null || !e.IsAlive) continue;
+                            Vector3 off = shadow.transform.position - e.transform.position;
+                            off.y = 0f;
+                            if (off.magnitude < closest) { closest = off.magnitude; closestAt = e.transform.position; }
+                        }
+                        Vector3 back = shadow.transform.position - closestAt;
+                        back.y = 0f;
+                        shadow.MoveTo(closest < notice + Scale.D(6f) ? shadow.transform.position + back.normalized * (keep - closest + Scale.D(6f)) : station);
+                        if (game.ShadowDetections > detectionsSeen)
+                        {
+                            detectionsSeen = game.ShadowDetections;
+                            log.WriteLine($"  Long Watch detection {detectionsSeen} at {game.MissionTime:F0} s: nearest vehicle {closest:F0} m, notice {notice:F0} m, watched {game.ShadowProgress:F0} s");
+                        }
                         rts.LookAt(middle, 70f * Scale.Camera, 60f);
                         if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
                     }

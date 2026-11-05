@@ -227,7 +227,11 @@ namespace DroneSandbox
         // While the world is stopped: a banner saying so, and the screen edges dimmed.
         void DrawPauseBanner()
         {
-            if (!game.Paused) return;
+            if (!game.Paused)
+            {
+                DrawSpeedPlate();
+                return;
+            }
             float s = Scale;
             float edge = 10f * s;
             var dim = new Color(Ink.r, Ink.g, Ink.b, 0.35f);
@@ -250,6 +254,21 @@ namespace DroneSandbox
             Fill(summary, PanelColor);
             GUI.Label(summary, $"{game.drones.Count} drones  \u00b7  {waypoints} waypoints  \u00b7  {attacks} attacking  \u00b7  {rts.selected.Count} selected",
                 Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, small.normal.textColor));
+        }
+
+        // Fast-forward on: a small plate where the pause banner goes. Just dropped back to 1x: why, for 3 s.
+        void DrawSpeedPlate()
+        {
+            if (game.UiBlocking) return;
+            bool slowed = game.GameSpeed == 1 && game.SlowedFor != null && Time.unscaledTime - game.SlowedAt < 3f;
+            if (game.GameSpeed == 1 && !slowed) return;
+            float s = Scale;
+            var r = new Rect((Screen.width - 380f * s) / 2f, 140f * s, 380f * s, 26f * s); // below the event feed
+            Fill(r, PanelColor);
+            Outline(r, Amber, Mathf.Max(1f, s));
+            string text = slowed ? $"<b>1x</b>   {game.SlowedFor}"
+                : $"<b>FAST-FORWARD {game.GameSpeed}x</b>   {GameInput.BindingLabel(GameKey.TimeBack)} slower";
+            GUI.Label(r, text, Tinted(centered, Amber));
         }
 
         void DrawAcknowledgements()

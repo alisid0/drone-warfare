@@ -37,6 +37,9 @@ namespace DroneSandbox
         public Hotspot Hotspot { get; private set; } // the theatre hotspot being played, if any
         public bool Loading { get; private set; }
         public bool Paused { get; private set; } // tactical pause: the world stops, orders can still be given
+        public int GameSpeed { get; private set; } = 1; // fast-forward for long flights: 1, 2 or 4 times normal
+        public string SlowedFor { get; private set; } // why fast-forward last dropped back to 1x, shown for a moment
+        public float SlowedAt { get; private set; } = -100f; // when it did (unscaled time)
 
         public GameMode Mode { get; private set; } = GameMode.Menu;
         public Mission Mission { get; private set; }
@@ -271,7 +274,7 @@ namespace DroneSandbox
         {
             BriefingOpen = false;
             Time.timeScale = 1f;
-            ShowMessage(Phase == MissionPhase.Recon ? "RECON: find the targets. Each drone sees about {Recon.IdentifyRange:0} m around it."
+            ShowMessage(Phase == MissionPhase.Recon ? $"RECON: find the targets. Each drone sees about {Recon.IdentifyRange:0} m around it."
                 : "STRIKE: the targets are known. Destroy them.", 5f);
         }
 
@@ -357,7 +360,7 @@ namespace DroneSandbox
         {
             if (UiBlocking || Loading) return;
             Paused = !Paused;
-            Time.timeScale = Paused ? 0f : 1f;
+            Time.timeScale = Paused ? 0f : GameSpeed;
             AudioListener.pause = Paused;
             if (pauseVolume == null)
             {
@@ -373,6 +376,46 @@ namespace DroneSandbox
         }
 
         UnityEngine.Rendering.Volume pauseVolume;
+
+        // ] and [: step the clock between 1x, 2x and 4x, so a 2 km flight doesn't drag. It won't speed up while
+        // something needs watching (Threat), and drops back to 1x by itself the moment something does.
+        public bool ChangeSpeed(int step)
+        {
+            if (UiBlocking || Loading) return false;
+            int next = Mathf.Clamp(step > 0 ? GameSpeed * 2 : GameSpeed / 2, 1, 4);
+            if (next == GameSpeed) return false;
+            string threat = next > GameSpeed ? Threat() : null;
+            if (threat != null)
+            {
+                ShowMessage($"Not now: {threat}", 2f);
+                return false;
+            }
+            GameSpeed = next;
+            if (!Paused) Time.timeScale = GameSpeed;
+            SlowedFor = null;
+            Sound.Ui("move", 0.6f);
+            return true;
+        }
+
+        // Something the player has to see at normal speed: fast-forward drops back to 1x, saying why.
+        public void SlowDown(string why)
+        {
+            if (GameSpeed == 1) return;
+            GameSpeed = 1;
+            if (!Paused && Result == MissionResult.None) Time.timeScale = 1f;
+            SlowedFor = why;
+            SlowedAt = Time.unscaledTime;
+        }
+
+        // What needs watching at normal speed right now - a gun laying on a drone, or a drone just hit - or null.
+        public string Threat()
+        {
+            foreach (var e in enemies)
+                if (e != null && e.IsAlive && e.TrackedDrone != null) return $"{e.unitName} is tracking {e.TrackedDrone.unitName}";
+            foreach (var d in drones)
+                if (d != null && Time.time - d.LastHitTime < 1f) return $"{d.unitName} is under fire";
+            return null;
+        }
 
         void LateUpdate()
         {
@@ -467,6 +510,7 @@ namespace DroneSandbox
             trackIds.Clear();
             EnemyUnit.ResetContactIds();
             Time.timeScale = 1f;
+            GameSpeed = 1;
             Paused = false;
             AudioListener.pause = false;
         }
@@ -499,6 +543,11 @@ namespace DroneSandbox
             {
                 dayNight.SetThermal(false);
                 ShowMessage("Thermal lost: no thermal camera in the air");
+            }
+            if (GameSpeed > 1 && !Paused)
+            {
+                string threat = Threat();
+                if (threat != null) SlowDown(threat);
             }
             if (Mode == GameMode.Mission) Coach.Tick(this);
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
@@ -661,6 +710,7 @@ namespace DroneSandbox
             if (!warned && left < 15f && Spotters > 0)
             {
                 warned = true;
+                SlowDown("shelling incoming");
                 ShowMessage($"INCOMING in 15 s: expected damage {ExpectedDamage:0}. Find the spotters, or keep them jammed", 4f);
                 Sound.Alert("warning", 1f);
             }
@@ -731,6 +781,7 @@ namespace DroneSandbox
         public void OnIdentified(EnemyUnit enemy)
         {
             if (Mode == GameMode.Menu) return;
+            SlowDown($"{enemy.unitName} identified");
             if (Time.time - identifiedNewsAt > 2f)
             {
                 ShowMessage(enemy.unitName + " identified");
@@ -742,6 +793,7 @@ namespace DroneSandbox
         // An enemy we can see has noticed us.
         public void OnEnemyAlerted(EnemyUnit enemy)
         {
+            SlowDown($"{enemy.unitName} alerted");
             if (Time.time - alertNewsAt < 6f) return;
             alertNewsAt = Time.time;
             ShowMessage(enemy.unitName + " alerted - they know you're here");
@@ -759,6 +811,7 @@ namespace DroneSandbox
 
         public void OnSpotted(EnemyUnit enemy)
         {
+            SlowDown($"{enemy.unitName} spotted");
             ShowMessage(enemy.unitName + " spotted");
             Sound.Alert("contact", 0.5f);
         }
@@ -775,6 +828,11 @@ namespace DroneSandbox
             Result = won ? MissionResult.Won : MissionResult.Failed;
             ResultReason = reason;
             Paused = false;
+            if (GameSpeed > 1)
+            {
+                GameSpeed = 1;
+                Time.timeScale = 1f;
+            }
             AudioListener.pause = false;
             Sound.Alert(won ? "success" : "failure", 0f);
             int home = CountHome(out int flying);
@@ -861,6 +919,7 @@ namespace DroneSandbox
         {
             ShadowDetections++;
             ShadowSuspicion = 0f;
+            SlowDown("the tail was seen");
             if (ShadowDetections >= ShadowDetectionLimit)
             {
                 Finish(false, "Spotted three times: the column called it off and went to ground.");
@@ -883,7 +942,7 @@ namespace DroneSandbox
             else if (ShadowIntel == 2)
             {
                 escortSweepUntil = Time.time + 8f;
-                ShowMessage("INTEL 2/3: the escort is sweeping its flanks - {Scale.D(34f):0} m for 8 s. Open the gap!", 5f);
+                ShowMessage($"INTEL 2/3: the escort is sweeping its flanks - {Scale.D(34f):0} m for 8 s. Open the gap!", 5f);
             }
             else ShowMessage("INTEL 3/3: route confirmed - they're heading out on the north road", 4f);
             Sound.Alert("objective", 0.3f);
@@ -980,6 +1039,7 @@ namespace DroneSandbox
         {
             if (unit is Drone drone)
             {
+                SlowDown($"{drone.unitName} lost");
                 drones.Remove(drone);
                 dronesLost++;
                 WatchSync(drone);
