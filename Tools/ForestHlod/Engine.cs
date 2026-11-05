@@ -52,7 +52,7 @@ namespace UnityEngine
         public Vector3 MultiplyPoint3x4(Vector3 p){var v=N.Vector3.Transform(new N.Vector3(p.x,p.y,p.z),value);return new Vector3(v.X,v.Y,v.Z);}
     }
     public class Mesh : Object {
-        public Rendering.IndexFormat indexFormat; public Vector3[] vertices=Array.Empty<Vector3>(),normals;public Vector2[] uv;public int[] triangles=Array.Empty<int>();public Bounds bounds;public int subMeshCount=1,modelTriangles;
+        public Rendering.IndexFormat indexFormat; Vector3[] vertexData=Array.Empty<Vector3>();public Vector3[] originalVertices;public Vector3[] vertices {get=>vertexData;set {vertexData=value;if(originalVertices==null)originalVertices=value;}}public Vector3[] normals;public Vector2[] uv;public int[] triangles=Array.Empty<int>();public Bounds bounds;public int subMeshCount=1,modelTriangles;
         public void SetVertices(List<Vector3> a)=>vertices=a.ToArray();public void SetUVs(int ch,List<Vector2> a)=>uv=a.ToArray();public void SetTriangles(List<int> t,int s,bool bounds=true)=>triangles=t.ToArray();
         public void RecalculateBounds(){if(vertices.Length==0)return;bounds=new Bounds(vertices[0],Vector3.zero);foreach(var v in vertices)bounds.Encapsulate(v);}
         public void RecalculateNormals(){normals=new Vector3[vertices.Length];for(int k=0;k<triangles.Length;k+=3){int a=triangles[k],b=triangles[k+1],c=triangles[k+2];var n=Vector3.Cross(vertices[b]-vertices[a],vertices[c]-vertices[a]).normalized;normals[a]=normals[b]=normals[c]=n;}}
@@ -120,7 +120,7 @@ namespace UnityEngine
             var tex=rp.material.mainTexture;string texture=Harness.ExportTexture(tex);
             var vertices=new float[mesh.vertices.Length][];var normals=new float[mesh.vertices.Length][];var uv=new float[mesh.vertices.Length][];
             for(int i=0;i<vertices.Length;i++){var v=mesh.vertices[i];
-                if(fullCanopy&&mesh.name.StartsWith("Forest canopy")){float wx=v.x+FarTerrain.Origin.x,wz=v.z+FarTerrain.Origin.y;var stand=ForestPattern.At(wx,wz);v.y=WorldPlan.Height(wx,wz)+ForestPattern.Canopy(stand,wx,wz)-.3f;}
+                if(fullCanopy&&mesh.name.StartsWith("Forest canopy")){v=mesh.originalVertices[i];}
                 vertices[i]=new[]{v.x,v.y,v.z};var n=mesh.normals[i];normals[i]=new[]{n.x,n.y,n.z};uv[i]=new[]{mesh.uv[i].x,mesh.uv[i].y};}
             meshes.Add(new{name=mesh.name,vertices,normals,uv,indices=mesh.triangles,texture});
         }
@@ -128,6 +128,7 @@ namespace UnityEngine
 }
 namespace UnityEngine.Rendering { public enum ShadowCastingMode { Off } public enum IndexFormat { UInt16,UInt32 } }
 namespace DroneSandbox {
+    public static class FarDetail { public static float ScatterHeight(Vector2 p,bool tree)=>FarTerrain.GroundAt(p); }
     public static class Ground { public const float Size=2000f; }
     public static class Art { public static Material NewMaterial(Color c)=>new Material{color=c};public static void Discard(UnityEngine.Object o){} }
 }

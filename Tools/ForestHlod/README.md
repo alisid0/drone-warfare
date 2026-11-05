@@ -1,61 +1,41 @@
-# Forest and settlement HLOD handoff
+# Natural forest handoff
 
-Branch: `codex/forest-hlod`, based on `fc81c6f`. Unity was **not** opened or run.
+Branch `codex/forest-natural`, based on the merged `788df6f`. Unity was not opened or run. FarDetail and the main checkout were not edited.
 
-The far forest now uses shared deterministic stands: LOD1 photo meshes within about 120 m, LOD2 crown cards to 700 m, then opaque canopy masses. Species, age, width and three gentle tint variants follow 30 m jittered stands. Glades and 15–35 m inward edge feathering affect both trees and canopy; margins favour birch. Camera distance includes altitude. Instances batch across cells, with a 511-instance limit for non-uniform crown scales. Both tree tier transforms are cached at cell creation; all nine after-view geometry captures stayed byte-identical after this optimization.
+The forest now uses deterministic, minimum-distance tree placement with clustered density and warped stand ages. Cards, meshes and the HLOD texture consume the same tree sampler, including position, species, height, radius, tint and yaw. Species follow warped 240 m districts instead of changing every 30 m. Individual crowns span 2-7 m in effective opaque radius and 8-24 m in height. The three atlas variants per species are asymmetrical derivatives of the existing species photograph, not three independently photographed trees.
 
-Canopy blocks are 2,048 m square, sampled at 16 m, with 64/128 m distant mesh LODs. Interior sample positions and the photo quilt are warped to avoid a visible lattice; shared block edges remain aligned. Heights combine stand age, crown bumps, glades and skirts to ground; normals come from the resulting surface. A normalized quilt derived from the existing top-view impostor photographs supplies crown detail. The palette uses ProjectSetup's exact impostor tints, measured crown coverage, dark ground gaps and a measured oblique-view correction. There is no alpha testing or shadow casting on the canopy. Row-by-row construction gets a 0.7 ms CPU slice, followed by a native mesh/texture upload; that upload is not time-capped.
+Glades have variable size, rotation, position and warped boundaries; their previous regular spacing contributed to the dotted appearance. Cover is interpolated before 7/21 m boundary noise. Small young trees can extend a few metres into pasture/farmland; water, wetland and built covers reject them. Both canopy height and crown size diminish at margins. A ground band meets the existing world picture through the new `FarTerrain.CanopyGroundColour` hook. This hook does not replace or sample FarDetail's independently changing textures.
 
-Settlements use road-aligned 120 m blocks, 28 m plot spacing, 3–9 m setbacks and overlap rejection. The same plots become individual photo-material houses inside 1.5 km or 12/14-triangle roof/wall shells beyond it. Far blocks are combined into one mesh per settlement, with index ranges removed when their individual houses appear.
+The canopy uses 32 m interior geometry, 16 m glade rims and stitched 8 m external margins, with shared world-space normals and skirts between block resolutions. Uncovered vertices sink two metres below the sampled ground. A non-repeating crown bake uses the exact individual tree list, per-tree rotation/offset, photo variants and overlapping crown heights. A small area filter and two-texel texture gutters suppress pinpricks and block seams. The 64/128 m far meshes average relief and species colour instead of sparsely sampling crowns or individual glades. Geometry describes the stand envelope; individual crown geometry still belongs to the card/mesh tiers.
 
-## Review artifacts
+## Renders and measurements
 
-- [Forest before/after: above, 300 m, 2.5 km, 9 km](Review/forest-comparison.png)
-- [Town before/after at the same four views](Review/town-comparison.png)
-- [Near tree mesh check](Review/forest_near_after.png)
-- [Matched-camera card/canopy luminance comparison](Review/calibration-comparison.png)
-- [Derived crown atlas](Review/crown-atlas.png)
-- [All per-tier counts and triangle/draw submissions](Review/counts.md)
+- [Before/after sheet: 300 m, 2.5 km, 9 km and farmland edge](Review/forest-comparison.png)
+- [300 m before](Review/forest_300m_before.png) / [after](Review/forest_300m_after.png)
+- [2.5 km before](Review/forest_2500m_before.png) / [after](Review/forest_2500m_after.png)
+- [9 km before](Review/forest_9000m_before.png) / [after](Review/forest_9000m_after.png)
+- [Farmland-edge before](Review/forest_edge_before.png) / [after](Review/forest_edge_after.png)
+- [Matched-camera luminance](Review/calibration-comparison.png), [near mesh tier](Review/forest_near_after.png), [crown atlas](Review/crown-atlas.png)
+- [Counts and budgets](Review/counts.md), [raw submissions and memory estimates](Review/metrics.json)
 
-Each comparison panel is 1600×900. These are **offline Blender renders, not Unity/HDRP captures**. The harness executes the current production scatter/mesh generators and the actual `fc81c6f` FarScatter source. Managed engine storage/submission substitutes and a conservative frustum replace Unity native calls. Model dimensions, materials and triangle counts come from the repository FBXs, including the two older houses without LOD groups. Blender uses those FBXs and project photo textures. The terrain is a sampled WorldPlan surface with the same baseline painting recipe on both sides; native Perlin noise, HDRP lighting, exposure, fog, mip coverage and occlusion are not reproduced exactly.
+All panels are 1600 x 900 offline Blender renders of production-source submissions, not Unity/HDRP captures. `before` compiles the four exact forest sources from `788df6f`; no checkout switch is needed. The interior forest is seed 1 at `(16500, -4500)`, so the complete 9 km frame remains inside the world. The edge target is the nearest forest/farmland boundary. Cameras, lighting, terrain and project photo models are held fixed between revisions. The largest-forest autotest view is near the world boundary and remains available unchanged in Unity.
 
-The review forest is seed 1 at `(16500, -4500)`, safely inside the world for the 9 km view. The town is seed 1's largest town. The new autotest shot independently finds the largest connected forest district on WorldPlan's kilometre grid.
+The harness replaces native engine storage/submission, uses a conservative frustum and samples WorldPlan ground. It does not reproduce FarDetail streaming geometry, native Perlin noise, HDRP exposure/fog, GPU clipping, uploads or pass multiplication. The comparison does not prove the FPS gates or an exact colour match to the other session's new ground textures.
 
-## Validation and budget
+Validation: the C# 9 assembly check passes with zero warnings/errors against installed Unity 6000.6.7f1 CoreModule and PhysicsModule. Complete rendering sources and WorldPlan compile; unrelated game services are fixtures, so this is not a full player build. Three-seed checks pass: full glades occupy 8.43-9.03% of sampled woodland, heights span 8-24 m, radii stay 2-7 m, and sampled minimum tree spacing is 4.14-4.20 m. Dense woodland samples contain 5,628-5,766 trees/km2. Neighbouring species agree 91.3-93.3% of the time at 20 m. Reverse traversal preserves tree membership/positions; adjacent fine blocks agree within 1 mm; normals are finite; faces are non-degenerate; near meshes and resource cleanup are exercised. See the committed seed JSON files and `luminance.json` for the measured handover difference (within 10%).
 
-The C# 9 assembly check passes with **zero errors and warnings** against installed Unity 6000.6.7f1 CoreModule and PhysicsModule. It includes the complete changed/new rendering sources, WorldPlan and the exact `WorldCheck` method extracted from AutoTest. The remaining game services are small compile fixtures; this is not a complete player build.
+The 2.5 km forest submits 149,277 triangles versus 240,484 at `788df6f`, with the same 10 draws. Fine texture residency increases about 1.6% for gutters. The 0.7 ms construction slice, opaque rendering and tree distance limits remain; final copies/native uploads are indivisible. Triangle counts improve, but target-machine frame time must still be measured.
 
-Three-seed execution checks pass: glades cover 8.10–8.23% of sampled woodland; sampled stand heights span 9.1–23.1 m within the 8–24 m limits; adjacent equal-resolution block heights agree within 1 mm; normals are finite and varied; generated roof faces are non-degenerate; sampled settlements have no overlapping proxy footprints. Repeat tree sampling, native-resource cleanup paths and origin changes are exercised. The near-flight check submits **258 real mesh trees and 2,787 cards**.
+## Build checklist for Claude
 
-At a fixed 600 m camera range and 60° pitch, the central matched-camera ROI measures **−2.67% linear luminance** for the canopy against the same stand's cards. This meets the 10% target in the offline harness. Confirm it in HDRP with fixed exposure.
+1. Integrate the commits into `environment-and-asset-hunt`, compile/build and run WorldCheck. No packages or generated Unity Library are needed in this worktree.
+2. Compare hd139 at the same 1600 x 900 settings: sandbox >= 114 fps, wide >= 121 fps, low-flight p95 <= 12.2 ms. Record steady CPU/GPU time and first-build/upload spikes during a 40 m/s forest-edge crossing.
+3. Inspect the unchanged `88_world_forest_hlod` shot plus these matched review cameras. Check the farmland-facing margin against the other session's FarDetail textures. The new FarTerrain colour hook matches the old world picture; adapt that integration only if the ground work changes its palette.
+4. With fixed exposure, check card/canopy luminance within 10% and silhouette continuity at 560-700 m. Also inspect the 120 m mesh/card switch and 3.2/8.5 km mass switches, including sideways camera movement across block seams. Tier geometry is discrete; this change does not add temporal dithering.
+5. Check forest edges, glade floors, narrow roads, scrub beside fields, origin rebases and sector changes. Confirm the existing Scout/Swift clearance checks and that old meshes/textures are released.
 
-| View | Before | After |
-|---|---|---|
-| Forest, 300 m | 88,501 cards; 1,901 draws; 708,008 tris | 3,263 cards; 20 draws; 157,856 tris |
-| Forest, 2.5 km | 76,835 cards; 1,598 draws; 614,680 tris | 0 trees; 10 canopy blocks/draws; 240,484 tris |
-| Town, 2.5 km | 2,692 houses + 403 cards; 2,953 draws; 2,327,320 tris | 0 instances; 186 town blocks + 2 forest blocks; 3 draws; 24,742 tris |
-| Forest region, 9 km | 0 scatter draws | 37 mass draws; 20,288 tris |
-| Town region, 9 km | 0 scatter draws | 19 mass draws; 30,318 tris |
+## Reproduce
 
-Counts are API submissions before GPU clipping, excluding terrain and the detailed sector. HDRP depth and other passes can multiply backend draw work. Full data is in `Review/metrics.json`.
+Run `Tools/ForestHlod/run.ps1` (or `-SkipRender` for compilation, captures and seed checks). It uses installed Python 3.13 with `-I`, headless Blender 5.2 and Unity's bundled .NET SDK. Outputs stay under `Temp/forest-hlod` and `Tools/ForestHlod/Review`. The baseline is read with `git show 788df6f`; no branch switch, Unity launch, network or package install occurs.
 
-**Estimated GPU allowance, not measured:** roughly 0.2–0.6 ms for the 2.5 km forest masses, 0.05–0.2 ms for the town masses, and 0.1–0.3 ms for the macro masses at 1600×900 on the target RTX 3050 class hardware. These are rough planning ranges; profile the actual HDRP passes. A fine block holds about 17k vertices, at most 33.8k triangles, a 512² mipmapped texture and CPU data; allow roughly 4 MB per populated fine block including readable mesh/copies. Distant blocks are much smaller.
-
-**The 97 fps wide / 85 fps sandbox gates are unverified.** The baseline already suppresses individual scatter at 9 km. The new macro geometry adds GPU work there, despite lower managed submission overhead; a speedup cannot be claimed. Static managed harness timings exclude native uploads/rendering and are not game frame timings.
-
-## Required integration and build checklist for Claude
-
-1. Keep the single `FarScatter.GroundAt(Vector2 local)` integration point. Redirect it to the other session's `FarDetail.HeightAt` when that work is merged; canopy and settlement placement already call through it.
-2. **Preserve flight height:** `Ground.HeightAt` currently calls `FarTerrain.SurfaceAt`. Both `SurfaceAt` and `Elevation` remain unchanged. The new `VisualSurfaceAt` hook removes the smooth shell only for mesh builders, and FarTerrain chunks already use it.
-3. **Legacy Backdrop ring needs coordination:** its existing builder still calls the flight-height method. Apply [the prepared one-line Backdrop integration patch](backdrop-integration.patch), or the equivalent in FarDetail's replacement builder, so that visible ring also uses `VisualSurfaceAt`/the shared bare-ground source. `Backdrop.cs` was outside the permitted files, so this patch is supplied but **not applied**. Until then, the old smooth canopy can still obscure near trees in the 1.5 km join ring. Set `ForestCanopyHlod` before rebuilding visual terrain.
-4. Compile/build the merged project, then run WorldCheck. It logs mesh trees, cards, houses, forest/town blocks, triangles, draw submissions and forest build time, and adds `88_world_forest_hlod` at a 2.5 km camera range over the largest forest district.
-5. Compare identical 1600×900 settings/cameras against the 97/85 fps baselines. Record steady GPU time and activation/upload spikes, including during a continuous 40 m/s crossing. Check the 120 m tree switch, 560–700 m canopy handover, 1.5 km town handover and 3.2/8.5 km canopy mesh LOD boundaries. Mesh/card and house/proxy switches are discrete; there is no temporal dithering shader in this change.
-6. Inspect fixed-exposure luminance at the handover, road-facing blocks, glade/edge skirts and terrain rebases. Retain the existing Scout/Swift clearance checks. Verify a sector change releases the old meshes/textures and does not leave duplicated scenery.
-
-## Reproduce without Unity
-
-Run `Tools/ForestHlod/run.ps1`, or add `-SkipRender` for API/geometry/count checks only. It requires the already-installed Python, Blender and Unity-bundled .NET SDK; it adds no packages and writes intermediate data to `Temp/forest-hlod`. The installed Python needs permission to execute from this sandbox.
-
-If source FBXs, impostor photos or tints change, first run `inspect_models.py` with Blender headlessly, then `python -I Tools/ForestHlod/make_palette.py`. The latter regenerates `ForestPalette.cs`, `ForestCrown.bytes` and the atlas. `run.ps1` intentionally does not regenerate production assets. Individual render PNGs are reproducible and ignored; the committed full-resolution sheets retain every requested view.
-
-API behavior was also checked in Unity's primary source: [Graphics/RenderParams](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Graphics/Graphics.cs), [Mesh](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Graphics/Mesh.cs), and [GeometryUtility](https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Geometry/GeometryUtility.cs). The installed assemblies are the version-specific compile authority.
+`python -I Tools/ForestHlod/make_palette.py` regenerates the embedded atlas and measured palette from existing impostor photographs. The old `ForestCrown.bytes` resource is retained for baseline reproduction; the revised runtime no longer loads it. Unity API usage follows the existing FarTerrain/FarScatter source, with the installed Unity assembly check as the version-specific authority.

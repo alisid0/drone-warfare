@@ -1,5 +1,6 @@
 from pathlib import Path
-import re, subprocess, os
+import re, subprocess, os, sys
+phase=sys.argv[1] if len(sys.argv)>1 else 'after'
 root=Path(__file__).resolve().parents[2]; scripts=root/'Assets/DroneSandbox/Scripts'; temp=root/'Temp/forest-hlod'
 unity=Path('C:/Users/ali10/Unity/Editors/6000.6.7f1/Editor/Data');dotnet=unity/'DotNetSdk/dotnet.exe'
 def write(p,text):p.write_bytes(text.replace('\r\n','\n').replace('\n','\r\n').encode())
@@ -28,13 +29,21 @@ static int canopyCount,textureSeed;static float[] canopy;static Texture2D worldT
 public static Texture2D WorldTexture=>worldTexture;
 public static float CanopyAt(float x,float z)=>Canopy(x,z);
 '''
-for sig in ['static void BuildCanopy(', 'static float Canopy(', 'static void PaintWorld(', 'static Color32 Field(', 'static int Hash(', 'static void DrawLine(']:support+=block(far,sig)+'\n'
+for sig in ['public static Color CanopyGroundColour(', 'static void BuildCanopy(', 'static float Canopy(', 'static void PaintWorld(', 'static Color32 Field(', 'static int Hash(', 'static void DrawLine(']:support+=block(far,sig)+'\n'
+support+=far[far.index('static readonly Color32[] CanopyCrops'):far.index('// A field',far.index('static readonly Color32[] CanopyCrops'))]
 support+='''static Color32 Shade(Color32 c,float f)=>new Color32((byte)Mathf.Clamp(c.r*f,0,255),(byte)Mathf.Clamp(c.g*f,0,255),(byte)Mathf.Clamp(c.b*f,0,255),255);
 }}'''
 write(temp/'Services.cs',support)
 files=list(scripts.glob('WorldPlan*.cs'))+[scripts/(x+'.cs') for x in ['FarScatter','ForestPattern','ForestPalette','ForestHlod','SettlementPattern','SettlementHlod']]+[temp/(x+'.cs') for x in ['SectorKind','Math','Services','BaselineFarScatter']]+[root/'Tools/ForestHlod'/x for x in ['Engine.cs','Harness.cs']]
+if phase == 'before':
+    baseline=temp/'baseline';baseline.mkdir(exist_ok=True)
+    for name in ['FarScatter','ForestPattern','ForestPalette','ForestHlod']:
+        path=baseline/(name+'.cs')
+        write(path,subprocess.check_output(cmd+['788df6f:Assets/DroneSandbox/Scripts/'+name+'.cs'],text=True))
+        files=[path if f==scripts/(name+'.cs') else f for f in files]
 includes=''.join('<Compile Include="'+str(p)+'" />' for p in files)
 write(temp/'harness.csproj','<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>9</LangVersion><EnableDefaultCompileItems>false</EnableDefaultCompileItems><Optimize>true</Optimize><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup><ItemGroup>'+includes+'</ItemGroup></Project>')
 env=dict(os.environ,DOTNET_CLI_HOME=str(temp/'dotnet-home'),DOTNET_CLI_TELEMETRY_OPTOUT='1')
 subprocess.run([str(dotnet),'build',str(temp/'harness.csproj'),'-c','Release','--nologo','--configfile',str(temp/'NuGet.Config')],env=env,check=True)
-subprocess.run([str(dotnet),str(temp/'bin/Release/net8.0/harness.dll'),str(root),str(temp/'exports')],check=True)
+
+subprocess.run([str(dotnet),str(temp/'bin/Release/net8.0/harness.dll'),str(root),str(temp/phase),'--snapshot',phase],check=True)

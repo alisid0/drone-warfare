@@ -30,16 +30,25 @@ public static class Harness
     static void Write(string name,object value)=>File.WriteAllText(Path.Combine(Output,name),JsonSerializer.Serialize(value,Json));
     static float[] V(Vector3 v)=>new[]{v.x,v.y,v.z};
     static float[] V(Vector2 v)=>new[]{v.x,v.y};
-    public static void Main(string[] args)
+    // Return failures to automation without leaving a Windows unhandled-exception dialog holding the DLL open.
+    public static int Main(string[] args)
+    {
+        try { Run(args); return 0; }
+        catch(Exception error) { Console.Error.WriteLine(error); return 1; }
+    }
+
+    // Dispatch exact-revision captures or deterministic seed checks without launching Unity.
+    static void Run(string[] args)
     {
         Root=args[0];Output=args[1];Directory.CreateDirectory(Output);
         Models=JsonDocument.Parse(File.ReadAllText(Root+"/Tools/ForestHlod/Review/models.json")).RootElement;
         WorldPlan.Generate(1);FarTerrain.Origin=new Vector2(-24000,-24000);
         if(args.Length>2 && args[2]=="--checks") {
-            foreach(int seed in new[]{1,2,3}){WorldPlan.Generate(seed);Checks();}
+            foreach(int seed in new[]{1,2,3}){WorldPlan.Generate(seed);Checks();NaturalChecks();}
             return;
         }
         FarTerrain.Initialize();
+        if(args.Length>2 && args[2]=="--snapshot"){Snapshot(args[3]);return;}
         if(args.Length>2 && args[2]=="--calibration"){Calibration(new Vector2(16500,-4500));return;}
         Checks();
         // This interior forest fits the complete 9 km view; WorldCheck independently visits the largest district.
@@ -84,6 +93,36 @@ public static class Harness
         NearTierCheck(forest);
     }
 
+    // Capture the current production revision; separate folders keep baseline textures immutable.
+    static void Snapshot(string phase)
+    {
+        Vector2 forest=new Vector2(16500,-4500),edge=forest;float best=float.MaxValue;
+        for(float z=forest.y-6000;z<=forest.y+6000;z+=32)for(float x=forest.x-6000;x<=forest.x+6000;x+=32){
+            if(!WorldPlan.Inside(x,z)||WorldPlan.CoverAt(x,z)!=Cover.Forest)continue;
+            if(WorldPlan.CoverAt(x-32,z)!=Cover.Farmland&&WorldPlan.CoverAt(x+32,z)!=Cover.Farmland&&WorldPlan.CoverAt(x,z-32)!=Cover.Farmland&&WorldPlan.CoverAt(x,z+32)!=Cover.Farmland)continue;
+            float d=(new Vector2(x,z)-forest).sqrMagnitude;if(d<best){best=d;edge=new Vector2(x,z);}
+        }
+        Require(best<float.MaxValue,"No forest edge found");
+        foreach(var view in new[]{("300m",300f,45f),("2500m",2500f,64f),("9000m",9000f,72f),("edge",850f,55f)}){
+            Vector2 world=view.Item1=="edge"?edge:forest,p=world-FarTerrain.Origin;
+            var target=new Vector3(p.x,WorldPlan.Height(world.x,world.y),p.y);
+            float pitch=view.Item3*Mathf.Deg2Rad,az=35*Mathf.Deg2Rad,d=view.Item2;
+            Camera.main.target=target;Camera.main.transform.position=target+new Vector3(-Mathf.Sin(az)*Mathf.Cos(pitch)*d,Mathf.Sin(pitch)*d,-Mathf.Cos(az)*Mathf.Cos(pitch)*d);
+            var scatter=new FarScatter();var late=typeof(FarScatter).GetMethod("LateUpdate",BindingFlags.Instance|BindingFlags.NonPublic);
+            Graphics.capture=false;
+            // Allow expensive first builds to settle without including capture or render costs in submissions.
+            for(int i=0;i<16000;i++)late.Invoke(scatter,null);
+            var timer=Stopwatch.StartNew();for(int i=0;i<60;i++)late.Invoke(scatter,null);double ms=timer.Elapsed.TotalMilliseconds/60;
+            Graphics.Reset();Graphics.capture=true;late.Invoke(scatter,null);Graphics.capture=false;
+            string name="forest_"+view.Item1+"_"+phase;
+            metrics.Add(new{name,world=V(world),meshTrees=FarScatter.MeshTreesDrawn,cards=FarScatter.CardTreesDrawn,forestBlocks=ForestHlod.BlocksDrawn,forestTriangles=ForestHlod.TrianglesDrawn,draws=Graphics.calls,triangles=Graphics.triangles,managedSubmitMs=ms});
+            Write(name+".json",new{name,camera=V(Camera.main.transform.position),target=V(target),origin=V(FarTerrain.Origin),after=true,ground=Terrain(world,d,true),worldTexture=ExportTexture(FarTerrain.WorldTexture),instances=Graphics.instances,meshes=Graphics.meshes});
+            Console.WriteLine(name+": "+Graphics.calls+" draws, "+Graphics.triangles+" triangles, "+ms.ToString("F3")+" managed ms");
+            typeof(FarScatter).GetMethod("OnDestroy",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(scatter,null);
+        }
+        Write("metrics.json",metrics);Calibration(forest);NearTierCheck(forest);
+    }
+
     // Hold camera, terrain, species, age and tint fixed while comparing cards alone against full canopy alone.
     static void Calibration(Vector2 world)
     {
@@ -120,7 +159,7 @@ public static class Harness
         int forest=0,glades=0,edge=0;float low=24,high=0;double heights=0,height2=0;int count=0;
         Vector2 focus=ForestHlod.LargestForest();
         for(float z=focus.y-2048;z<focus.y+2048;z+=8)for(float x=focus.x-2048;x<focus.x+2048;x+=8){
-            if(WorldPlan.CoverAt(x,z)!=Cover.Forest)continue;forest++;
+            if(!WorldPlan.Inside(x,z)||WorldPlan.CoverAt(x,z)!=Cover.Forest)continue;forest++;
             if(ForestPattern.Glade(x,z)==0)glades++;
             var stand=ForestPattern.At(x,z);Require(stand.height>=8&&stand.height<=24,"Height outside 8-24 m");
             if(stand.cover<.5)edge++;
@@ -136,9 +175,19 @@ public static class Harness
         var quilt=File.ReadAllBytes(Root+"/Assets/DroneSandbox/Resources/Textures/ForestCrown.bytes");
         var left=new ForestHlod.Data{corner=corner,step=16};var build=ForestHlod.Build(left,quilt);while(build.MoveNext()){}
         var right=new ForestHlod.Data{corner=corner+new Vector2(ForestHlod.BlockSize,0),step=16};build=ForestHlod.Build(right,quilt);while(build.MoveNext()){}
-        for(int j=0;j<=128;j++)Require(Math.Abs(left.vertices[j*129+128].y-right.vertices[j*129].y)<.001,"Canopy seam");
-        int sloped=0;for(int i=0;i<129*129;i++){Require(!float.IsNaN(left.normals[i].y)&&left.normals[i].y>0,"Invalid canopy normal");if(left.normals[i].y<.995)sloped++;}
-        Require(sloped>200,"Canopy has no meaningful surface variation");
+        var edgeHeights=new Dictionary<float,float>();
+        float shared=corner.x+ForestHlod.BlockSize-FarTerrain.Origin.x;
+        for(int i=0;i<left.vertices.Length;i++)if(left.vertices[i].x==shared&&left.crown[i]>0)edgeHeights[left.vertices[i].z]=left.vertices[i].y;
+        int compared=0;
+        for(int i=0;i<right.vertices.Length;i++)if(right.vertices[i].x==shared&&right.crown[i]>0&&edgeHeights.TryGetValue(right.vertices[i].z,out float h)){
+            Require(Math.Abs(h-right.vertices[i].y)<.001,"Canopy seam");compared++;
+        }
+        Require(compared>0,"No shared boundary vertices checked");
+        int sloped=0;for(int i=0;i<left.vertices.Length;i++){Require(!float.IsNaN(left.normals[i].y)&&left.normals[i].y>0,"Invalid canopy normal");if(left.normals[i].y<.995)sloped++;}
+        for(int k=0;k<left.triangles.Length;k+=3){
+            Vector3 a=left.vertices[left.triangles[k]],b=left.vertices[left.triangles[k+1]],c=left.vertices[left.triangles[k+2]];
+            Require(Vector3.Cross(b-a,c-a).sqrMagnitude>.00001f,"Degenerate canopy face");
+        }        Require(sloped>200,"Canopy has no meaningful surface variation");
         Require(ForestHlod.Step(new Vector3(focus.x,WorldPlan.Height(focus.x,focus.y)+9000,focus.y),corner)==128,"Wide view kept fine canopy");
         var houses=new List<SettlementPattern.House>();
         foreach(var settlement in WorldPlan.Settlements)if(settlement.town){
@@ -160,11 +209,46 @@ public static class Harness
         Console.WriteLine("CHECKS PASS: glades "+(share*100).ToString("F2")+"%, heights "+low.ToString("F1")+"-"+high.ToString("F1")+", adjacent seam < 1 mm.");
     }
 
+    // Independent hard-core and range checks catch duplicate placement, tier drift and salt-dependent ordering.
+    static void NaturalChecks()
+    {
+        var radiusField=typeof(ForestPattern.Stand).GetField("radius");
+        if(radiusField==null)return;
+        Vector2 focus=ForestHlod.LargestForest();
+        int gx=Mathf.FloorToInt((focus.x-500)/ForestPattern.TreeStep),gz=Mathf.FloorToInt((focus.y-500)/ForestPattern.TreeStep);
+        int n=Mathf.RoundToInt(1000/ForestPattern.TreeStep),trees=0,agree20=0,agree200=0,comparisons=0,scrub=0;
+        float minimum=100,small=7,large=0;
+        var points=new Dictionary<long,Vector2>();
+        for(int j=gz;j<gz+n;j++)for(int i=gx;i<gx+n;i++){
+            bool yes=ForestPattern.Tree(i,j,out var p,out var stand);if(!yes)continue;
+            trees++;points[((long)i<<32)^(uint)j]=p;
+            float radius=(float)radiusField.GetValue(stand);small=Math.Min(small,radius);large=Math.Max(large,radius);
+            Require(radius>=2&&radius<=7,"Crown radius outside 2-7 m");
+            Require(stand.height>=8&&stand.height<=24,"Individual tree height outside 8-24 m");
+            if(WorldPlan.CoverAt(p.x,p.y)!=Cover.Forest)scrub++;
+            if(stand.cover>.95){comparisons++;if(stand.species==ForestPattern.At(p.x+20,p.y).species)agree20++;if(stand.species==ForestPattern.At(p.x+200,p.y).species)agree200++;}
+        }
+        for(int j=gz+n-1;j>=gz;j--)for(int i=gx+n-1;i>=gx;i--){
+            bool yes=ForestPattern.Tree(i,j,out var p,out var stand);long key=((long)i<<32)^(uint)j;
+            Require(yes==points.ContainsKey(key),"Order changed tree membership");if(!yes)continue;
+            Require(p==points[key],"Order changed crown position");
+            for(int dz=-1;dz<=1;dz++)for(int dx=-1;dx<=1;dx++){
+                if(dx==0&&dz==0)continue;
+                if(points.TryGetValue(((long)(i+dx)<<32)^(uint)(j+dz),out var other))minimum=Math.Min(minimum,Vector2.Distance(p,other));
+            }
+        }
+        Require(minimum>=4,"Poisson hard core violated");
+        Require(comparisons>0,"No woodland found for species check");
+        Require(agree20/(float)comparisons>.85,"Species became salt-and-pepper");
+        Write("pattern-seed-"+WorldPlan.Seed+".json",new{treesPerSquareKm=trees,minimumSpacing=minimum,radiusMin=small,radiusMax=large,scrubTrees=scrub,
+            speciesAgreement20m=agree20/(float)comparisons,speciesAgreement200m=agree200/(float)comparisons,reverseOrderIdentical=true});
+        Console.WriteLine("PATTERN PASS: "+trees+" trees/km2, spacing >= "+minimum.ToString("F2")+" m, species agreement "+(agree20*100f/comparisons).ToString("F1")+"% at 20 m");
+    }
     // Exercise the expensive near tier and cleanup/origin paths, which high-altitude review views never reach.
     static void NearTierCheck(Vector2 forest)
     {
         Vector2 world=forest;ForestPattern.Stand stand=default;bool found=false;
-        int gx=Mathf.FloorToInt(forest.x/12),gz=Mathf.FloorToInt(forest.y/12);
+        int gx=Mathf.FloorToInt(forest.x/ForestPattern.TreeStep),gz=Mathf.FloorToInt(forest.y/ForestPattern.TreeStep);
         for(int j=-10;j<=10&&!found;j++)for(int i=-10;i<=10&&!found;i++)found=ForestPattern.Tree(gx+i,gz+j,out world,out stand);
         Require(found,"No near-tier reference tree");
         Vector2 p=world-FarTerrain.Origin;
