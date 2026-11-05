@@ -70,6 +70,8 @@ namespace DroneSandbox
         // drops screen-space reflections, contact shadows and the volumetric fog (plain height fog still hazes the
         // distance) and brings in the tree detail a little; Low also drops ambient occlusion and the volumetric
         // clouds, cuts tree detail further and thins the grass and draws it nearer. The water stays at every level.
+        // With upscaling on (Settings.Upscaling), DLSS draws the frame smaller and sharpens it back up: its quality
+        // mode at High, balanced at Medium, performance at Low.
         public static void ApplyQuality(Camera cam)
         {
             int q = Settings.Quality;
@@ -86,6 +88,11 @@ namespace DroneSandbox
                 Set(FrameSettingsField.SSAO, q >= 1);
                 Set(FrameSettingsField.Volumetrics, q >= 2);
                 Set(FrameSettingsField.VolumetricClouds, q >= 1);
+                data.allowDynamicResolution = Settings.Upscaling;
+                data.allowDeepLearningSuperSampling = true;
+                data.deepLearningSuperSamplingUseCustomQualitySettings = true;
+                data.deepLearningSuperSamplingQuality = (uint)(q == 2 ? UnityEngine.NVIDIA.DLSSQuality.MaximumQuality
+                    : q == 1 ? UnityEngine.NVIDIA.DLSSQuality.Balanced : UnityEngine.NVIDIA.DLSSQuality.MaximumPerformance);
             }
             QualitySettings.lodBias = q == 0 ? 1f : q == 1 ? 1.5f : 2f; // the project's own setting (2) at High
             if (Ground.Current != null) Ground.Current.detailObjectDensity = GrassDensity;

@@ -12,7 +12,7 @@ namespace DroneSandbox
 
         static bool loaded, persist = true;
         static float uiScale = 1f, volume = 1f;
-        static bool shake = true, flashes = true, alertSounds = true, tips = true;
+        static bool shake = true, flashes = true, alertSounds = true, tips = true, upscaling = true;
         static int quality = 2;
         static DifficultyLevel difficulty = DifficultyLevel.Regular;
 
@@ -40,6 +40,19 @@ namespace DroneSandbox
         public static float Volume { get { Load(); return volume; } set { Load(); volume = Mathf.Clamp01(value); AudioListener.volume = volume; Save(); } }
         public static bool Shake { get { Load(); return shake; } set { Load(); shake = value; Save(); } }
         public static bool Tips { get { Load(); return tips; } set { Load(); tips = value; Save(); } } // Coach, in the first two Operations
+
+        // DLSS on NVIDIA RTX cards (STP elsewhere): see Atmosphere.ApplyQuality.
+        public static bool Upscaling
+        {
+            get { Load(); return upscaling; }
+            set
+            {
+                Load();
+                upscaling = value;
+                Save();
+                if (Camera.main != null) Atmosphere.ApplyQuality(Camera.main);
+            }
+        }
         public static bool Flashes { get { Load(); return flashes; } set { Load(); flashes = value; Save(); } }
         public static bool AlertSounds { get { Load(); return alertSounds; } set { Load(); alertSounds = value; Save(); } }
 
@@ -51,6 +64,7 @@ namespace DroneSandbox
             volume = PlayerPrefs.GetFloat("settings.volume", 1f);
             shake = PlayerPrefs.GetInt("settings.shake", 1) == 1;
             tips = PlayerPrefs.GetInt("settings.tips", 1) == 1;
+            upscaling = PlayerPrefs.GetInt("settings.upscaling", 1) == 1;
             flashes = PlayerPrefs.GetInt("settings.flashes", 1) == 1;
             alertSounds = PlayerPrefs.GetInt("settings.alertSounds", 1) == 1;
             quality = Mathf.Clamp(PlayerPrefs.GetInt("settings.quality", 2), 0, QualityNames.Length - 1);
@@ -65,6 +79,7 @@ namespace DroneSandbox
             PlayerPrefs.SetFloat("settings.volume", volume);
             PlayerPrefs.SetInt("settings.shake", shake ? 1 : 0);
             PlayerPrefs.SetInt("settings.tips", tips ? 1 : 0);
+            PlayerPrefs.SetInt("settings.upscaling", upscaling ? 1 : 0);
             PlayerPrefs.SetInt("settings.flashes", flashes ? 1 : 0);
             PlayerPrefs.SetInt("settings.alertSounds", alertSounds ? 1 : 0);
             PlayerPrefs.SetInt("settings.quality", quality);
@@ -80,7 +95,7 @@ namespace DroneSandbox
             persist = false;
             uiScale = 1f;
             volume = 1f;
-            shake = flashes = alertSounds = true;
+            shake = flashes = alertSounds = upscaling = true;
             quality = 2;
             difficulty = DifficultyLevel.Regular;
             AudioListener.volume = 1f;

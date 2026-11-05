@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
@@ -29,8 +31,30 @@ namespace DroneSandbox.EditorTools
             settings.supportSSR = true;
             settings.supportSSAO = true;
             settings.supportSSGI = true; // bounce light, in photo mode (PhotoMode.ConfigureFocus)
+            // Unity 6's GPU Resident Drawer: the woods, rocks and houses repeat a few meshes thousands of times, so
+            // they're drawn instanced from the GPU instead of one call each, and what's behind a ridge or a hill is
+            // culled on the GPU. It needs every BatchRendererGroup shader variant kept in the build (below).
+            settings.gpuResidentDrawerSettings.mode = GPUResidentDrawerMode.InstancedDrawing;
+            settings.gpuResidentDrawerSettings.enableOcclusionCullingInCameras = true;
+            // Dynamic resolution: on NVIDIA RTX cards DLSS draws the frame smaller and upscales it (the mode is
+            // set per quality level in Atmosphere.ApplyQuality); elsewhere STP stands in for the anti-aliasing.
+            var drs = settings.dynamicResolutionSettings;
+            drs.enabled = true;
+            drs.DLSSUseOptimalSettings = true;
+            drs.advancedUpscalerNames = new List<string> { "DLSS", "STP" };
+            drs.dynResType = DynamicResolutionType.Hardware;
+            drs.maxPercentage = 100f;
+            drs.minPercentage = 50f;
+            settings.dynamicResolutionSettings = drs;
             asset.currentPlatformRenderPipelineSettings = settings;
             EditorUtility.SetDirty(asset);
+            var graphics = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset")[0]);
+            var brg = graphics.FindProperty("m_BrgStripping");
+            if (brg != null)
+            {
+                brg.intValue = (int)BatchRendererGroupStrippingMode.KeepAll;
+                graphics.ApplyModifiedPropertiesWithoutUndo();
+            }
 
             GraphicsSettings.defaultRenderPipeline = asset;
             // Every quality level uses it too (the URP template had its own asset per level).

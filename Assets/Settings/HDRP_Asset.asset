@@ -205,7 +205,7 @@ MonoBehaviour:
   m_ObsoleteShaderVariantLogLevel: 0
   m_ObsoleteLensAttenuation: 0
   m_ObsoleteDiffusionProfileSettingsList: []
-  m_PrefilterUseLegacyLightmaps: 0
+  m_PrefilterUseLegacyLightmaps: 1
   m_PrefilterUseLightmapBicubicSampling: 0
   m_ShouldUseConservativeEnclosingSphere: 0
   m_NumIterationsEnclosingSphere: 64
@@ -366,10 +366,11 @@ MonoBehaviour:
       lutFormat: 48
       bufferFormat: 74
     dynamicResolutionSettings:
-      enabled: 0
+      enabled: 1
       useMipBias: 0
       advancedUpscalersByPriority: 
       advancedUpscalerNames:
+      - DLSS
       - STP
       DLSSPerfQualitySetting: 0
       DLSSInjectionPoint: 0
@@ -391,7 +392,7 @@ MonoBehaviour:
       fsrOverrideSharpness: 0
       fsrSharpness: 0.92
       maxPercentage: 100
-      minPercentage: 100
+      minPercentage: 50
       dynResType: 1
       upsampleFilter: 1
       forceResolution: 0
@@ -522,9 +523,9 @@ MonoBehaviour:
       - 0.666
       - 0.5
     gpuResidentDrawerSettings:
-      mode: 0
+      mode: 1
       smallMeshScreenPercentage: 0
-      enableOcclusionCullingInCameras: 0
+      enableOcclusionCullingInCameras: 1
       useDepthPrepassForOccluders: 1
       shadowSmallMeshScreenPercentages: {x: 0, y: 0, z: 0, w: 0}
     m_ObsoleteLightLayerName0: 

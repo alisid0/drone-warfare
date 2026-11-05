@@ -270,6 +270,7 @@ namespace DroneSandbox
             yield return HuntMission(game, rts, false);
             yield return HuntMission(game, rts, true);
             yield return SeekIgnored(game, rts);
+            yield return IdentificationHuntCheck(game, rts);
             yield return OcclusionCheck(game);
             yield return SectorTour(game, rts);
 
@@ -838,6 +839,67 @@ namespace DroneSandbox
             float until = Time.realtimeSinceStartup + 10f;
             while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until) yield return null;
             yield return Shot("65_seek_lost");
+        }
+
+        // The identification hunt (Codex's campaign situation): generated in a village sector and played by a bot that
+        // takes a Scout over each look-alike in turn and watches it, strikes only the ones shown to be real, and
+        // brings the Scout home. It has to be winnable this way, with 3-5 look-alikes and 1-2 real ones.
+        IEnumerator IdentificationHuntCheck(SandboxGame game, RtsController rts)
+        {
+            var spot = new Hotspot
+            {
+                kind = SectorKind.VillageCluster, seed = 4321, situation = Situation.IdentificationHunt,
+                daylight = Daylight.Day, weather = Weather.Clear, heat = 0.5f, sectorName = "Test",
+            };
+            game.PlayHotspot(spot);
+            while (game.Loading) yield return null;
+            yield return new WaitForSecondsRealtime(0.4f);
+            yield return Shot("70_idhunt_briefing");
+            game.CloseBriefing();
+            var group = game.enemies.FindAll(e => e != null && (e.isTarget || e.isDecoy));
+            int real = group.FindAll(e => e.isTarget).Count, struck = 0;
+            var scout = game.SpawnDrone(DroneType.Scout);
+            int scouts = 1;
+            float started = Time.time;
+            bool shot = false;
+            foreach (var e in group)
+            {
+                if (game.Result != MissionResult.None) break;
+                if (e == null || !e.IsAlive) continue;
+                if (scout == null || !scout.IsAlive)
+                {
+                    scout = game.SpawnDrone(DroneType.Scout); // the last one was shot down
+                    scouts++;
+                }
+                if (scout == null) break;
+                scout.MoveTo(e.ContactPosition);
+                for (float t = 0f; t < 25f && scout != null && e != null && Vector3.Distance(scout.transform.position, e.transform.position) > 14f; t += 0.25f)
+                    yield return new WaitForSeconds(0.25f);
+                for (float t = 0f; t < 6f && e != null && e.Intel < Intel.Identified && !e.ExposedDecoy; t += 0.25f) yield return new WaitForSeconds(0.25f);
+                if (e == null) continue;
+                if (!shot)
+                {
+                    shot = true;
+                    rts.LookAt(e.transform.position, 50f, 40f);
+                    yield return new WaitForSeconds(0.3f);
+                    yield return Shot("71_idhunt_watching");
+                }
+                if (e.isTarget && e.IsAlive && e.Intel >= Intel.Identified)
+                {
+                    var k = game.SpawnDrone(DroneType.Kamikaze);
+                    if (k != null) { k.Attack(e); struck++; }
+                }
+            }
+            for (float t = 0f; t < 40f && game.Phase != MissionPhase.Extract && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSeconds(0.5f);
+            int exposed = group.FindAll(e => e != null && e.ExposedDecoy).Count;
+            game.Recall(new List<Drone>());
+            for (float t = 0f; t < 90f && game.Result == MissionResult.None; t += 0.5f) yield return new WaitForSeconds(0.5f);
+            float until = Time.realtimeSinceStartup + 10f;
+            while (Time.unscaledTime < game.ResultsAt + 0.5f && Time.realtimeSinceStartup < until) yield return null;
+            yield return Shot("72_idhunt_result");
+            log.WriteLine($"Identification hunt: {group.Count} look-alikes ({group[0].type}), {real} real, {exposed} decoys exposed by watching, {struck} strikes, {scouts} scouts, " +
+                          $"result {game.Result} ({game.ResultReason}) in {Time.time - started:F0} s, par {game.Mission.par}");
+            if (game.Result != MissionResult.Won || group.Count < 3 || group.Count > 5 || real < 1 || real > 2) errors++;
         }
 
         // Does the treetop line-of-sight check (Canopy.Blocks) agree with the picture? 50 views of a 1 m sphere (a bird

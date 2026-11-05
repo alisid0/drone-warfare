@@ -10,7 +10,7 @@ namespace DroneSandbox
         {
             float s = Scale;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
-            Rect r = Centered(560f, 588f);
+            Rect r = Centered(560f, 646f);
             Fill(r, ModalColor);
             Fill(new Rect(r.x, r.y, r.width, 3f * s), Teal);
             GUI.Label(new Rect(r.x, r.y + 16f * s, r.width, 34f * s), "SETTINGS", Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, label.normal.textColor));
@@ -20,6 +20,8 @@ namespace DroneSandbox
             if (difficulty >= 0) Settings.Difficulty = (DifficultyLevel)difficulty;
             int quality = Choice(r, ref y, "Graphics", "Lower it if the game stutters", Settings.QualityNames, Settings.Quality);
             if (quality >= 0) Settings.Quality = quality;
+            int upscaling = Choice(r, ref y, "Upscaling", "DLSS on NVIDIA RTX: faster, a touch softer", new[] { "On", "Off" }, Settings.Upscaling ? 0 : 1);
+            if (upscaling >= 0) Settings.Upscaling = upscaling == 0;
             int scale = Choice(r, ref y, "Interface size", "Text, panels and markers", new[] { "80%", "90%", "100%", "120%", "140%" },
                 System.Array.IndexOf(Settings.UiScales, Settings.UiScale));
             if (scale >= 0) Settings.UiScale = Settings.UiScales[scale];

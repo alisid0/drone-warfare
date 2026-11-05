@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox
@@ -63,6 +64,8 @@ namespace DroneSandbox
             yield return new WaitForSeconds(1f);
             log.WriteLine($"{SystemInfo.graphicsDeviceName} ({SystemInfo.graphicsDeviceType}, {SystemInfo.graphicsMemorySize} MB), " +
                           $"{SystemInfo.processorType}, screen {Screen.width}x{Screen.height}, quality {QualitySettings.names[QualitySettings.GetQualityLevel()]}");
+            log.WriteLine($"Upscaling {(Settings.Upscaling ? "on" : "off")}, DLSS {(HDDynamicResolutionPlatformCapabilities.DLSSDetected ? "available" : "not available")}, " +
+                          $"drawn at {(DynamicResolutionHandler.instance != null ? DynamicResolutionHandler.instance.GetCurrentScale() * 100f : 100f):F0}% of the screen");
             LogScene();
 
             var village = MapLayout.Villages[0];
@@ -166,6 +169,12 @@ namespace DroneSandbox
                          FrameSettingsField.SubsurfaceScattering, FrameSettingsField.Postprocess, FrameSettingsField.OpaqueObjects,
                      })
                 yield return (field.ToString(), () => Frame(data, field, false));
+            yield return ("upscaling (DLSS) off", () =>
+            {
+                if (!data.allowDynamicResolution) return null;
+                data.allowDynamicResolution = false;
+                return () => data.allowDynamicResolution = true;
+            });
             yield return ("TAA -> SMAA", () =>
             {
                 var was = data.antialiasing;
