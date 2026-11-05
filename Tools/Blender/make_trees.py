@@ -3,6 +3,7 @@ and exports them for Unity, replacing the simple ones from make_scenery.py.
 
 Run from the project root (Blender 4.x or 5.x):
     blender --background --python Tools/Blender/make_trees.py -- Assets/DroneSandbox/Resources/Models Assets/DroneSandbox/Textures/PBR [preview_dir] [names]
+Add --lod2-only to reuse the existing leaf/bark textures when changing only the far impostors.
 
 How a tree is made:
 1. Leaf atlas: each species' leaf (lobed oak, toothed birch, diamond poplar) is modelled, a few dozen of them are
@@ -17,14 +18,17 @@ How a tree is made:
 3. The branches become tubes with real bark UVs (around and along, in metres); the trunk flares at the root.
 4. Leaf cards (the atlas twigs) sit on every fine branch tip, with normals pointing out from the middle of the
    crown, so the crown shades softly like a real one instead of card by card.
-5. Three levels of detail, named so Unity makes a LOD group: _LOD0 full, _LOD1 lighter, _LOD2 a billboard of
-   three crossed cards showing a render of the tree (impostor_<species>.png).
+5. Three levels of detail, named so Unity makes a LOD group: _LOD0 full, _LOD1 lighter, _LOD2 three crossed
+   side cards and a horizontal crown card, sharing one side/top atlas (impostor_<species>.png).
 Materials: Bark<Species>, Leaves<Species> and Impostor<Species> (photo-textured in Unity by ProjectSetup).
 """
 import math
 import os
 import random
 import sys
+import tempfile
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import export, reset_scene, root  # noqa: E402
@@ -33,10 +37,13 @@ import bpy  # noqa: E402
 from mathutils import Matrix, Vector, kdtree, noise  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+LOD2_ONLY = "--lod2-only" in args
+args = [arg for arg in args if arg != "--lod2-only"]
 OUT_DIR = os.path.abspath(args[0] if args else ".")
 TEX_DIR = os.path.abspath(args[1]) if len(args) > 1 else OUT_DIR
 PREVIEW_DIR = os.path.abspath(args[2]) if len(args) > 2 and args[2] else None
-ONLY = set(args[3].split(",")) if len(args) > 3 else None
+ONLY = set(args[3].split(",")) if len(args) > 3 and args[3] else None
+BAKED = set()
 
 # ---------- species ----------
 
@@ -776,6 +783,7 @@ def tree_materials(kind):
 
 
 def build_tree(name, kind, seed, variant):
+    """Grows the unchanged near meshes, then adds an eight-triangle RTS impostor for distant crowns."""
     rng = random.Random(seed)
     spec = SPECIES[kind]
     nodes = grow_conifer(kind, rng, variant) if spec.get("conifer") else grow(kind, rng, variant)
@@ -810,9 +818,10 @@ def build_tree(name, kind, seed, variant):
         tris = sum(len(p.vertices) - 2 for p in obj.data.polygons)
         print(f"  {name}_LOD{lod}: {tris} triangles")
 
-    # LOD2: three crossed cards with a picture of the tree. The later variants share their species' picture.
-    if variant < 2:
+    # Bake once per species, even for a filtered export. The top and side always come from the same tree.
+    if kind not in BAKED:
         render_impostor(kind, r, height, width)
+        BAKED.add(kind)
     verts, faces, uvs, mats = [], [], [], []
     for k in range(3):
         a = k * math.pi / 3
@@ -820,16 +829,30 @@ def build_tree(name, kind, seed, variant):
         start = len(verts)
         for corner, uv in ((-d, (0, 0)), (d, (1, 0)), (d + Vector((0, 0, height)), (1, 1)), (-d + Vector((0, 0, height)), (0, 1))):
             verts.append(tuple(corner))
-            uvs.append(uv)
+            uvs.append(impostor_uv(uv, False))
         faces.append((start, start + 1, start + 2, start + 3))
         mats.append(0)
+    # A crown seen from above fills the gaps between vertical cards without adding another renderer/material.
+    # Conifers keep their leader above the cap; broad crowns put it near their upper shoulder.
+    cap = height * {"oak": 0.72, "birch": 0.72, "poplar": 0.65, "spruce": 0.3, "pine": 0.8}[kind]
+    start = len(verts)
+    for x, y, uv in ((-1, -1, (0, 0)), (1, -1, (1, 0)), (1, 1, (1, 1)), (-1, 1, (0, 1))):
+        verts.append((x * width, y * width, cap))
+        uvs.append(impostor_uv(uv, True))
+    faces.append((start, start + 1, start + 2, start + 3))
+    mats.append(0)
     lod2 = build_mesh(f"{name}_LOD2", verts, faces, uvs, None, mats, [impostor], r)
     lod2.data.normals_split_custom_set_from_vertices([Vector((0, 0, 1))] * len(verts))
     return r, height
 
 
+def impostor_uv(uv, top):
+    """Maps a full picture into one padded atlas tile, keeping the other view out of its mip edges."""
+    return ((512 * int(top) + 8 + uv[0] * 496) / 1024, (8 + uv[1] * 496) / 512)
+
+
 def render_impostor(kind, tree_root, height, width):
-    """A side view of the full tree on a transparent background, for the far billboard."""
+    """Bakes side and overhead views into one transparent atlas for the existing alpha-clipped material."""
     path = os.path.join(TEX_DIR, f"impostor_{kind}.png")
     scene = bpy.context.scene
     lod0 = next(o for o in tree_root.children if o.name.endswith("_LOD0"))
@@ -860,7 +883,31 @@ def render_impostor(kind, tree_root, height, width):
     scene.render.resolution_x = int(512 * (width * 2) / size + 0.5)
     scene.render.resolution_y = int(512 * height / size + 0.5)
     scene.camera.data.ortho_scale = max(width * 2, height)
-    render_to(scene, path, "Standard")
+    # Stretch the side picture into its square tile; the side card's aspect restores the original proportions.
+    # Temporary render files stay outside Assets, so Unity sees only the finished shared atlas.
+    pixels = np.zeros((512, 1024, 4), dtype=np.float32)
+    with tempfile.TemporaryDirectory(prefix="dw-impostor-") as temp:
+        for top in (False, True):
+            if top:
+                scene.camera.location = (0, 0, height + 60)
+                scene.camera.rotation_euler = (0, 0, 0)
+                scene.camera.data.ortho_scale = width * 2
+                scene.render.resolution_x = scene.render.resolution_y = 496
+            shot = os.path.join(temp, "top.png" if top else "side.png")
+            render_to(scene, shot, "Standard")
+            img = bpy.data.images.load(shot, check_existing=False)
+            img.scale(496, 496)
+            tile = np.empty(496 * 496 * 4, dtype=np.float32)
+            img.pixels.foreach_get(tile)
+            x = 512 * int(top) + 8
+            pixels[8:504, x:x + 496] = tile.reshape(496, 496, 4)
+            bpy.data.images.remove(img)
+    atlas = bpy.data.images.new("ImpostorAtlas", width=1024, height=512, alpha=True)
+    atlas.pixels.foreach_set(pixels.ravel())
+    atlas.filepath_raw = path
+    atlas.file_format = "PNG"
+    atlas.save()
+    bpy.data.images.remove(atlas)
     bpy.data.objects.remove(sun_obj, do_unlink=True)
     for o in hidden:
         o.hide_render = False
@@ -946,16 +993,23 @@ TREES = [
 
 
 def main():
+    """Exports the tree variants; --lod2-only keeps the existing bark and leaf textures untouched."""
     os.makedirs(OUT_DIR, exist_ok=True)
     os.makedirs(TEX_DIR, exist_ok=True)
     wanted = {kind for name, kind, _, _ in TREES if not ONLY or name in ONLY}
-    for kind in sorted(wanted):
-        make_atlas(kind)
-    if "birch" in wanted:
-        make_birch_bark()
+    if not LOD2_ONLY:
+        for kind in sorted(wanted):
+            make_atlas(kind)
+        if "birch" in wanted:
+            make_birch_bark()
     for name, kind, seed, variant in TREES:
         if ONLY and name not in ONLY:
             continue
+        # Filtered exports still bake the same representative, not whichever variant happened to be selected.
+        source = next(t for t in TREES if t[1] == kind)
+        if kind not in BAKED and source[0] != name:
+            reset_scene()
+            build_tree(*source)
         reset_scene()
         r, height = build_tree(name, kind, seed, variant)
         export(r, os.path.join(OUT_DIR, name + ".fbx"))
@@ -965,4 +1019,5 @@ def main():
             preview(os.path.join(PREVIEW_DIR, name + ".png"), height)
 
 
-main()
+if __name__ == "__main__":
+    main()
