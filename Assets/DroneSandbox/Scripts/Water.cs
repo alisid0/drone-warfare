@@ -27,6 +27,12 @@ namespace DroneSandbox
             var root = new GameObject("Water").transform;
             root.SetParent(parent, false);
             if (MapLayout.HasRiver && MapLayout.RiverField.points.Count > 1) BuildRiver(root);
+            if (MapLayout.Plan.world != null)
+            {
+                foreach (var lake in MapLayout.Plan.world.lakes) BuildWorldLake(root, lake);
+                BuildWorldStructures(root);
+                return;
+            }
             if (MapLayout.HasDam) BuildLake(root);
             if (MapLayout.Plan.ponds.Count > 0) BuildPonds(root);
         }
@@ -36,7 +42,9 @@ namespace DroneSandbox
             bool dam = MapLayout.HasDam;
             Vector2 start = dam ? MapLayout.DamPoint : MapLayout.RiverField.points[0];
             float riverLevel = MapLayout.RiverField.values[0];
-            var river = dam
+            var river = MapLayout.Plan.world != null
+                ? Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), WorldRiverMeshes())
+                : dam
                 ? Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh(), PoolMesh())
                 : Surface("River", root, WaterSurfaceType.River, new Vector3(start.x, riverLevel, start.y), RiverMesh());
             // Clear, slightly teal water you can see the bed through at the edges, and ripples catching the sky:
@@ -98,7 +106,7 @@ namespace DroneSandbox
             offset = (min + max) / 2f - origin;
 
             // Downstream is the way the water level falls.
-            float downstream = field.values[field.values.Length - 1] <= field.values[0] ? 1f : -1f;
+            float downstream = MapLayout.Plan.world != null || field.values[field.values.Length - 1] <= field.values[0] ? 1f : -1f;
             bool dam = MapLayout.HasDam;
             // About 2 m per texel on each axis, capped at 5 MiB for both maps together. Cache bend directions
             // once per segment rather than normalizing seven vectors for every texel of the larger river box.
@@ -108,8 +116,16 @@ namespace DroneSandbox
             for (int i = 0; i < directions.Length; i++)
             {
                 Vector2 dir = Vector2.zero;
-                for (int k = -3; k <= 3; k++)
-                    if (field.IsValidSegment(i + k)) dir += field.Direction(i + k);
+                if (MapLayout.Plan.world != null)
+                {
+                    // Never average the tangent across a break between unrelated reaches.
+                    if (field.IsValidSegment(i)) dir = field.Direction(i);
+                    for (int k = i - 1; k >= Mathf.Max(0, i - 3) && field.IsValidSegment(k); k--) dir += field.Direction(k);
+                    for (int k = i + 1; k <= Mathf.Min(line.Count - 2, i + 3) && field.IsValidSegment(k - 1) && field.IsValidSegment(k); k++) dir += field.Direction(k);
+                }
+                else
+                    for (int k = -3; k <= 3; k++)
+                        if (field.IsValidSegment(i + k)) dir += field.Direction(i + k);
                 directions[i] = dir.sqrMagnitude > 0f ? dir.normalized * downstream : Vector2.right;
             }
             current = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { name = "River Current", wrapMode = TextureWrapMode.Clamp };
@@ -362,17 +378,23 @@ namespace DroneSandbox
 
         // A grid over the lake, 2-4 m cells, kept wherever a corner is near water. HDRP adds the wave detail;
         // the terrain draws the shoreline. Grid density is bounded on the larger map. UVs are world metres.
-        static Mesh LakeMesh()
+        static Mesh LakeMesh(WorldLake lake = null)
         {
             float cell = Mathf.Max(2f, Ground.Size / 512f);
-            Rect bounds = LakeBounds();
+            Rect bounds = lake != null ? WorldLakeBounds(lake) : LakeBounds();
             int nx = Mathf.Max(1, Mathf.CeilToInt(bounds.width / cell)), nz = Mathf.Max(1, Mathf.CeilToInt(bounds.height / cell));
             float dx = bounds.width / nx, dz = bounds.height / nz;
             var vertices = new List<Vector3>();
             var uvs = new List<Vector2>();
             var triangles = new List<int>();
             var index = new Dictionary<int, int>();
-            float y = MapLayout.LakeLevel;
+            float y = lake != null ? lake.level : MapLayout.LakeLevel;
+            // Each shoreline query is reused by up to four cells; large reservoirs stay bounded by the grid.
+            var wetCorners = lake != null ? new bool[(nx + 1) * (nz + 1)] : null;
+            if (lake != null)
+                for (int j = 0; j <= nz; j++)
+                    for (int i = 0; i <= nx; i++)
+                        wetCorners[j * (nx + 1) + i] = WorldSectorData.ShoreDistance(new Vector2(bounds.xMin + i * dx, bounds.yMin + j * dz), lake.shore) < 1.5f;
 
             int Vertex(int i, int j)
             {
@@ -392,13 +414,162 @@ namespace DroneSandbox
                     float x = bounds.xMin + i * dx, z = bounds.yMin + j * dz;
                     bool wet = false;
                     for (int c = 0; c < 4 && !wet; c++)
-                        wet = MapLayout.ReservoirDistance(x + (c & 1) * dx, z + (c >> 1) * dz) < 1.5f;
+                        wet = lake != null ? wetCorners[(j + (c >> 1)) * (nx + 1) + i + (c & 1)]
+                            : MapLayout.ReservoirDistance(x + (c & 1) * dx, z + (c >> 1) * dz) < 1.5f;
                     if (!wet) continue;
                     int a = Vertex(i, j), b = Vertex(i + 1, j), d = Vertex(i, j + 1), e = Vertex(i + 1, j + 1);
                     triangles.AddRange(new[] { a, d, b, b, d, e }); // clockwise from above, so it faces up
                 }
             }
             return Finish("Lake", vertices, uvs, triangles);
+        }
+
+        // Each world lake owns its absolute level and complete polygon, even when its shore leaves the square.
+        static void BuildWorldLake(Transform root, WorldLake lake)
+        {
+            var bounds = WorldLakeBounds(lake);
+            if (bounds.width <= 0f || bounds.height <= 0f) return;
+            var surface = Surface(lake.name, root, WaterSurfaceType.OceanSeaLake,
+                new Vector3(bounds.center.x, lake.level, bounds.center.y), LakeMesh(lake));
+            surface.repetitionSize = 250f;
+            surface.largeWindSpeed = 7f;
+            surface.largeChaos = 0.6f;
+            surface.ripplesWindSpeed = 7f;
+            surface.startSmoothness = 0.97f;
+            surface.endSmoothness = 0.93f;
+            surface.smoothnessFadeStart = 150f * Scale.Camera;
+            surface.smoothnessFadeDistance = 800f * Scale.Camera;
+            surface.refractionColor = new Color(0.06f, 0.46f, 0.52f);
+            surface.scatteringColor = new Color(0.05f, 0.3f, 0.32f);
+            surface.absorptionDistance = 9f;
+        }
+
+        // Bound the grid to the terrain, without inventing a shoreline or leaving a one-metre seam at its edge.
+        static Rect WorldLakeBounds(WorldLake lake)
+        {
+            Vector2 min = lake.shore[0], max = min;
+            foreach (var p in lake.shore) { min = Vector2.Min(min, p); max = Vector2.Max(max, p); }
+            float limit = Ground.Size / 2f;
+            return Rect.MinMaxRect(Mathf.Clamp(min.x - 2f, -limit, limit), Mathf.Clamp(min.y - 2f, -limit, limit),
+                Mathf.Clamp(max.x + 2f, -limit, limit), Mathf.Clamp(max.y + 2f, -limit, limit));
+        }
+
+        // A separate mesh per reach keeps tangents, UV distance and triangles from crossing a line break.
+        static Mesh[] WorldRiverMeshes()
+        {
+            var reaches = MapLayout.Plan.world.rivers;
+            var meshes = new Mesh[reaches.Count];
+            for (int i = 0; i < meshes.Length; i++) meshes[i] = WorldRiverMesh(reaches[i]);
+            return meshes;
+        }
+
+        // Interpolate the reach's own widths and levels; a nearby tributary must not supply its vertex values.
+        static Mesh WorldRiverMesh(SectorRiver reach)
+        {
+            var line = new List<Vector2>();
+            var widths = new List<float>();
+            var levels = new List<float>();
+            for (int i = 1; i < reach.points.Length; i++)
+            {
+                int n = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(reach.points[i - 1], reach.points[i]) / 2f));
+                for (int j = 0; j < n; j++)
+                {
+                    float t = j / (float)n;
+                    line.Add(Vector2.Lerp(reach.points[i - 1], reach.points[i], t));
+                    widths.Add(Mathf.Lerp(reach.halfWidths[i - 1], reach.halfWidths[i], t));
+                    levels.Add(Mathf.Lerp(reach.waterLevels[i - 1], reach.waterLevels[i], t));
+                }
+            }
+            int last = reach.points.Length - 1;
+            line.Add(reach.points[last]); widths.Add(reach.halfWidths[last]); levels.Add(reach.waterLevels[last]);
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var triangles = new List<int>();
+            float travelled = 0f;
+            Vector3 oldLeft = default, oldRight = default;
+            float oldWidth = 0f, oldTravelled = 0f;
+            for (int i = 0; i < line.Count; i++)
+            {
+                if (i > 0) travelled += Vector2.Distance(line[i - 1], line[i]);
+                Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(0, i - 1)]).normalized;
+                Vector2 side = new Vector2(-dir.y, dir.x) * widths[i];
+                var left = new Vector3(line[i].x - side.x, levels[i], line[i].y - side.y);
+                var right = new Vector3(line[i].x + side.x, levels[i], line[i].y + side.y);
+                if (i > 0)
+                {
+                    var a = (oldLeft, new Vector2(-oldWidth, oldTravelled));
+                    var b = (oldRight, new Vector2(oldWidth, oldTravelled));
+                    var c = (left, new Vector2(-widths[i], travelled));
+                    var d = (right, new Vector2(widths[i], travelled));
+                    AddWaterTriangle(a, b, c, vertices, uvs, triangles);
+                    AddWaterTriangle(b, d, c, vertices, uvs, triangles);
+                }
+                oldLeft = left; oldRight = right; oldWidth = widths[i]; oldTravelled = travelled;
+            }
+            return Finish(reach.name, vertices, uvs, triangles);
+        }
+
+        // Clip only boundary triangles, interpolating elevation and UVs right up to the square's exact edge.
+        static void AddWaterTriangle((Vector3 p, Vector2 uv) a, (Vector3 p, Vector2 uv) b, (Vector3 p, Vector2 uv) c,
+            List<Vector3> vertices, List<Vector2> uvs, List<int> triangles)
+        {
+            float limit = Ground.Size / 2f;
+            bool Inside(Vector3 p) => Mathf.Abs(p.x) <= limit && Mathf.Abs(p.z) <= limit;
+            void Add((Vector3 p, Vector2 uv) v) { triangles.Add(vertices.Count); vertices.Add(v.p); uvs.Add(v.uv); }
+            if (Inside(a.p) && Inside(b.p) && Inside(c.p)) { Add(a); Add(b); Add(c); return; }
+            if (Mathf.Min(a.p.x, Mathf.Min(b.p.x, c.p.x)) > limit || Mathf.Max(a.p.x, Mathf.Max(b.p.x, c.p.x)) < -limit
+                || Mathf.Min(a.p.z, Mathf.Min(b.p.z, c.p.z)) > limit || Mathf.Max(a.p.z, Mathf.Max(b.p.z, c.p.z)) < -limit) return;
+            var polygon = new List<(Vector3 p, Vector2 uv)> { a, b, c };
+            for (int edge = 0; edge < 4 && polygon.Count > 0; edge++)
+            {
+                float Distance(Vector3 p) => limit - (edge == 0 ? p.x : edge == 1 ? -p.x : edge == 2 ? p.z : -p.z);
+                var clipped = new List<(Vector3 p, Vector2 uv)>();
+                var previous = polygon[polygon.Count - 1];
+                float before = Distance(previous.p);
+                foreach (var next in polygon)
+                {
+                    float after = Distance(next.p);
+                    if ((before >= 0f) != (after >= 0f))
+                    {
+                        float t = before / (before - after);
+                        clipped.Add((Vector3.Lerp(previous.p, next.p, t), Vector2.Lerp(previous.uv, next.uv, t)));
+                    }
+                    if (after >= 0f) clipped.Add(next);
+                    previous = next; before = after;
+                }
+                polygon = clipped;
+            }
+            for (int i = 2; i < polygon.Count; i++) { Add(polygon[0]); Add(polygon[i - 1]); Add(polygon[i]); }
+        }
+
+        // Existing models use +Z along a bridge/downstream at a dam; their authored deck datums are 0.3/15 m.
+        static void BuildWorldStructures(Transform root)
+        {
+            var source = MapLayout.Plan.world;
+            foreach (var bridge in source.bridges)
+            {
+                Vector2 center = (bridge.a + bridge.b) / 2f, along = (bridge.b - bridge.a).normalized;
+                var model = new GameObject(bridge.railway ? "World Rail Bridge" : "World Road Bridge").transform;
+                model.SetParent(root, false);
+                model.position = new Vector3(center.x, bridge.deckLevel - 0.3f, center.y);
+                model.rotation = Quaternion.LookRotation(new Vector3(along.x, 0f, along.y));
+                var mesh = Art.TryModel("Scenery_Bridge", model);
+                if (mesh != null) mesh.transform.localScale = new Vector3(1f, 1f, Vector2.Distance(bridge.a, bridge.b) / 18f);
+            }
+            foreach (var dam in source.dams)
+            {
+                Vector2 center = (dam.a + dam.b) / 2f, across = (dam.b - dam.a).normalized;
+                Vector2 down = new Vector2(-across.y, across.x);
+                // The dry side has the larger signed shoreline distance, regardless of endpoint ordering.
+                if (source.LakeDistance(center + down * 10f, out _) < source.LakeDistance(center - down * 10f, out _)) down = -down;
+                var model = new GameObject(dam.name).transform;
+                model.SetParent(root, false);
+                model.position = new Vector3(center.x, dam.tailwater, center.y);
+                model.rotation = Quaternion.LookRotation(new Vector3(down.x, 0f, down.y));
+                var mesh = Art.TryModel("Scenery_Dam", model);
+                if (mesh != null) mesh.transform.localScale = new Vector3(Vector2.Distance(dam.a, dam.b) / 72f,
+                    Mathf.Max(0.01f, (dam.crest - dam.tailwater) / 15f), 1f);
+            }
         }
 
         // The plunge pool below the spillway: an oval of river water wider than the river. UVs run downstream.

@@ -465,44 +465,67 @@ namespace DroneSandbox
             // when the budget fills, so neither the last wood nor the last row gets chopped off.
             var candidates = new List<(Vector2 p, bool outer, float age)>();
             var plan = MapLayout.Plan;
-            int innerWant = Mathf.Min(10, Mathf.RoundToInt(6f * plan.forest / 0.3f));
-            int outerWant = Mathf.Min(22, Mathf.RoundToInt(16f * plan.forest / 0.3f));
-            int inner = 0, outer = 0;
-            int attempts = 600 + 20 * (innerWant + outerWant);
-            float limit = MapLayout.Edge - 10f, softEdge = Scale.D(7f);
-            for (int attempt = 0; attempt < attempts && (inner < innerWant || outer < outerWant); attempt++)
+            if (plan.world != null)
             {
-                var c = new Vector2(Range(rng, -limit, limit), Range(rng, -limit, limit));
-                bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > Mathf.Min(Scale.D(105f), MapLayout.Edge * 0.48f);
-                if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
-                if (!MapLayout.IsWild(c, 3f)) continue;
-                if (isOuter) outer++; else inner++;
-                float radius = Mathf.Min(Scale.D(isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f)), Ground.Size * 0.075f);
-                float spacing = isOuter ? 5.6f : 4.6f;
-                int seed = rng.Next();
-                // Each wood is stretched along its own axis and lopsided.
-                float axis = (seed % 360) * Mathf.Deg2Rad, stretch = 1f + (seed / 360 % 100) / 100f * 1.4f;
-                float cos = Mathf.Cos(axis), sin = Mathf.Sin(axis), reach = (radius * 1.1f + softEdge) * Mathf.Sqrt(stretch);
-                for (float x = -reach; x <= reach; x += spacing)
-                {
-                    for (float z = -reach; z <= reach; z += spacing)
+                // World-aligned spacing keeps each crop in the same forest; the existing shuffle and budget
+                // distribute its trees across the whole square instead of exhausting the first woodland.
+                var source = plan.world;
+                const float spacing = 5.6f;
+                float firstX = Mathf.CeilToInt((source.center.x - MapLayout.Edge) / spacing) * spacing;
+                float firstZ = Mathf.CeilToInt((source.center.y - MapLayout.Edge) / spacing) * spacing;
+                for (float wx = firstX; wx < source.center.x + MapLayout.Edge; wx += spacing)
+                    for (float wz = firstZ; wz < source.center.y + MapLayout.Edge; wz += spacing)
                     {
-                        Vector2 p = c + new Vector2(x, z) + new Vector2(Range(rng, -1.6f, 1.6f), Range(rng, -1.6f, 1.6f));
-                        float du = (x * cos + z * sin) / Mathf.Sqrt(stretch), dv = (z * cos - x * sin) * Mathf.Sqrt(stretch);
-                        float angle = Mathf.Atan2(dv, du), r = Mathf.Sqrt(du * du + dv * dv);
-                        float edge = radius * (0.7f + 0.22f * Mathf.PerlinNoise(seed % 1000 + angle * 1.6f, 0.5f)
-                                                    + 0.18f * Mathf.PerlinNoise(seed % 997 + angle * 4.3f, 3.7f));
-                        // A broad, ragged margin and glades inside; the spacing of individual trees stays real.
-                        if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / softEdge) continue;
-                        if (r > edge + softEdge || Mathf.PerlinNoise(p.x * 0.07f / Scale.Distance + seed % 211, p.y * 0.07f / Scale.Distance + 5f) < 0.28f) continue;
-                        if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
-                        // Trees of an age together (a stand planted or seeded at once), 0.7 to 1.3 times the usual size
-                        // over 15-25 m, and here and there a young one half the size.
-                        float age = 0.7f + 0.6f * Mathf.PerlinNoise(p.x * 0.05f + seed % 89, p.y * 0.05f + 31f);
-                        if (Mathf.PerlinNoise(p.x * 0.27f + 12f, p.y * 0.27f + seed % 53) > 0.74f) age *= 0.55f;
-                        candidates.Add((p, isOuter, age));
+                        var p = new Vector2(wx - source.center.x + Range(rng, -1.6f, 1.6f), wz - source.center.y + Range(rng, -1.6f, 1.6f));
+                        if (source.CoverAt(p.x, p.y) != Cover.Forest || !MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
+                        if (Mathf.PerlinNoise(wx * 0.07f / Scale.Distance, wz * 0.07f / Scale.Distance + 5f) < 0.28f) continue;
+                        float age = 0.7f + 0.6f * Mathf.PerlinNoise(wx * 0.05f, wz * 0.05f + 31f);
+                        if (Mathf.PerlinNoise(wx * 0.27f + 12f, wz * 0.27f) > 0.74f) age *= 0.55f;
+                        candidates.Add((p, Mathf.Max(Mathf.Abs(p.x), Mathf.Abs(p.y)) > MapLayout.Edge * 0.48f, age));
+                    }
+            }
+            else
+            {
+                int innerWant = Mathf.Min(10, Mathf.RoundToInt(6f * plan.forest / 0.3f));
+                int outerWant = Mathf.Min(22, Mathf.RoundToInt(16f * plan.forest / 0.3f));
+                int inner = 0, outer = 0;
+                int attempts = 600 + 20 * (innerWant + outerWant);
+                float limit = MapLayout.Edge - 10f, softEdge = Scale.D(7f);
+                for (int attempt = 0; attempt < attempts && (inner < innerWant || outer < outerWant); attempt++)
+                {
+                    var c = new Vector2(Range(rng, -limit, limit), Range(rng, -limit, limit));
+                    bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > Mathf.Min(Scale.D(105f), MapLayout.Edge * 0.48f);
+                    if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
+                    if (!MapLayout.IsWild(c, 3f)) continue;
+                    if (isOuter) outer++; else inner++;
+                    float radius = Mathf.Min(Scale.D(isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f)), Ground.Size * 0.075f);
+                    float spacing = isOuter ? 5.6f : 4.6f;
+                    int seed = rng.Next();
+                    // Each wood is stretched along its own axis and lopsided.
+                    float axis = (seed % 360) * Mathf.Deg2Rad, stretch = 1f + (seed / 360 % 100) / 100f * 1.4f;
+                    float cos = Mathf.Cos(axis), sin = Mathf.Sin(axis), reach = (radius * 1.1f + softEdge) * Mathf.Sqrt(stretch);
+                    for (float x = -reach; x <= reach; x += spacing)
+                    {
+                        for (float z = -reach; z <= reach; z += spacing)
+                        {
+                            Vector2 p = c + new Vector2(x, z) + new Vector2(Range(rng, -1.6f, 1.6f), Range(rng, -1.6f, 1.6f));
+                            float du = (x * cos + z * sin) / Mathf.Sqrt(stretch), dv = (z * cos - x * sin) * Mathf.Sqrt(stretch);
+                            float angle = Mathf.Atan2(dv, du), r = Mathf.Sqrt(du * du + dv * dv);
+                            float edge = radius * (0.7f + 0.22f * Mathf.PerlinNoise(seed % 1000 + angle * 1.6f, 0.5f)
+                                                        + 0.18f * Mathf.PerlinNoise(seed % 997 + angle * 4.3f, 3.7f));
+                            // A broad, ragged margin and glades inside; the spacing of individual trees stays real.
+                            if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / softEdge) continue;
+                            if (r > edge + softEdge || Mathf.PerlinNoise(p.x * 0.07f / Scale.Distance + seed % 211, p.y * 0.07f / Scale.Distance + 5f) < 0.28f) continue;
+                            if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
+                            // Trees of an age together (a stand planted or seeded at once), 0.7 to 1.3 times the usual size
+                            // over 15-25 m, and here and there a young one half the size.
+                            float age = 0.7f + 0.6f * Mathf.PerlinNoise(p.x * 0.05f + seed % 89, p.y * 0.05f + 31f);
+                            if (Mathf.PerlinNoise(p.x * 0.27f + 12f, p.y * 0.27f + seed % 53) > 0.74f) age *= 0.55f;
+                            candidates.Add((p, isOuter, age));
+                        }
                     }
                 }
+
             }
 
             int startCount = TreeCount;
@@ -521,6 +544,7 @@ namespace DroneSandbox
             float walked = 0f, next = 0f;
             for (int i = 1; i < river.Count; i++)
             {
+                if (plan.world != null && !MapLayout.RiverField.IsValidSegment(i - 1)) { walked = next = 0f; continue; }
                 float length = Vector2.Distance(river[i - 1], river[i]);
                 if (length < 0.001f) continue;
                 Vector2 dir = (river[i] - river[i - 1]) / length, side = new Vector2(-dir.y, dir.x);
@@ -530,7 +554,9 @@ namespace DroneSandbox
                     foreach (float sign in new[] { -1f, 1f })
                     {
                         if (rng.NextDouble() > 0.42) continue;
-                        Vector2 p = bank + side * sign * (MapLayout.RiverHalfWidth + Range(rng, 3.2f, 9f));
+                        float width = plan.world != null ? MapLayout.RiverWidthAt(bank.x, bank.y) : MapLayout.RiverHalfWidth;
+                        Vector2 p = bank + side * sign * (width + Range(rng, 3.2f, 9f));
+                        if (plan.world != null && (plan.world.CoverAt(p.x, p.y) != Cover.Forest || InClearing(p))) continue;
                         if (Vector2.Distance(p, MapLayout.BridgePoint) < 14f || !MapLayout.IsWild(p, -2f)) continue;
                         double roll = rng.NextDouble();
                         string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
