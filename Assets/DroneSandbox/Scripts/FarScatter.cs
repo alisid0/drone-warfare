@@ -143,7 +143,7 @@ namespace DroneSandbox
                     if (!WorldPlan.Inside(wx, wz) || WorldPlan.CoverAt(wx, wz) != Cover.Forest) continue;
                     Vector2 local = new Vector2(wx, wz) - FarTerrain.Origin;
                     if (Mathf.Abs(local.x) < edge && Mathf.Abs(local.y) < edge) continue;
-                    float ground = FarTerrain.GroundAt(local);
+                    float ground = GroundHeight(local, true);
                     float conifer = Mathf.Clamp01(0.15f + Mathf.SmoothStep(0f, 1f, (WorldPlan.Height(wx, wz) - 120f) / 220f) * 0.7f);
                     int kind = pick < conifer ? (pick < conifer * 0.55 ? 2 : 3) : (pick - conifer < (1.0 - conifer) * 0.25 ? 1 : 0);
                     var part = parts[kind];
@@ -169,7 +169,7 @@ namespace DroneSandbox
                     float yaw = block + 90f * (Hash(Mathf.FloorToInt(wx), Mathf.FloorToInt(wz)) % 4);
                     var house = parts[kind];
                     if (house == null) continue;
-                    var at = new Vector3(local.x, FarTerrain.GroundAt(local) - 0.2f, local.y);
+                    var at = new Vector3(local.x, GroundHeight(local, false) - 0.2f, local.y);
                     lists[kind].Add(Matrix4x4.TRS(at, Quaternion.Euler(0f, yaw, 0f), Vector3.one) * house.local);
                 }
             var cell = new Cell
@@ -191,6 +191,9 @@ namespace DroneSandbox
             }
             return cell;
         }
+
+        // Keep cached instances on the eventual tile surface; tree lookup also cancels the legacy canopy lift.
+        static float GroundHeight(Vector2 local, bool tree) => FarDetail.ScatterHeight(local, tree);
 
         static int Hash(int x, int z)
         {
