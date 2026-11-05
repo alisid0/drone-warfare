@@ -690,15 +690,31 @@ namespace DroneSandbox
             // it must finish with battery to spare and without touching the ground.
             var swift = game.SpawnDrone(DroneType.Recon);
             if (swift != null) swift.MoveTo(game.basePosition + away.normalized * 16000f);
+            var flightFrames = new List<float>(12000);
+            FarDetail.ResetMetrics();
+            bool lowField = false, lowForest = false;
+            rts.selected.Clear();
+            if (swift != null) rts.selected.Add(swift); // the feed has its own streaming priority and predicted velocity
             Time.timeScale = 4f;
             float swiftLowest = float.MaxValue, swiftFlown = 0f, started = Time.time;
-            for (float t = 0f; t < 600f && swift != null && swift.IsAlive; t += 0.5f)
+            while (Time.time - started < 600f && swift != null && swift.IsAlive)
             {
+                flightFrames.Add(Time.unscaledDeltaTime * 1000f);
                 swiftFlown = Vector3.Distance(Flat(swift.transform.position), Flat(game.basePosition));
                 if (swiftFlown > 15000f) break;
                 if (swiftFlown > 600f) swiftLowest = Mathf.Min(swiftLowest, swift.transform.position.y - Ground.HeightAt(swift.transform.position));
-                if (t % 20f < 0.5f) rts.LookAt(swift.transform.position, 1200f, 30f);
-                yield return new WaitForSeconds(0.5f);
+                rts.LookAt(swift.transform.position, 75f, 30f);
+                if (!lowField && swiftFlown > 5500f)
+                {
+                    yield return LowWorldShot(Cover.Farmland, "86_world_low_detail", swift.transform.position);
+                    lowField = true;
+                }
+                if (!lowForest && swiftFlown > 10000f)
+                {
+                    yield return LowWorldShot(Cover.Forest, "87_world_low_forest_edge", swift.transform.position);
+                    lowForest = true;
+                }
+                yield return null;
             }
             Time.timeScale = 1f;
             if (swift != null) rts.LookAt(swift.transform.position, 900f, 30f);
@@ -706,8 +722,56 @@ namespace DroneSandbox
             yield return Shot("83_world_swift_far");
             log.WriteLine($"World long flight: Swift alive {swift != null && swift.IsAlive}, flew {swiftFlown:F0} m in {Time.time - started:F0} s, " +
                           $"battery {(swift != null ? swift.Battery * 100f : 0f):F0}%, lowest {swiftLowest:F1} m above the ground");
+            flightFrames.Sort();
+            float p95 = flightFrames.Count > 0 ? flightFrames[Mathf.Min(flightFrames.Count - 1, Mathf.CeilToInt(flightFrames.Count * 0.95f) - 1)] : 0f;
+            double meanCommit = FarDetail.TotalCommitMs / Mathf.Max(1, FarDetail.CommitFrames);
+            log.WriteLine($"World detail flight: live {FarDetail.Live}/{FarDetail.MaxTiles}, committed {FarDetail.Committed}, " +
+                          $"generation last {FarDetail.LastGenerationMs:F2} ms, main-thread mean {meanCommit:F3} ms, worst {FarDetail.WorstCommitMs:F3} ms, " +
+                          $"over 2 ms {FarDetail.BudgetOverruns}, pressure evictions {FarDetail.PressureEvictions}; frame p95 {p95:F2} ms ({flightFrames.Count} frames, screenshot I/O excluded), " +
+                          $"{Screen.width}x{Screen.height}, {SystemInfo.graphicsDeviceName}");
+            if (!lowField || !lowForest || FarDetail.Live > FarDetail.MaxTiles || FarDetail.Committed == 0 ||
+                FarDetail.WorstCommitMs > 2.0 || meanCommit > 1.0 || p95 > 16.7f) errors++;
             if (swift == null || !swift.IsAlive || swiftFlown < 15000f || swiftLowest < 2f) errors++;
             yield return WorldMapCheck(game, rts, swift);
+
+            // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
+            IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
+            {
+                Vector3 chosen = near;
+                float best = float.MaxValue;
+                for (int z = -24; z <= 24; z++) for (int x = -24; x <= 24; x++)
+                {
+                    Vector3 local = near + new Vector3(x * 64f, 0f, z * 64f);
+                    Vector2 world = new Vector2(local.x, local.z) + FarTerrain.Origin;
+                    if (!FarDetail.Eligible(Mathf.FloorToInt(world.x / 512f), Mathf.FloorToInt(world.y / 512f)) ||
+                        WorldPlan.CoverAt(world.x, world.y) != cover) continue;
+                    if (cover == Cover.Forest && WorldPlan.CoverAt(world.x + 64f, world.y) == cover &&
+                        WorldPlan.CoverAt(world.x - 64f, world.y) == cover && WorldPlan.CoverAt(world.x, world.y + 64f) == cover &&
+                        WorldPlan.CoverAt(world.x, world.y - 64f) == cover) continue;
+                    float distance = x * x + z * z;
+                    if (distance < best) { best = distance; chosen = local; }
+                }
+                if (best == float.MaxValue) { log.WriteLine($"World detail: no {cover} probe near flight; {name} failed"); errors++; yield break; }
+                float until = Time.realtimeSinceStartup + 12f, zoom = 75f;
+                bool loaded = false;
+                while (Time.realtimeSinceStartup < until)
+                {
+                    rts.LookAt(chosen, zoom, 30f);
+                    var camera = rts.Cam.transform.position;
+                    float clearance = camera.y - Ground.HeightAt(camera);
+                    zoom = Mathf.Clamp(zoom + (50f - clearance) * 1.2f, 25f, 180f);
+                    loaded = FarDetail.TryHeight(new Vector2(camera.x, camera.z), out _) &&
+                             FarDetail.TryHeight(new Vector2(chosen.x, chosen.z), out _);
+                    flightFrames.Add(Time.unscaledDeltaTime * 1000f);
+                    if (loaded && clearance >= 40f && clearance <= 60f) break;
+                    yield return null;
+                }
+                var eye = rts.Cam.transform.position;
+                float above = eye.y - Ground.HeightAt(eye);
+                log.WriteLine($"{name}: live {loaded}, clearance {above:F1} m, local ({eye.x:F0},{eye.z:F0}), tiles {FarDetail.Live}");
+                if (!loaded || above < 40f || above > 60f) errors++;
+                yield return Shot(name);
+            }
         }
 
         // Exercise the atlas's actual pointer path, with a far-away Swift and screenshots at both map scales.

@@ -67,6 +67,7 @@ namespace DroneSandbox
         public static void Build()
         {
             if (!WorldPlan.Ready) return;
+            FarDetail.Clear();
             if (root == null)
             {
                 root = new GameObject("Far Terrain").transform;
@@ -93,6 +94,7 @@ namespace DroneSandbox
             for (int cz = 0; cz < ChunkCount; cz++)
                 for (int cx = 0; cx < ChunkCount; cx++)
                     BuildChunk(cx, cz);
+            FarDetail.Initialise(root);
         }
 
         // ---- Heights ----
@@ -236,6 +238,7 @@ namespace DroneSandbox
             var group = go.AddComponent<LODGroup>();
             group.SetLODs(lods);
             group.RecalculateBounds();
+            FarDetailChunks.Register(corner, lods[0].renderers[0].GetComponent<MeshFilter>(), group);
         }
 
         // A grid of (quads + 1) x (quads + 1) heights over the chunk, plus a skirt round it, with normals from the world's own
@@ -303,7 +306,8 @@ namespace DroneSandbox
             foreach (var c in colliders)
             {
                 if (c == null || !c.bounds.IntersectRay(ray)) continue;
-                if (c.Raycast(ray, out RaycastHit hit, 80000f) && hit.distance < best)
+                if (c.Raycast(ray, out RaycastHit hit, 80000f) && hit.distance < best &&
+                    !FarDetail.TryHeight(new Vector2(hit.point.x, hit.point.z), out _))
                 {
                     best = hit.distance;
                     point = hit.point;

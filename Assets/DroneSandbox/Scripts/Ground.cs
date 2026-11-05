@@ -35,7 +35,7 @@ namespace DroneSandbox
         public static float HeightAt(Vector3 p)
         {
             if (terrain == null) return 0f;
-            if (FarTerrain.Active && (Mathf.Abs(p.x) > Size / 2f || Mathf.Abs(p.z) > Size / 2f)) return FarTerrain.SurfaceAt(new Vector2(p.x, p.z));
+            if (FarTerrain.Active && (Mathf.Abs(p.x) > Size / 2f || Mathf.Abs(p.z) > Size / 2f)) return FarDetail.HeightAt(new Vector2(p.x, p.z));
             return terrain.SampleHeight(p) + terrain.transform.position.y;
         }
 
@@ -57,7 +57,7 @@ namespace DroneSandbox
                 point = hit.point;
                 return true;
             }
-            if (FarTerrain.Active && FarTerrain.Raycast(ray, out point)) return true;
+            if (FarTerrain.Active && FarDetail.Raycast(ray, out point)) return true;
             var plane = new Plane(Vector3.up, Vector3.zero);
             if (plane.Raycast(ray, out float enter))
             {
