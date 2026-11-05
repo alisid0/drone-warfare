@@ -28,6 +28,7 @@ namespace DroneSandbox
             else if (industry) Industry(p, area);
             else if (rail) RailYard(p, area);
             else Town(p, area);
+            FeatureBridges(p);
         }
 
         // Scores dry, unobstructed rectangles, retaining through-roads and mission sites instead of moving them.
@@ -36,6 +37,7 @@ namespace DroneSandbox
             var roads = new List<Vector2>();
             foreach (var line in p.roads) roads.AddRange(MapLayout.Smooth(line, 8f));
             var river = p.river == null ? new List<Vector2>() : MapLayout.Smooth(p.river, 8f);
+            var riverPoints = river.ToArray();
             var rails = new List<Vector2>();
             foreach (var line in p.railways) rails.AddRange(MapLayout.Smooth(line, 8f));
             FeatureArea best = default;
@@ -64,6 +66,11 @@ namespace DroneSandbox
                             foreach (var q in rails) if (a.Contains(q, 12f)) { clear = false; break; }
                         }
                         if (!clear) continue;
+                        if (!forest && rails.Count > 0)
+                        {
+                            Vector2 entry = a.Point(-a.halfLength - 8f, p.kind == SectorKind.RailJunction ? -30f : -104f);
+                            if (!DrySegment(p, riverPoints, Nearest(rails, entry), entry)) continue;
+                        }
                         float distance = a.center.magnitude;
                         if (rails.Count > 0) distance += Vector2.Distance(Nearest(rails, a.center), a.center) * 2f;
                         if (distance >= score) continue;
@@ -224,6 +231,30 @@ namespace DroneSandbox
         static void Site(SectorPlan p, string model, Vector2 at, Vector2 facing, float flat)
         {
             p.sites.Add(new Site { model = model, position = at, yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg, scale = 1f, flat = flat });
+        }
+
+        // The forestry track is planned after the old bridge pass, so register its stream crossings too.
+        static void FeatureBridges(SectorPlan p)
+        {
+            if (p.river == null) return;
+            var river = MapLayout.Smooth(p.river, 2f);
+            foreach (var street in p.featureStreets)
+            {
+                var road = MapLayout.Smooth(street, 2f);
+                for (int i = 1; i < road.Count; i++)
+                    for (int j = 1; j < river.Count; j++)
+                    {
+                        Vector2 r = road[i] - road[i - 1], s = river[j] - river[j - 1], d = river[j - 1] - road[i - 1];
+                        float cross = r.x * s.y - r.y * s.x;
+                        if (Mathf.Abs(cross) < 0.00001f) continue;
+                        float t = (d.x * s.y - d.y * s.x) / cross, u = (d.x * r.y - d.y * r.x) / cross;
+                        if (t < 0f || t > 1f || u < 0f || u > 1f) continue;
+                        Vector2 at = road[i - 1] + r * t;
+                        bool known = false;
+                        foreach (var bridge in p.bridges) if (Vector2.Distance(at, bridge) < 20f) known = true;
+                        if (!known) p.bridges.Add(at);
+                    }
+            }
         }
 
         // Records surfaces separately from sites, so missions never choose an invisible yard marker as a building.
