@@ -62,6 +62,15 @@ namespace DroneSandbox
         {
             if (Cam == null) return;
             selected.RemoveAll(d => d == null || !d.IsAlive);
+            // The atlas owns input before camera movement, selection or orders can see the same press.
+            hud.UpdateWorldMapIntel();
+            if (hud.HandleWorldMapInput())
+            {
+                IsDragging = false;
+                HoveredEnemy = null;
+                if (DroneFeed.Instance != null) DroneFeed.Instance.Inspecting = false;
+                return;
+            }
             if (PhotoMode.Active)
             {
                 IsDragging = false;
