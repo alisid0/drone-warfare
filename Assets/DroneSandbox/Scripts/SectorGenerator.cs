@@ -79,7 +79,7 @@ namespace DroneSandbox
                 Orchards();
                 Defences();
                 Bridges();
-                return p;
+                return p.ScaleLayout(); // laid out in the old map's metres, like Varrow
             }
 
             // ---- River and water ----

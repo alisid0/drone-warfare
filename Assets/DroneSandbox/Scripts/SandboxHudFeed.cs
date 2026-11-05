@@ -58,7 +58,7 @@ namespace DroneSandbox
             {
                 if (b == null || b.Down || !b.gameObject.activeInHierarchy) continue;
                 Vector3 at = f.FeedCamera.WorldToViewportPoint(b.transform.position);
-                if (at.z <= 0f || at.z > 150f) continue;
+                if (at.z <= 0f || at.z > DroneSandbox.Scale.D(150f)) continue;
                 float pixels = new Vector2((at.x - u) * r.width, (at.y - v) * r.height).magnitude;
                 if (pixels < bestPixels)
                 {
@@ -146,7 +146,7 @@ namespace DroneSandbox
                 {
                     if (b == null || b.Down || !b.gameObject.activeInHierarchy) continue;
                     Vector3 v = cam.WorldToViewportPoint(b.transform.position);
-                    if (v.z <= 0f || v.z > 150f || v.x < 0.03f || v.x > 0.97f || v.y < 0.06f || v.y > 0.97f) continue;
+                    if (v.z <= 0f || v.z > DroneSandbox.Scale.D(150f) || v.x < 0.03f || v.x > 0.97f || v.y < 0.06f || v.y > 0.97f) continue;
                     var p = new Vector2(r.x + v.x * r.width, r.y + (1f - v.y) * r.height);
                     var ev = Mimic.Of(b);
                     if (Mimic.Jammed(b)) JamPulse(p, 18f * s, b);

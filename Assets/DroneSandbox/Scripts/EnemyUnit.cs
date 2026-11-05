@@ -15,11 +15,12 @@ namespace DroneSandbox
     // and patrols go to look where the trouble was.
     public class EnemyUnit : Unit
     {
-        public const float RadarCoverage = 35f; // AA guns this close to a radar get extra range
-        public const float RadarRangeBonus = 6f;
-        public const float JamRadius = 24f;     // drones inside a jammer's circle lose their link
+        // Reaches and speeds are the old 480 m map's, brought over by Scale.
+        public const float RadarCoverage = 35f * Scale.Distance; // AA guns this close to a radar get extra range
+        public const float RadarRangeBonus = 6f * Scale.Distance;
+        public const float JamRadius = 24f * Scale.Distance;     // drones inside a jammer's circle lose their link
         public const float AlertSeconds = 30f;  // how long a unit stays on alert after the last trouble
-        public const float AlertShare = 42f;    // units this close to one that's hit or destroyed go on alert too
+        public const float AlertShare = 42f * Scale.Distance;    // units this close to one that's hit or destroyed go on alert too
         public static float Wariness = 1f;      // an ALERTED campaign sector (Theatre): drones noticed further off, the alarm spreading wider
 
         public EnemyType type;
@@ -168,6 +169,8 @@ namespace DroneSandbox
                     maxHp = 150f; radius = 3.4f; aimHeight = 0.9f;
                     break;
             }
+            moveSpeed *= Scale.Speed;
+            range *= Scale.Distance;
             hp = maxHp;
             if (enemyType == EnemyType.Command) return; // the HQ building in the world is its model
 
@@ -374,7 +377,7 @@ namespace DroneSandbox
                 case EnemyType.Tank:
                 case EnemyType.APC:
                     Move(dt);
-                    var escortTarget = TrackNearestDrone(30f, 40f, dt);
+                    var escortTarget = TrackNearestDrone(Scale.D(30f), 40f, dt);
                     if (type == EnemyType.APC) Escort(escortTarget, dt);
                     break;
                 case EnemyType.Truck:
@@ -417,7 +420,7 @@ namespace DroneSandbox
         // A heavier gun (Silent Corridor's): reaches high enough to catch a Nightjar and hits much harder.
         public void Upgun()
         {
-            range = 24f;
+            range = Scale.D(24f);
             damage = 18f; // enough to bring down a Nightjar (182 hp) that flies the corridor without pinning them first
             unitName = "Heavy AA";
         }
@@ -508,7 +511,7 @@ namespace DroneSandbox
 
         // What the briefing says about it: a static defence's position is known (Identified), a vehicle's only
         // roughly (a Contact within `radius` of where it really is).
-        public void Brief(Intel level, float radius = 12f)
+        public void Brief(Intel level, float radius = 12f * Scale.Distance)
         {
             Intel = level;
             NumberContact();
@@ -551,7 +554,7 @@ namespace DroneSandbox
                 {
                     Intel = Intel.Contact; // the trail has gone cold
                     ContactPosition = LastSeenPosition;
-                    ContactRadius = 18f;
+                    ContactRadius = Scale.D(18f);
                 }
             }
             Observed = seen;
@@ -574,9 +577,9 @@ namespace DroneSandbox
         void Flash()
         {
             if (Hidden || Intel >= Intel.Contact) return;
-            Vector2 off = Random.insideUnitCircle * 8f;
+            Vector2 off = Random.insideUnitCircle * Scale.D(8f);
             ContactPosition = Ground.OnGround(transform.position + new Vector3(off.x, 0f, off.y));
-            ContactRadius = 14f;
+            ContactRadius = Scale.D(14f);
             Intel = Intel.Contact;
         }
 
@@ -621,9 +624,9 @@ namespace DroneSandbox
         public void Notice(Drone drone, float distance, float dark)
         {
             if (isTarget && SandboxGame.Instance.IsShadow) return; // a shadowed column grows suspicious instead (SandboxGame)
-            float range = type == EnemyType.Radar ? RadarCoverage + 10f
-                : type == EnemyType.AAGun ? CurrentRange + 6f
-                : IsMobile ? 26f : 20f;
+            float range = type == EnemyType.Radar ? RadarCoverage + Scale.D(10f)
+                : type == EnemyType.AAGun ? CurrentRange + Scale.D(6f)
+                : Scale.D(IsMobile ? 26f : 20f);
             range *= Mathf.Lerp(1f, 0.7f, dark) * Recon.WeatherFactor * Wariness;
             if (distance * Difficulty.AlertReactionFactor > range) return;
             Alert(drone.transform.position);
@@ -658,7 +661,7 @@ namespace DroneSandbox
         {
             Suppress(LastDamage);
             Vector3 from = transform.position;
-            var shooter = Combat.NearestHostile(AimPoint, team, 60f, true);
+            var shooter = Combat.NearestHostile(AimPoint, team, Scale.D(60f), true);
             if (shooter != null) from = shooter.transform.position;
             Alert(from);
             AlertNeighbours(from);
@@ -683,8 +686,8 @@ namespace DroneSandbox
             if (away.sqrMagnitude < 0.01f) away = Random.insideUnitSphere;
             away.y = 0f;
             away = Quaternion.Euler(0f, Random.Range(-40f, 40f), 0f) * away.normalized;
-            Vector3 point = transform.position + away * Random.Range(30f, 45f);
-            float limit = SandboxGame.MapHalfSize - 10f;
+            Vector3 point = transform.position + away * Random.Range(30f, 45f) * Scale.Distance;
+            float limit = SandboxGame.MapHalfSize - Scale.D(10f);
             point.x = Mathf.Clamp(point.x, -limit, limit);
             point.z = Mathf.Clamp(point.z, -limit, limit);
             return Ground.OnGround(point);
@@ -871,7 +874,7 @@ namespace DroneSandbox
         {
             cooldown -= dt;
             if (!Alerted || nearest == null || Suppressed || cooldown > 0f) return;
-            if (Vector3.Distance(nearest.AimPoint, AimPoint) > 16f) return;
+            if (Vector3.Distance(nearest.AimPoint, AimPoint) > Scale.D(16f)) return;
             cooldown = 0.6f;
             Vector3 muzzle = AimPoint + Vector3.up * 0.8f;
             Projectile.Bullet(muzzle, nearest, team, 4f, 0.5f, new Color(1f, 0.6f, 0.3f));

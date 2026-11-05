@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DroneSandbox.EditorTools
 {
-    // Draws why each square metre of a sector's valley floor is or isn't farmed, to tune the field planner without
+    // Draws why each 4 m square of a sector is or isn't farmed, to tune the field planner without
     // a full build. Command line:
     //   Unity.exe -batchmode -quit -projectPath . -executeMethod DroneSandbox.EditorTools.LayoutProbe.Run -probeOut <png>
     public static class LayoutProbe
@@ -18,7 +18,8 @@ namespace DroneSandbox.EditorTools
             var clock = System.Diagnostics.Stopwatch.StartNew();
             MapLayout.Prepare();
             long prepareMs = clock.ElapsedMilliseconds;
-            const int half = 160;
+            const int half = 250;
+            float cell = Ground.Size / (2f * half); // the whole map, a pixel every 4 m
             var tex = new Texture2D(2 * half, 2 * half, TextureFormat.RGB24, false);
             var counts = new int[10];
             string[] names = { "field", "field margin", "road", "river", "lake", "dam/works", "site", "village", "open", "edge" };
@@ -32,7 +33,7 @@ namespace DroneSandbox.EditorTools
             {
                 for (int i = 0; i < 2 * half; i++)
                 {
-                    var p = new Vector2(i - half + 0.5f, j - half + 0.5f);
+                    var p = new Vector2(i - half + 0.5f, j - half + 0.5f) * cell;
                     int why;
                     if (MapLayout.InField(p, 0f)) why = 0;
                     else if (MapLayout.InField(p, 3f)) why = 1;
@@ -42,14 +43,14 @@ namespace DroneSandbox.EditorTools
                     else if (MapLayout.NearDam(p, 15f) || MapLayout.OnWorks(p, 4f)) why = 5;
                     else if (MapLayout.NearFlatSite(p, 4f)) why = 6;
                     else if (MapLayout.NearVillage(p, 0f)) why = 7;
-                    else if (Mathf.Abs(p.x) > 210f || Mathf.Abs(p.y) > 210f) why = 9;
+                    else if (Mathf.Abs(p.x) > MapLayout.Edge - 15f || Mathf.Abs(p.y) > MapLayout.Edge - 15f) why = 9;
                     else why = 8;
                     counts[why]++;
                     tex.SetPixel(i, j, colours[why]);
                 }
             }
             File.WriteAllBytes(output, tex.EncodeToPNG());
-            var report = new System.Text.StringBuilder($"Layout probe: prepared in {prepareMs} ms, {MapLayout.Fields.Count} fields, coverage {MapLayout.FieldCoverage():P0};");
+            var report = new System.Text.StringBuilder($"Layout probe: prepared in {prepareMs} ms ({MapLayout.Timings}{MapLayout.FieldTimings}), {MapLayout.Fields.Count} fields, coverage {MapLayout.FieldCoverage():P0};");
             for (int k = 0; k < counts.Length; k++)
                 if (counts[k] > 0) report.Append($" {names[k]} {counts[k] * 100f / (4f * half * half):0}%");
             Debug.Log(report.ToString());

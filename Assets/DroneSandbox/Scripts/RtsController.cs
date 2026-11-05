@@ -19,8 +19,12 @@ namespace DroneSandbox
         SandboxHud hud;
         Vector3 focus;
         float yaw = 45f;
-        float distance = 55f;
-        float zoomTarget = 55f;   // the mouse wheel sets this; the camera eases to it
+        float distance = 55f * Scale.Camera;
+        float zoomTarget = 55f * Scale.Camera;   // the mouse wheel sets this; the camera eases to it
+        // How close and how far the wheel takes the camera: right down to a drone, and out to the old map's widest
+        // view brought over (Scale.Camera), at the narrower lens.
+        public const float MinZoom = 25f;
+        public static readonly float MaxZoom = 110f * Scale.Camera;
         bool orbiting;
         Drone following;          // double-clicked: the camera keeps it in the middle until you pan
         Drone lastClicked;
@@ -31,6 +35,7 @@ namespace DroneSandbox
             game = sandbox;
             hud = overlay;
             Cam = camera;
+            Cam.fieldOfView = Scale.CameraFov;
             focus = startFocus;
             ApplyCamera();
         }
@@ -39,7 +44,7 @@ namespace DroneSandbox
         public void Orbit(bool on)
         {
             orbiting = on;
-            if (on) LookAt(new Vector3(-10f, 0f, -10f), 105f, yaw);
+            if (on) LookAt(new Vector3(-10f, 0f, -10f) * Scale.Distance, 105f * Scale.Camera, yaw);
         }
 
         // Points the camera at a spot on the map (used by missions and the auto-test).
@@ -106,7 +111,7 @@ namespace DroneSandbox
             if (feed != null) feed.Inspecting = inspecting;
             if (inspecting && scroll != 0f) feed.Zoom = Mathf.Clamp(feed.Zoom * (scroll > 0f ? 1.2f : 1f / 1.2f), 1f, 3f); // the wheel zooms the drone's camera
             else if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
-                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), 15f, 110f);
+                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), MinZoom, MaxZoom);
             distance = Mathf.Lerp(distance, zoomTarget, 1f - Mathf.Exp(-dt / 0.15f)); // eased over about 0.15 s
 
             ApplyCamera();
@@ -118,7 +123,7 @@ namespace DroneSandbox
         void ApplyCamera()
         {
             // Look more steeply down when zoomed out, flatter when zoomed in.
-            float pitch = Mathf.Lerp(42f, 64f, Mathf.InverseLerp(15f, 110f, distance));
+            float pitch = Mathf.Lerp(42f, 64f, Mathf.InverseLerp(15f * Scale.Camera, MaxZoom, distance));
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Cam.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             Cam.transform.rotation = rotation;

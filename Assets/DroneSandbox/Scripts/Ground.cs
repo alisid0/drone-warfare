@@ -7,13 +7,15 @@ namespace DroneSandbox
     // makes them), ridges around the edge opening into a river valley, a river channel, the reservoir, lakes and
     // pools, dirt roads, railway beds, a quarry pit or a trench line where the sector has them, and flat sites
     // (bases, defences, buildings) levelled to y = 0. Also answers "how high is the ground here?".
+    // The land's shapes (hills, ridges, the lake's banks, the quarry) are the old 480 m map's, made Scale.Distance
+    // times bigger; the river's channel, the roads and the dam are real sizes and stay as they were.
     public static class Ground
     {
-        public const float Size = 480f;   // terrain is Size x Size metres, centred on the map
-        const float Sink = 8f;            // terrain sits this far below y = 0, so the river and hollows can dip below the flat sites
-        const float HeightRange = 80f;
-        const int HeightRes = 513;
-        const int SplatRes = 1024;
+        public const float Size = 480f * Scale.Distance;   // terrain is Size x Size metres, centred on the map
+        const float Sink = 8f * Scale.Distance;            // terrain sits this far below y = 0, so the river and hollows can dip below the flat sites
+        const float HeightRange = 80f * Scale.Distance;
+        const int HeightRes = 1025;                        // about 2 m between heights
+        const int SplatRes = 2048;                         // about 1 m per texel
 
         public struct FlatSite
         {
@@ -64,6 +66,7 @@ namespace DroneSandbox
             MapLayout.Prepare();
             sites.Clear();
             sites.AddRange(MapLayout.FlatSites);
+            IndexSites();
             worn.Clear();
 
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
@@ -78,7 +81,7 @@ namespace DroneSandbox
             go.transform.position = new Vector3(-Size / 2f, -Sink, -Size / 2f);
             terrain = go.GetComponent<Terrain>();
             terrain.heightmapPixelError = 2f;
-            terrain.basemapDistance = 600f;
+            terrain.basemapDistance = 1200f;
             var lit = Resources.Load<Material>("Materials/TerrainLit");
             if (lit != null) terrain.materialTemplate = lit;
             // Draw without GPU instancing. Instanced terrain takes its normals from a texture Unity generates, and
@@ -173,7 +176,7 @@ namespace DroneSandbox
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
                     float d = river.Query(x, z, out float water, out _);
-                    if (d > hw + 45f || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
+                    if (d > hw + 45f * Scale.Distance || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
                     float h = world[zi, xi];
                     float wet = MapLayout.RiverWidthAt(x, z); // the water's own width here, inside the full channel
                     if (d <= wet)
@@ -219,7 +222,7 @@ namespace DroneSandbox
                     float s = MapLayout.LakeDistance(x, z);
                     Vector2 local = MapLayout.DamLocal(x, z);
                     bool nearDam = local.x > -20f && local.x < 25f && Mathf.Abs(local.y) < 80f;
-                    if (s > 60f && !nearDam) continue;
+                    if (s > 60f * Scale.Distance && !nearDam) continue;
                     float h = world[zi, xi];
                     float bumps = (Mathf.PerlinNoise(x * 0.07f + 13f, z * 0.07f + 77f) - 0.5f) * 2.5f;
                     if (s < 0f)
@@ -229,7 +232,7 @@ namespace DroneSandbox
                     else if (local.x < -1f || Mathf.Abs(local.y) > MapLayout.DamHalfSpan)
                     {
                         float bank = level + 0.3f + s * 0.21f + bumps * Mathf.Clamp01(s / 8f);
-                        float natural = Mathf.SmoothStep(0f, 1f, (s - 10f) / 45f);
+                        float natural = Mathf.SmoothStep(0f, 1f, (s - 10f * Scale.Distance) / (45f * Scale.Distance));
                         float upstream = 1f - Mathf.SmoothStep(0f, 1f, (local.x - 5f) / 25f); // nothing to bank downstream
                         h = Mathf.Lerp(h, Mathf.Lerp(bank, h, natural), upstream);
                     }
@@ -271,28 +274,28 @@ namespace DroneSandbox
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
                     float s = MapLayout.PondDistance(x, z, out int i);
-                    if (i < 0 || s > 40f) continue;
+                    if (i < 0 || s > 40f * Scale.Distance) continue;
                     float level = ponds[i].level, h = world[zi, xi];
                     float bumps = (Mathf.PerlinNoise(x * 0.09f + 17f, z * 0.09f + 41f) - 0.5f) * 1.5f;
                     if (s < 0f)
                     {
                         // A shallow shelf for the first 3 m out from the shore (down to half a metre), then sloping
                         // to the deepest: a pond you can see the bottom of near its edges, as farm ponds are.
-                        float deepest = ponds[i].radius > 60f ? 7f : 1.7f;
+                        float deepest = ponds[i].radius > 60f * Scale.Distance ? 7f : 1.7f;
                         float depth = -s < 3f ? 0.08f - s * 0.14f : Mathf.Min(deepest, 0.5f + (-s - 3f) * 0.2f);
                         h = Mathf.Min(h, level - depth + bumps * 0.15f);
                     }
                     else
                     {
                         float bank = level + 0.25f + s * 0.12f + bumps * Mathf.Clamp01(s / 10f);
-                        h = Mathf.Lerp(bank, h, Mathf.SmoothStep(0f, 1f, (s - 4f) / 32f));
+                        h = Mathf.Lerp(bank, h, Mathf.SmoothStep(0f, 1f, (s - 4f) / (32f * Scale.Distance)));
                     }
                     world[zi, xi] = h;
                 }
             }
         }
 
-        // A stone quarry: a pit cut down in benches, its floor about 12 m below the ground round it.
+        // A stone quarry: a pit cut down in benches, its floor about 50 m below the ground round it.
         static void Quarry(float[,] world, float step)
         {
             var plan = MapLayout.Plan;
@@ -304,11 +307,11 @@ namespace DroneSandbox
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
                     float d = Vector2.Distance(new Vector2(x, z), plan.quarry);
-                    if (d > r + 12f) continue;
+                    if (d > r + 12f * Scale.Distance) continue;
                     float depth = 1f - Mathf.SmoothStep(0f, 1f, (d / r - 0.45f) / 0.55f);
                     float benches = Mathf.Floor(depth * 4f) / 4f;
-                    float pit = rim - 12f * Mathf.Lerp(depth, benches, 0.7f);
-                    float outside = Mathf.SmoothStep(0f, 1f, (d - r) / 12f);
+                    float pit = rim - 12f * Scale.Distance * Mathf.Lerp(depth, benches, 0.7f);
+                    float outside = Mathf.SmoothStep(0f, 1f, (d - r) / (12f * Scale.Distance));
                     world[zi, xi] = Mathf.Lerp(Mathf.Min(world[zi, xi], pit), world[zi, xi], outside);
                 }
             }
@@ -377,14 +380,17 @@ namespace DroneSandbox
         static float Hills(float x, float z, float riverDistance)
         {
             var plan = MapLayout.Plan;
-            float k = plan.hills / 9f, nx = x + plan.noiseOffset.x, nz = z + plan.noiseOffset.y;
-            float h = (Mathf.PerlinNoise(nx * 0.008f + 11.3f, nz * 0.008f + 3.7f) - 0.42f) * 9f * k;                        // broad hills
-            h += (Mathf.PerlinNoise(nx * 0.024f + 41.1f, nz * 0.024f + 7.9f) - 0.5f) * 3f * Mathf.Clamp(k, 0.4f, 1.6f);     // bumps
-            h += (Mathf.PerlinNoise(nx * 0.09f + 5.5f, nz * 0.09f + 91.2f) - 0.5f) * 0.6f;                                  // roughness
+            const float S = Scale.Distance;
+            float k = plan.hills / 9f, nx = x / S + plan.noiseOffset.x, nz = z / S + plan.noiseOffset.y; // the old map's noise, stretched
+            float h = (Mathf.PerlinNoise(nx * 0.008f + 11.3f, nz * 0.008f + 3.7f) - 0.42f) * 9f * S * k;                    // broad hills
+            h += (Mathf.PerlinNoise(nx * 0.024f + 41.1f, nz * 0.024f + 7.9f) - 0.5f) * 3f * S * Mathf.Clamp(k, 0.4f, 1.6f); // bumps
+            // Real-sized undulation and roughness on top, the ground a walker would feel.
+            h += (Mathf.PerlinNoise(x * 0.024f + 17.3f, z * 0.024f + 63.1f) - 0.5f) * 1.6f;
+            h += (Mathf.PerlinNoise(x * 0.09f + 5.5f, z * 0.09f + 91.2f) - 0.5f) * 0.6f;
             // Ridges beyond the playable area so the battlefield sits in a valley, with a gap for the river.
-            float edge = Mathf.InverseLerp(95f, 230f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
-            float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f) / 55f);
-            h += edge * edge * plan.ridges * (0.7f + 0.6f * Mathf.PerlinNoise(nx * 0.015f, nz * 0.015f)) * valley;
+            float edge = Mathf.InverseLerp(95f * S, 230f * S, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
+            float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f * S) / (55f * S));
+            h += edge * edge * plan.ridges * S * (0.7f + 0.6f * Mathf.PerlinNoise(nx * 0.015f, nz * 0.015f)) * valley;
             return h;
         }
 
@@ -397,15 +403,43 @@ namespace DroneSandbox
                    + 0.12f * (Mathf.PerlinNoise(dx * 0.15f + 40f, dz * 0.15f + 9f) - 0.5f);
         }
 
+        // Which flat sites reach each 64 m square (their own ground and the slope easing out of it), so the millions
+        // of FlatMask questions while the land is shaped and painted each look at only the few nearby.
+        const float SiteCell = 64f;
+        static readonly int siteCellCount = Mathf.CeilToInt(Size / SiteCell);
+        static List<FlatSite>[] siteCells;
+
+        static float SiteReach(FlatSite s) => s.radius * 1.25f + (s.radius * 0.6f + 6f) * Scale.Distance;
+
+        static void IndexSites()
+        {
+            siteCells = new List<FlatSite>[siteCellCount * siteCellCount];
+            foreach (var s in sites)
+            {
+                float reach = SiteReach(s);
+                int x0 = Mathf.Max(0, Mathf.FloorToInt((s.center.x - reach + Size / 2f) / SiteCell));
+                int x1 = Mathf.Min(siteCellCount - 1, Mathf.FloorToInt((s.center.x + reach + Size / 2f) / SiteCell));
+                int z0 = Mathf.Max(0, Mathf.FloorToInt((s.center.z - reach + Size / 2f) / SiteCell));
+                int z1 = Mathf.Min(siteCellCount - 1, Mathf.FloorToInt((s.center.z + reach + Size / 2f) / SiteCell));
+                for (int cz = z0; cz <= z1; cz++)
+                    for (int cx = x0; cx <= x1; cx++)
+                        (siteCells[cz * siteCellCount + cx] ??= new List<FlatSite>()).Add(s);
+            }
+        }
+
         // 0 inside a flat site, easing up to 1 a little outside it.
         static float FlatMask(float x, float z, out bool bare)
         {
             float mask = 1f;
             bare = false;
-            foreach (var s in sites)
+            int cx = Mathf.Clamp(Mathf.FloorToInt((x + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            int cz = Mathf.Clamp(Mathf.FloorToInt((z + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            var near = siteCells != null ? siteCells[cz * siteCellCount + cx] : sites;
+            if (near == null) return mask;
+            foreach (var s in near)
             {
                 float d = Vector2.Distance(new Vector2(x, z), new Vector2(s.center.x, s.center.z));
-                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / (s.radius * 0.6f + 6f));
+                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / ((s.radius * 0.6f + 6f) * Scale.Distance));
                 if (m < mask) mask = m;
                 if (s.bare && d < s.radius * SiteEdge(x - s.center.x, z - s.center.z)) bare = true;
             }
@@ -591,6 +625,7 @@ namespace DroneSandbox
                     }
                     foreach (var j in junctions)
                     {
+                        if (dRoad > 11f) break; // junctions are on the roads
                         float dj = Vector2.Distance(new Vector2(x, z), j);
                         if (dj > 11f) continue;
                         float apron = 6.5f + 3f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
@@ -673,7 +708,7 @@ namespace DroneSandbox
                     if (verge > 0f) variation = Mathf.Max(variation, 0.8f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
                     // Regions with a reason, as aerial photos show them: grass thin and pale on the higher, drier
                     // ground and in broad drifts of old pasture, never in the damp by water.
-                    float high = Mathf.SmoothStep(0f, 1f, (data.GetInterpolatedHeight(u, v) - Sink - 1.5f) / 8f);
+                    float high = Mathf.SmoothStep(0f, 1f, (data.GetInterpolatedHeight(u, v) - Sink - 1.5f * Scale.Distance) / (8f * Scale.Distance));
                     float region = Mathf.PerlinNoise(x * 0.011f + 120f, z * 0.011f + 60f) * 0.7f + Mathf.PerlinNoise(x * 0.09f + 3f, z * 0.09f + 77f) * 0.3f;
                     float dry = Mathf.SmoothStep(0f, 1f, (region + 0.3f * high - 0.56f) * 5f) * (1f - damp);
 

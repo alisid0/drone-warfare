@@ -19,12 +19,12 @@ namespace DroneSandbox
     {
         public const int PointsPerNewStar = 20;
         public const float ArmourBonus = 1.4f, MotorBonus = 1.2f, WarheadBonus = 1.3f;
-        public const float OpticsSpotRange = 36f;
+        public const float OpticsSpotRange = 36f * Scale.Distance;
 
         public static readonly TechItem[] Items =
         {
             new TechItem { id = TechId.ThermalCamera, cost = 50, branch = "RECON", name = "Wren-T thermal camera",
-                info = "Scouts carry a thermal camera: press T to see heat, and they find vehicles 52 m away by night as by day." },
+                info = "Scouts carry a thermal camera: press T to see heat, and they find vehicles {Recon.ThermalRange:0} m away by night as by day." },
             new TechItem { id = TechId.Nightjar, cost = 150, branch = "STRIKE", name = "Nightjar heavy bomber",
                 info = "One per mission, counts as two drones for stars. Three bombs, rearms at base, own thermal camera. Key 4." },
             new TechItem { id = TechId.Armour, cost = 80, branch = "SURVIVAL", name = "Armoured frames",

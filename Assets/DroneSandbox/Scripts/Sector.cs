@@ -188,7 +188,89 @@ namespace DroneSandbox
         public bool Has(SectorFeature f) => (features & f) != 0;
         public SectorType Type => SectorTypes.Get(kind);
 
-        // The hand-made Varrow Valley: the map the game started with, unchanged.
+        // Where the plan was laid out on the old 480 m map (Varrow and the generator still think in its metres), so
+        // positions written in those metres (the Operations', the tests') can be brought over with FromOld.
+        public Vector2 oldBase, oldHq;
+
+        // An (x, z) point on the old map, on this one: everything is Scale.Distance times further from the middle,
+        // except what belongs to the base or the HQ (their gates, the HQ's ring of guns and radar), which keeps its
+        // real distance from the compound it's part of.
+        public Vector2 FromOld(Vector2 q)
+        {
+            if (Vector2.Distance(q, oldBase) < MapLayout.BaseRadius + 6f) return oldBase * Scale.Distance + (q - oldBase);
+            if (Vector2.Distance(q, oldHq) < MapLayout.HqRadius + 6f) return oldHq * Scale.Distance + (q - oldHq);
+            return q * Scale.Distance;
+        }
+
+        public Vector3 FromOld(Vector3 q)
+        {
+            Vector2 p = FromOld(new Vector2(q.x, q.z));
+            return new Vector3(p.x, q.y, p.y);
+        }
+
+        // Brings a plan laid out on the old map over to this one (FromOld). Real sizes stay: the river's width, the
+        // dam, sites' models and the ground they level. Fields' and orchards' sizes grow by MapLayout.FieldScale.
+        public SectorPlan ScaleLayout()
+        {
+            const float S = Scale.Distance;
+            oldBase = new Vector2(basePosition.x, basePosition.z);
+            oldHq = new Vector2(enemyHqPosition.x, enemyHqPosition.z);
+            Vector2[] Line(Vector2[] line)
+            {
+                if (line == null) return null;
+                var moved = new Vector2[line.Length];
+                for (int i = 0; i < line.Length; i++) moved[i] = FromOld(line[i]);
+                return moved;
+            }
+            for (int i = 0; i < defences.Count; i++) defences[i] = (defences[i].type, FromOld(defences[i].position));
+            enemyArea = new Rect(enemyArea.x * S, enemyArea.y * S, enemyArea.width * S, enemyArea.height * S);
+            river = Line(river);
+            for (int i = 0; i < bridges.Count; i++) bridges[i] = FromOld(bridges[i]);
+            for (int i = 0; i < roads.Count; i++) roads[i] = Line(roads[i]);
+            for (int i = 0; i < villages.Count; i++) villages[i] = FromOld(villages[i]);
+            damPoint = FromOld(damPoint);
+            for (int i = 0; i < lakeLobes.Length; i++)
+            {
+                var l = lakeLobes[i];
+                lakeLobes[i] = (l.center * S, l.angle, l.halfLength * S, l.halfWidth * S, l.seed);
+            }
+            for (int i = 0; i < islands.Length; i++) islands[i] = (islands[i].center * S, islands[i].radius * S);
+            for (int i = 0; i < ponds.Count; i++)
+            {
+                var pond = ponds[i];
+                pond.center = FromOld(pond.center);
+                pond.radius *= S;
+                ponds[i] = pond;
+            }
+            for (int i = 0; i < railways.Count; i++) railways[i] = Line(railways[i]);
+            powerLine = Line(powerLine);
+            fortLine = Line(fortLine);
+            trenchLine = Line(trenchLine);
+            airstripCenter = FromOld(airstripCenter);
+            airstripLength *= S;
+            quarry = FromOld(quarry);
+            quarryRadius *= S;
+            for (int i = 0; i < sites.Count; i++)
+            {
+                var s = sites[i];
+                s.position = FromOld(s.position);
+                sites[i] = s;
+            }
+            for (int i = 0; i < orchards.Count; i++)
+            {
+                var o = orchards[i];
+                o.center = FromOld(o.center);
+                o.halfLength *= MapLayout.FieldScale;
+                o.halfWidth *= MapLayout.FieldScale;
+                orchards[i] = o;
+            }
+            for (int i = 0; i < clearings.Count; i++) clearings[i] = FromOld(clearings[i]);
+            basePosition = FromOld(basePosition);
+            enemyHqPosition = FromOld(enemyHqPosition);
+            return this;
+        }
+
+        // The hand-made Varrow Valley: the map the game started with, at the new scale (ScaleLayout).
         public static SectorPlan Varrow()
         {
             var p = new SectorPlan
@@ -245,7 +327,7 @@ namespace DroneSandbox
                 p.villageNames.Add(name);
                 p.farmsteads.Add(farm);
             }
-            return p;
+            return p.ScaleLayout();
         }
     }
 

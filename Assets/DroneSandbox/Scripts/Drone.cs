@@ -124,6 +124,7 @@ namespace DroneSandbox
             body.SetParent(transform, false);
 
             float modelScale = 1f; // models are drawn bigger than life so they read from the RTS camera
+            // Speeds, flight heights and reaches are the old map's (see Scale), brought over below the switch.
             switch (droneType)
             {
                 case DroneType.Scout:
@@ -158,6 +159,9 @@ namespace DroneSandbox
                     BombsLeft = BomberLoad;
                     break;
             }
+            speed *= Scale.Speed;
+            altitude *= Scale.Distance;
+            weaponRange *= Scale.Distance;
 
             // Upgrades from the tech shop.
             if (Tech.Active(TechId.Armour)) maxHp *= Tech.ArmourBonus;
@@ -346,7 +350,7 @@ namespace DroneSandbox
                 attackTarget = null;
                 moveTarget = null;
                 waypoints.Clear();
-                Fly(transform.position + Vector3.down * 1.5f, false, dt * 0.5f);
+                Fly(transform.position + Vector3.down * 1.5f * Scale.Distance, false, dt * 0.5f);
                 if (jammedFor > 6f) TakeDamage(maxHp * 0.5f * dt);
                 return;
             }
@@ -359,7 +363,7 @@ namespace DroneSandbox
             // an attack-move (a kamikaze dives on the first enemy within 18 m).
             if (attackTarget == null && (!moveTarget.HasValue || attackMove) && (!IsKamikaze || attackMove) && !SandboxGame.WeaponsTight)
             {
-                var nearest = Combat.NearestHostile(transform.position, team, IsKamikaze ? 18f : weaponRange, true);
+                var nearest = Combat.NearestHostile(transform.position, team, IsKamikaze ? Scale.D(18f) : weaponRange, true);
                 if (nearest != null)
                 {
                     attackTarget = nearest;
@@ -443,8 +447,8 @@ namespace DroneSandbox
         void Fly(Vector3 goal, bool diving, float dt)
         {
             Vector3 toGoal = goal - transform.position;
-            // A Kamikaze picks up speed through the last 40 m of its dive.
-            float dive = diving ? Mathf.Lerp(1.6f, 1f, Mathf.Clamp01(toGoal.magnitude / 40f)) : 1f;
+            // A Kamikaze picks up speed through the last 170 m of its dive.
+            float dive = diving ? Mathf.Lerp(1.6f, 1f, Mathf.Clamp01(toGoal.magnitude / Scale.D(40f))) : 1f;
             Vector3 desired = diving ? toGoal.normalized * speed * dive : Vector3.ClampMagnitude(toGoal * 2f, speed);
             if (!diving) desired += Separation() * 4f;
             velocity = Vector3.MoveTowards(velocity, desired, speed * 2.5f * dt);
@@ -492,7 +496,7 @@ namespace DroneSandbox
         float CruiseHeight(Vector3 destination)
         {
             float overGround = Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)) + altitude;
-            Vector3 ahead = transform.position + Vector3.ClampMagnitude(new Vector3(velocity.x, 0f, velocity.z) * 1.2f, 12f);
+            Vector3 ahead = transform.position + Vector3.ClampMagnitude(new Vector3(velocity.x, 0f, velocity.z) * 1.2f, 12f * Scale.Speed);
             float trees = Mathf.Max(Canopy.TopNear(transform.position, 5f), Canopy.TopNear(ahead, 5f));
             return Mathf.Max(overGround, trees + 2.5f);
         }

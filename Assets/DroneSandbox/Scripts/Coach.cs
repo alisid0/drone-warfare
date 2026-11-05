@@ -71,9 +71,9 @@ namespace DroneSandbox
             Add("Press <b>1</b> to launch a Scout (or click it in the bar below).",
                 g => true, g => Launched(g, DroneType.Scout));
             Add("<b>Right-click</b> the map to send it. Try a grey circle: a truck was reported somewhere inside.",
-                g => true, g => g.drones.Exists(d => d != null && d.type == DroneType.Scout && (d.MoveTarget.HasValue || Vector3.Distance(d.transform.position, g.basePosition) > 30f)));
+                g => true, g => g.drones.Exists(d => d != null && d.type == DroneType.Scout && (d.MoveTarget.HasValue || Vector3.Distance(d.transform.position, g.basePosition) > Scale.D(30f))));
             Add("Keep the Scout over the contact a moment. Watching it is what <b>identifies</b> it: real truck, or decoy?",
-                g => Any(g, e => e.LooksLikeTarget && e.Intel == Intel.Contact && g.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, e.transform.position) < 45f)),
+                g => Any(g, e => e.LooksLikeTarget && e.Intel == Intel.Contact && g.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, e.transform.position) < Scale.D(45f))),
                 g => Any(g, e => (e.isTarget || e.isDecoy) && e.Intel >= Intel.Identified));
             Add("Identified. Press <b>3</b> for a Kamikaze, then <b>right-click the truck</b> to strike it. Spend them only on real trucks.",
                 g => Any(g, e => e.isTarget && e.IsAlive && e.Intel >= Intel.Identified),

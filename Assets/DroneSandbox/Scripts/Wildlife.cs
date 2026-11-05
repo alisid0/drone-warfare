@@ -29,7 +29,7 @@ namespace DroneSandbox
         State state = State.Flying;
 
         public const float Scale = 1.25f;           // a little bigger than life, like the drones, so it reads
-        const float Speed = 10f;
+        const float Speed = 10f * DroneSandbox.Scale.Speed; // the old map's, like everything that moves (see Scale)
 
         Flock flock;
         Flock mingle;                               // a robot passing as one of this flock for a while
@@ -229,15 +229,15 @@ namespace DroneSandbox
             Spooked = true;
             spookedAt = Time.time;
             Vector3 away = new Vector3(transform.position.x, 0f, transform.position.z) - new Vector3(MapLayout.BasePosition.x, 0f, MapLayout.BasePosition.z);
-            escapeTo = transform.position + (away.sqrMagnitude > 1f ? away.normalized : Vector3.forward) * 400f;
+            escapeTo = transform.position + (away.sqrMagnitude > 1f ? away.normalized : Vector3.forward) * 400f * DroneSandbox.Scale.Distance;
         }
 
         void Escape(float dt)
         {
             Vector3 goal = escapeTo;
-            goal.y = Ground.HeightAt(goal) + altitude + 10f;
-            Steer(goal, 13f, dt); // a Scout (16 m/s) can still run it down
-            if (Time.time - spookedAt > 40f)
+            goal.y = Ground.HeightAt(goal) + altitude + 10f * DroneSandbox.Scale.Distance;
+            Steer(goal, 13f * DroneSandbox.Scale.Speed, dt); // a Scout (16 m/s on the old map) can still run it down
+            if (Time.time - spookedAt > 40f * DroneSandbox.Scale.TravelTime) // as long to run down as it was
             {
                 Escaped = true;
                 gameObject.SetActive(false);
@@ -261,7 +261,7 @@ namespace DroneSandbox
             if (mingle == null && Time.time > nextMingle)
             {
                 nextMingle = Time.time + Range(45f, 75f);
-                mingle = Wildlife.FlockNear(transform.position, 90f);
+                mingle = Wildlife.FlockNear(transform.position, 90f * DroneSandbox.Scale.Distance);
                 mingleUntil = Time.time + Range(15f, 25f);
             }
             if (mingle == null) return false;
@@ -441,7 +441,7 @@ namespace DroneSandbox
                 // Down into open ground for a while (a field or a meadow, not the woods or the water).
                 for (int tries = 0; tries < 20; tries++)
                 {
-                    var spot = Centre + new Vector3(Range(-30f, 30f), 0f, Range(-30f, 30f));
+                    var spot = Centre + new Vector3(Range(-30f, 30f), 0f, Range(-30f, 30f)) * DroneSandbox.Scale.Distance;
                     if (MapLayout.LakeDistance(spot.x, spot.z) < 4f || Canopy.TopNear(spot, 2f) > Ground.HeightAt(spot) + 1f) continue;
                     LandingSpot = spot;
                     Landing = true;
@@ -462,7 +462,7 @@ namespace DroneSandbox
         {
             int i = birds.IndexOf(b);
             float a = Time.time * 0.25f + i * 2.1f;
-            return Centre + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * (14f + 4f * (i % 3));
+            return Centre + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * (14f + 4f * (i % 3)) * DroneSandbox.Scale.Distance;
         }
 
         float Range(float a, float b) => a + (float)rng.NextDouble() * (b - a);
@@ -515,8 +515,8 @@ namespace DroneSandbox
             var rng = new System.Random(seed);
             for (int i = 0; i < count; i++)
             {
-                var at = home + new Vector3((float)rng.NextDouble() * 20f - 10f, 0f, (float)rng.NextDouble() * 20f - 10f);
-                at.y = Ground.HeightAt(at) + 12f + (float)rng.NextDouble() * 10f;
+                var at = home + new Vector3((float)rng.NextDouble() * 20f - 10f, 0f, (float)rng.NextDouble() * 20f - 10f) * DroneSandbox.Scale.Distance;
+                at.y = Ground.HeightAt(at) + (12f + (float)rng.NextDouble() * 10f) * DroneSandbox.Scale.Distance;
                 var b = Bird.Create(at, false, f, null, Root(), seed * 31 + i);
                 f.Add(b);
                 Birds.Add(b);
@@ -546,7 +546,7 @@ namespace DroneSandbox
                     foreach (var b in Birds)
                     {
                         if (b == null || b.Robot || b.Down || shuffle.NextDouble() > 0.35) continue;
-                        b.JoinFlock(NearestOther(b.Flock, b.transform.position, 150f));
+                        b.JoinFlock(NearestOther(b.Flock, b.transform.position, 150f * DroneSandbox.Scale.Distance));
                     }
                 nextShuffle = Time.time + 12f + (float)shuffle.NextDouble() * 13f;
             }

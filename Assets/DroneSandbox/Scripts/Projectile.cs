@@ -2,14 +2,16 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Bullets and missiles. Hits follow their target; misses fly past and vanish.
+    // Bullets and missiles. Hits follow their target; misses fly past and vanish. They fly Scale.Speed times as
+    // fast as on the old map and last Scale.TravelTime times as long, so they reach as far as it asks; tracers are
+    // long streaks, to be seen from a camera a few hundred metres off.
     public class Projectile : MonoBehaviour
     {
         Unit target;
         Vector3 aimPoint;
         Team team;
         float speed, damage, blastRadius, turnRate;
-        float life = 4f;
+        float life = 4f * Scale.TravelTime;
         bool smokeTrail, heavy;
         float trailTimer;
         Vector3 velocity;
@@ -29,9 +31,9 @@ namespace DroneSandbox
         // A fast tracer round. hitChance is the odds (0-1) that it connects.
         public static void Bullet(Vector3 from, Unit target, Team team, float damage, float hitChance, Color color, Achievements.Shot shot = null)
         {
-            var p = Spawn(from, target, team, new Vector3(0.08f, 0.3f, 0.08f), color);
+            var p = Spawn(from, target, team, new Vector3(0.16f, 1.6f, 0.16f), color);
             p.shot = shot;
-            p.speed = 70f;
+            p.speed = 70f * Scale.Speed;
             p.damage = damage;
             if (Random.value > hitChance)
             {
@@ -47,13 +49,13 @@ namespace DroneSandbox
         // A homing missile that explodes on arrival.
         public static void Missile(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 launchDirection, Achievements.Shot shot = null)
         {
-            var p = Spawn(from, target, team, new Vector3(0.18f, 0.3f, 0.18f), Color.white);
+            var p = Spawn(from, target, team, new Vector3(0.3f, 0.6f, 0.3f), Color.white);
             p.shot = shot;
-            p.speed = 24f;
+            p.speed = 24f * Scale.Speed;
             p.damage = damage;
             p.blastRadius = blastRadius;
             p.turnRate = 5f;
-            p.life = 8f;
+            p.life = 8f * Scale.TravelTime;
             p.smokeTrail = true;
             p.velocity = (launchDirection + Vector3.down * 0.3f).normalized * p.speed * 0.6f;
         }
@@ -63,7 +65,7 @@ namespace DroneSandbox
         public static void Bomb(Vector3 from, Unit target, Team team, float damage, float blastRadius, Vector3 dropVelocity,
             float hitChance, Achievements.Shot shot = null)
         {
-            var p = Spawn(from, target, team, new Vector3(0.2f, 0.32f, 0.2f), new Color(0.2f, 0.21f, 0.13f));
+            var p = Spawn(from, target, team, new Vector3(0.3f, 0.45f, 0.3f), new Color(0.2f, 0.21f, 0.13f));
             p.shot = shot;
             if (Random.value > hitChance)
             {
@@ -71,12 +73,12 @@ namespace DroneSandbox
                 p.aimPoint = Ground.OnGround(target.transform.position + new Vector3(off.x, 0f, off.y));
                 p.target = null;
             }
-            p.speed = 20f;
+            p.speed = 20f * Scale.Speed;
             p.damage = damage;
             p.blastRadius = blastRadius;
             p.turnRate = 4f;
-            p.life = 6f;
-            p.velocity = dropVelocity + Vector3.down * 2f;
+            p.life = 6f * Scale.TravelTime;
+            p.velocity = dropVelocity + Vector3.down * 2f * Scale.Speed;
             p.heavy = true;
         }
 

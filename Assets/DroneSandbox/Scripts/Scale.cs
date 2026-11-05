@@ -23,7 +23,10 @@ namespace DroneSandbox
         // land the way an aerial photo does, where a wide one close in looks like a model. Camera distances are
         // the old ones times Camera, which frames the same ground at the narrower angle.
         public const float CameraFov = 45f;
-        public static readonly float Camera = Distance * Mathf.Tan(30f * Mathf.Deg2Rad) / Mathf.Tan(CameraFov * 0.5f * Mathf.Deg2Rad);
+        // How much further a camera has to stand to frame something at CameraFov as it did at 60 degrees (for
+        // close-ups of things that are their real size).
+        public static readonly float Lens = Mathf.Tan(30f * Mathf.Deg2Rad) / Mathf.Tan(CameraFov * 0.5f * Mathf.Deg2Rad);
+        public static readonly float Camera = Distance * Lens; // (after Lens: static fields start in order)
 
         // A distance written in the old map's metres, in today's.
         public static float D(float oldMetres) => oldMetres * Distance;

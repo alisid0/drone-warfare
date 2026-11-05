@@ -10,7 +10,7 @@ namespace DroneSandbox
     {
         const float LaunchButtonWidth = 160f;
         const float LaunchButtonGap = 8f;
-        const float DroneFlightAltitude = 8f; // threat rings show AA reach at this height
+        const float DroneFlightAltitude = 8f * DroneSandbox.Scale.Distance; // threat rings show AA reach at this height
 
         static readonly Color Friendly = new Color(0.35f, 1f, 0.6f);
         static readonly Color Hostile = new Color(1f, 0.32f, 0.25f);
@@ -208,7 +208,7 @@ namespace DroneSandbox
         void DrawWorldOverlays()
         {
             float s = Scale;
-            if (rts.Distance >= 55f) DrawPlaceNames();
+            if (rts.Distance >= 55f * DroneSandbox.Scale.Camera) DrawPlaceNames();
             DrawGroundZones();
 
             foreach (var e in game.enemies)
@@ -289,7 +289,7 @@ namespace DroneSandbox
             PlaceName(game.enemyHqPosition, 18f, Factions.EnemyBase);
             var points = MapLayout.RiverField.points;
             if (points.Count == 0) return;
-            Vector2 near = plan.kind == SectorKind.VarrowValley ? new Vector2(-105f, 2f) : Vector2.zero;
+            Vector2 near = plan.kind == SectorKind.VarrowValley ? new Vector2(-105f, 2f) * DroneSandbox.Scale.Distance : Vector2.zero;
             Vector2 river = points[0];
             foreach (var p in points)
                 if ((p - near).sqrMagnitude < (river - near).sqrMagnitude) river = p;

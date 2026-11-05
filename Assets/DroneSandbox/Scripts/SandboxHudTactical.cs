@@ -28,7 +28,7 @@ namespace DroneSandbox
         bool helpPinned, orderGiven;
 
         // How far the camera is into the strategic view: 0 at 30 m and below, 1 from 80 m.
-        float Strategic => Mathf.InverseLerp(30f, 80f, rts.Distance);
+        float Strategic => Mathf.InverseLerp(30f * DroneSandbox.Scale.Camera, 80f * DroneSandbox.Scale.Camera, rts.Distance);
 
         // An order was given: answer it on the ground at once.
         public void Acknowledge(Vector3 at, bool attack)
@@ -149,7 +149,7 @@ namespace DroneSandbox
                 }
                 if (!d.MoveTarget.HasValue) continue;
                 Vector3 m = d.MoveTarget.Value;
-                var key = new Vector3Int(Mathf.RoundToInt(m.x / 10f), Mathf.RoundToInt(m.z / 10f), d.Waypoints.Count * 2 + (d.AttackMoving ? 1 : 0));
+                var key = new Vector3Int(Mathf.RoundToInt(m.x / DroneSandbox.Scale.D(10f)), Mathf.RoundToInt(m.z / DroneSandbox.Scale.D(10f)), d.Waypoints.Count * 2 + (d.AttackMoving ? 1 : 0));
                 if (!squads.TryGetValue(key, out var squad)) squads[key] = squad = new List<Drone>();
                 squad.Add(d);
             }

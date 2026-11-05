@@ -94,34 +94,34 @@ namespace DroneSandbox
             yield return Shot("01_start");
 
             // Close-up of the drones at the base, to check the models.
-            rts.LookAt(game.basePosition, 18f, 30f);
+            rts.LookAt(game.basePosition, 18f * Scale.Lens, 30f);
             yield return new WaitForSeconds(2.5f);
             yield return Shot("02_drones_closeup");
-            rts.LookAt(game.basePosition, 42f, 20f);
+            rts.LookAt(game.basePosition, 42f * Scale.Camera, 20f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02a_base");
 
             // Close-up of the enemy HQ, to check the vehicle models, terrain and sky.
-            rts.LookAt(game.enemyHqPosition, 38f, 210f);
+            rts.LookAt(game.enemyHqPosition, 38f * Scale.Camera, 210f);
             yield return new WaitForSeconds(1f);
             yield return Shot("02b_enemy_closeup");
 
             // The river crossing, a village and the farmland.
             var bridge = MapLayout.BridgePoint;
-            rts.LookAt(new Vector3(bridge.x, 0f, bridge.y), 40f, 135f);
+            rts.LookAt(new Vector3(bridge.x, 0f * Scale.Lens, bridge.y), 40f, 135f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02c_bridge");
-            rts.LookAt(new Vector3(-100f, 0f, 0f), 26f, 150f);
+            rts.LookAt(Old(-100f, 0f), 26f * Scale.Lens, 150f);
             yield return new WaitForSeconds(2f); // the camera settled, for the pair below
             yield return Shot("02f_river");
             // The same view a second later, to check that the water flows down the river (compare the two).
             yield return new WaitForSeconds(1f);
             yield return Shot("02f_river_later");
             var village = MapLayout.Villages[0];
-            rts.LookAt(new Vector3(village.x, 0f, village.y), 45f, 200f);
+            rts.LookAt(new Vector3(village.x, 0f * Scale.Lens, village.y), 45f, 200f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02d_village");
-            rts.LookAt(new Vector3(-20f, 0f, -30f), 100f, 40f);
+            rts.LookAt(Old(-20f, -30f), 100f * Scale.Camera, 40f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02e_farmland");
 
@@ -129,18 +129,18 @@ namespace DroneSandbox
             var flags = UnityEngine.Object.FindObjectsByType<Flag>();
             if (flags.Length > 0)
             {
-                rts.LookAt(flags[0].transform.position, 22f, 30f);
+                rts.LookAt(flags[0].transform.position, 22f * Scale.Lens, 30f);
                 yield return new WaitForSeconds(0.5f);
                 yield return Shot("02g_flag");
             }
             EnemyUnit emblemTank = Nearest(EnemyType.Tank, game.enemyHqPosition);
             if (emblemTank != null)
             {
-                rts.LookAt(emblemTank.transform.position, 12f, emblemTank.transform.eulerAngles.y + 90f);
+                rts.LookAt(emblemTank.transform.position, 12f * Scale.Lens, emblemTank.transform.eulerAngles.y + 90f);
                 yield return new WaitForSeconds(0.3f);
                 yield return Shot("02h_tank_emblem");
             }
-            rts.LookAt(game.basePosition, 30f, 300f);
+            rts.LookAt(game.basePosition, 30f * Scale.Lens, 300f);
             yield return new WaitForSeconds(0.3f);
             yield return Shot("02i_base_emblem");
 
@@ -148,20 +148,20 @@ namespace DroneSandbox
             var liftOff = game.SpawnDrone(DroneType.Bomber);
             if (liftOff != null)
             {
-                rts.LookAt(liftOff.transform.position, 14f, 30f);
+                rts.LookAt(liftOff.transform.position, 14f * Scale.Lens, 30f);
                 yield return new WaitForSeconds(0.3f);
                 yield return Shot("02j_nightjar");
             }
 
             // Send everyone toward the forward AA post and follow them, with the fog of war on.
             Recon.ForceShowAll = false;
-            Vector3 staging = new Vector3(-32f, 0f, -26f);
+            Vector3 staging = Old(-32f, -26f);
             rts.selected.Clear();
             rts.selected.AddRange(game.drones);
             foreach (var d in game.drones) d.MoveTo(staging);
             for (float t = 0f; t < 6f; t += 0.5f)
             {
-                rts.LookAt(Vector3.Lerp(game.basePosition, staging, t / 6f), 45f, 45f);
+                rts.LookAt(Vector3.Lerp(game.basePosition, staging, t / 6f), 45f * Scale.Camera, 45f);
                 yield return new WaitForSeconds(0.5f);
             }
             yield return Shot("03_moving");
@@ -177,26 +177,26 @@ namespace DroneSandbox
                 else if (d.type == DroneType.Kamikaze && tank != null) d.Attack(tank);
                 else if (d.type == DroneType.Bomber && vehicle != null) d.Attack(vehicle);
             }
-            rts.LookAt(aa != null ? aa.transform.position : staging, 40f, 45f);
+            rts.LookAt(aa != null ? aa.transform.position : staging, 40f * Scale.Camera, 45f);
             yield return new WaitForSeconds(3f);
             yield return Shot("04_engaging");
             yield return new WaitForSeconds(4f);
             yield return Shot("05_battle");
-            if (tank != null) rts.LookAt(tank.transform.position, 35f, 45f);
+            if (tank != null) rts.LookAt(tank.transform.position, 35f * Scale.Camera, 45f);
             yield return new WaitForSeconds(4f);
             yield return Shot("06_battle_later");
 
             // Orders: an attack-move with two waypoints queued after it, then the tactical pause.
             rts.selected.Clear();
             rts.selected.AddRange(game.drones);
-            Vector3 sweep = staging + new Vector3(-20f, 0f, 18f);
+            Vector3 sweep = staging + new Vector3(-20f, 0f, 18f) * Scale.Distance;
             foreach (var d in game.drones)
             {
                 d.MoveTo(sweep, false, true);
-                d.MoveTo(sweep + new Vector3(15f, 0f, 15f), true);
+                d.MoveTo(sweep + new Vector3(15f, 0f, 15f) * Scale.Distance, true);
                 d.MoveTo(game.basePosition + new Vector3(8f, 0f, 8f), true);
             }
-            rts.LookAt(sweep, 60f, 45f);
+            rts.LookAt(sweep, 60f * Scale.Camera, 45f);
             yield return new WaitForSeconds(1.5f);
             yield return Shot("06a_orders_route");
             game.TogglePause();
@@ -216,7 +216,7 @@ namespace DroneSandbox
                 rts.selected.Add(strikers[i]);
             }
             game.CoordinateStrike(rts.selected);
-            rts.LookAt(sweep, 70f, 45f);
+            rts.LookAt(sweep, 70f * Scale.Camera, 45f);
             yield return new WaitForSeconds(0.8f);
             yield return Shot("06c_sync_strike");
             string tags = "";
@@ -224,7 +224,7 @@ namespace DroneSandbox
             log.WriteLine($"Sync strike: {rts.selected.Count} drones, tags {tags} (\"{game.Message}\")");
 
             // Wide view of the whole map.
-            rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
+            rts.LookAt(Old(10f, 10f), 110f * Scale.Camera, 45f);
             yield return new WaitForSeconds(1f);
             yield return Shot("07_overview");
             var overlay = game.GetComponent<SandboxHud>();
@@ -240,17 +240,17 @@ namespace DroneSandbox
             // Dusk, night and thermal view over the base and the valley.
             var dayNight = DayNight.Instance;
             dayNight.SetTime(20.2f, 0f);
-            rts.LookAt(game.basePosition + new Vector3(25f, 0f, 25f), 75f, 45f);
+            rts.LookAt(game.basePosition + new Vector3(25f, 0f * Scale.Lens, 25f) * Scale.Distance, 75f, 45f);
             yield return new WaitForSeconds(1f);
             yield return Shot("08a_dusk");
             dayNight.SetTime(23.5f, 0f);
             yield return new WaitForSeconds(1f);
             yield return Shot("08b_night");
-            rts.LookAt(game.enemyHqPosition, 45f, 210f);
+            rts.LookAt(game.enemyHqPosition, 45f * Scale.Camera, 210f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("08c_night_hq");
             if (game.SpawnDrone(DroneType.Scout) != null) game.ToggleThermal();
-            rts.LookAt(new Vector3(10f, 0f, 10f), 90f, 45f);
+            rts.LookAt(Old(10f, 10f), 90f * Scale.Camera, 45f);
             yield return new WaitForSeconds(1f);
             log.WriteLine($"Thermal on: {dayNight.Thermal} at {dayNight.Clock}");
             yield return Shot("08d_thermal");
@@ -300,9 +300,9 @@ namespace DroneSandbox
             {
                 // A three-quarter view of the spillway, from high enough to see down onto its steps.
                 ("20_photo_dam_morning", 6.0f, At(dam + down * 40f + across * 20f, river + 13f), At(dam + down * 4f, river + 4f), 45f),
-                ("21_photo_lake_evening", 20.0f, At(dam + down * 165f - across * 30f, lake + 90f), At(dam - down * 55f + across * 30f, lake), 47f),
+                ("21_photo_lake_evening", 20.0f, At(dam + (down * 165f - across * 30f) * Scale.Distance, lake + 90f * Scale.Distance), At(dam + (-down * 55f + across * 30f) * Scale.Distance, lake), 47f),
                 ("22_photo_bridge", 8.5f, At(MapLayout.BridgePoint + new Vector2(20f, 24f), 5f), At(MapLayout.BridgePoint, 1f), 45f),
-                ("23_photo_valley", 19.3f, new Vector3(75f, 70f, -150f), new Vector3(-35f, 0f, 0f), 60f),
+                ("23_photo_valley", 19.3f, Old(75f, -150f) + Vector3.up * 70f * Scale.Distance, Old(-35f, 0f), 60f),
                 ("24_photo_dam_night", 22.8f, At(dam + down * 32f + across * 26f, lake + 5f), At(dam, lake), 55f),
                 ("25_photo_lake_shore", 8f, Right(shoreFrom, shoreTo, 4f), shoreTo, 50f),
             };
@@ -355,7 +355,7 @@ namespace DroneSandbox
             var dayNight = DayNight.Instance;
             Vector3 spot = Ground.OnGround(OpenGroundNear(game.basePosition));
             dayNight.SetTime(10f, 0f);
-            rts.LookAt(spot, 24f, 30f);
+            rts.LookAt(spot, 24f * Scale.Lens, 30f);
             yield return new WaitForSeconds(0.5f);
             Effects.Explosion(spot + Vector3.up, 5f);
             for (int frame = 0; frame < 30; frame++)
@@ -400,7 +400,7 @@ namespace DroneSandbox
                 parked[i] = game.SpawnEnemy(kinds[i], spots[i], 30f + i * 25f);
                 parked[i].enabled = false; // parked for the camera: no driving off, no shooting
             }
-            rts.LookAt(spot, 45f, 20f);
+            rts.LookAt(spot, 45f * Scale.Camera, 20f);
             yield return new WaitForSeconds(1f);
             yield return Shot("53_vehicles_all");
             rts.enabled = false; // hold the camera by hand for the close-ups
@@ -428,7 +428,7 @@ namespace DroneSandbox
                 game.enemies.Remove(enemy);
                 Destroy(enemy.gameObject);
             }
-            rts.LookAt(spot, 45f, 20f);
+            rts.LookAt(spot, 45f * Scale.Camera, 20f);
             yield return new WaitForSeconds(13f); // flames out, smoke gone
             yield return Shot("54_wrecks_all");
             rts.enabled = false;
@@ -451,7 +451,7 @@ namespace DroneSandbox
                 flying.Add(drone);
             }
             yield return new WaitForSeconds(6f);
-            rts.LookAt(spot, 25f, 20f);
+            rts.LookAt(spot, 25f * Scale.Lens, 20f);
             yield return new WaitForSeconds(0.3f);
             yield return Shot("57_drones_rts");
             rts.enabled = false;
@@ -474,6 +474,9 @@ namespace DroneSandbox
         }
 
         // The nearest dry spot (going out in rings) with no tree within clearance metres, so the camera sees the ground.
+        // An (x, z) spot on the old 480 m Varrow map, on today's (see SectorPlan.FromOld).
+        static Vector3 Old(float x, float z) => MapLayout.Plan.FromOld(new Vector3(x, 0f, z));
+
         static Vector3 OpenGroundNear(Vector3 from, float clearance = 25f)
         {
             for (float reach = 30f; reach < 300f; reach += 15f)
@@ -599,7 +602,7 @@ namespace DroneSandbox
         IEnumerator QualityCheck(SandboxGame game, RtsController rts)
         {
             game.StartSandbox();
-            rts.LookAt(new Vector3(10f, 0f, 10f), 110f, 45f);
+            rts.LookAt(Old(10f, 10f), 110f * Scale.Camera, 45f);
             yield return new WaitForSecondsRealtime(2f);
             var fps = new float[3];
             foreach (int q in new[] { 2, 1, 0 })
@@ -622,12 +625,13 @@ namespace DroneSandbox
         IEnumerator WildlifeShots(SandboxGame game, RtsController rts)
         {
             game.StartSandbox();
-            Vector3 home = game.basePosition + new Vector3(30f, 0f, 30f);
-            Wildlife.AddFlock(home, 25f, 5, 11);
-            Wildlife.AddFlock(home + new Vector3(-60f, 0f, 20f), 25f, 3, 12);
-            var route = new List<Vector3> { game.basePosition + new Vector3(-20f, 0f, 25f), game.basePosition + new Vector3(15f, 0f, 30f),
-                                            game.basePosition + new Vector3(25f, 0f, -5f), game.basePosition + new Vector3(-10f, 0f, -20f) };
-            var robot = Wildlife.AddRobot(route, 14f, 21);
+            const float S = Scale.Distance;
+            Vector3 home = game.basePosition + new Vector3(30f, 0f, 30f) * S;
+            Wildlife.AddFlock(home, 25f * S, 5, 11);
+            Wildlife.AddFlock(home + new Vector3(-60f, 0f, 20f) * S, 25f * S, 3, 12);
+            var route = new List<Vector3> { game.basePosition + new Vector3(-20f, 0f, 25f) * S, game.basePosition + new Vector3(15f, 0f, 30f) * S,
+                                            game.basePosition + new Vector3(25f, 0f, -5f) * S, game.basePosition + new Vector3(-10f, 0f, -20f) * S };
+            var robot = Wildlife.AddRobot(route, 14f * S, 21);
             yield return new WaitForSeconds(6f);
             var crow = Wildlife.Birds.Find(b => b != null && !b.Robot);
 
@@ -647,7 +651,7 @@ namespace DroneSandbox
                 Time.timeScale = 1f;
                 photo.Exit();
             }
-            rts.LookAt(home, 70f, 30f);
+            rts.LookAt(home, 70f * Scale.Camera, 30f);
             yield return new WaitForSeconds(1f);
             yield return Shot("52_birds_game_view");
             log.WriteLine($"Wildlife: {Wildlife.Birds.Count} birds ({Wildlife.Birds.FindAll(b => b.Robot).Count} robots), robot hovering {robot.Hovering}, " +
@@ -668,7 +672,7 @@ namespace DroneSandbox
             while (Time.time - started < 120f && !Mimic.Of(robot).Confirmed) yield return null;
             var seen = Mimic.Of(robot);
             log.WriteLine($"Hunt: robot {seen.Status} after {Time.time - started:F0} s, {seen.Points} pts from {seen.KindCount} kinds: {string.Join("; ", seen.Found)}");
-            rts.LookAt(scout.transform.position, 60f, 30f);
+            rts.LookAt(scout.transform.position, 60f * Scale.Camera, 30f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("53_hunt_confirmed");
             while (!robot.Down && !robot.Escaped && Mimic.ShotsLeftFor(scout) > 0 && Time.time - started < 180f)
@@ -746,7 +750,7 @@ namespace DroneSandbox
                 Mimic.Act(next, scout);
                 float look = Time.time;
                 var e = Mimic.Of(next);
-                while (Time.time - look < 20f && Vector3.Distance(scout.transform.position, next.transform.position) > 60f) yield return null;
+                while (Time.time - look < 20f * Scale.TravelTime && Vector3.Distance(scout.transform.position, next.transform.position) > Scale.D(60f)) yield return null;
                 look = Time.time;
                 while (Time.time - look < 12f && e.Points == 0 && game.Result == MissionResult.None) yield return null;
                 if (e.Points == 0 && next.Robot)
@@ -759,7 +763,7 @@ namespace DroneSandbox
                 if (!e.Confirmed) continue;
                 if (!feedShot)
                 {
-                    rts.LookAt(scout.transform.position, 55f, 30f);
+                    rts.LookAt(scout.transform.position, 55f * Scale.Camera, 30f);
                     yield return new WaitForSeconds(0.4f);
                     yield return Shot(prefix + "6_hunt_confirmed_feed");
                     feedShot = true;
@@ -768,7 +772,7 @@ namespace DroneSandbox
                 if (spotting && !jamShots && Mimic.Jammed(next))
                 {
                     jamShots = true;
-                    rts.LookAt(next.transform.position, 45f, 30f);
+                    rts.LookAt(next.transform.position, 45f * Scale.Camera, 30f);
                     yield return new WaitForSeconds(0.5f);
                     yield return Shot("68_seek_jammed");
                     Mimic.Track(null);
@@ -808,7 +812,7 @@ namespace DroneSandbox
             if (seek < 0) yield break;
             game.StartMission(seek);
             game.CloseBriefing();
-            rts.LookAt(game.basePosition, 85f, 30f);
+            rts.LookAt(game.basePosition, 85f * Scale.Camera, 30f);
             Time.timeScale = 8f;
             var integrity = new List<string>();
             int seen = 0;
@@ -873,14 +877,14 @@ namespace DroneSandbox
                 }
                 if (scout == null) break;
                 scout.MoveTo(e.ContactPosition);
-                for (float t = 0f; t < 25f && scout != null && e != null && Vector3.Distance(scout.transform.position, e.transform.position) > 14f; t += 0.25f)
+                for (float t = 0f; t < 25f && scout != null && e != null && Vector3.Distance(scout.transform.position, e.transform.position) > Scale.D(14f); t += 0.25f)
                     yield return new WaitForSeconds(0.25f);
                 for (float t = 0f; t < 6f && e != null && e.Intel < Intel.Identified && !e.ExposedDecoy; t += 0.25f) yield return new WaitForSeconds(0.25f);
                 if (e == null) continue;
                 if (!shot)
                 {
                     shot = true;
-                    rts.LookAt(e.transform.position, 50f, 40f);
+                    rts.LookAt(e.transform.position, 50f * Scale.Camera, 40f);
                     yield return new WaitForSeconds(0.3f);
                     yield return Shot("71_idhunt_watching");
                 }
@@ -915,6 +919,10 @@ namespace DroneSandbox
             marker.GetComponent<Renderer>().sharedMaterial = Art.NewMaterial(new Color(0.9f, 0.1f, 0.8f));
             photo.Enter();
             Time.timeScale = 0f;
+            // The pixel test compares two frames, so draw them as they are rather than reconstructed by the upscaler.
+            var cameraData = Camera.main.GetComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData>();
+            bool upscaled = cameraData != null && cameraData.allowDynamicResolution;
+            if (cameraData != null) cameraData.allowDynamicResolution = false;
             var rng = new System.Random(5);
             float R(float a, float b) => a + (float)rng.NextDouble() * (b - a);
             int views = 0, tries = 0, agree = 0, falseBlocked = 0, falseClear = 0, partly = 0;
@@ -972,6 +980,7 @@ namespace DroneSandbox
             }
             Time.timeScale = 1f;
             photo.Exit();
+            if (cameraData != null) cameraData.allowDynamicResolution = upscaled;
             UnityEngine.Object.Destroy(marker);
             log.WriteLine($"Occlusion check: {views} views ({tries} tries), {agree} agree, {partly} partly hidden (either verdict fair), " +
                           $"{falseBlocked} refused though plainly visible, {falseClear} allowed though hidden");
@@ -1033,7 +1042,7 @@ namespace DroneSandbox
                 photo.Exit();
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
-                rts.LookAt(game.Mission.cameraFocus, 70f, game.Mission.cameraYaw);
+                rts.LookAt(game.Mission.cameraFocus, 70f * Scale.Camera, game.Mission.cameraYaw);
                 yield return new WaitForSeconds(2f);
                 yield return Shot($"32_mission_{n:00}_{situation}");
             }
@@ -1089,7 +1098,7 @@ namespace DroneSandbox
                     var next = NearestVisible(nightjar.transform.position);
                     if (next != null) nightjar.Attack(next);
                 }
-                rts.LookAt(nightjar.transform.position, 40f, 45f);
+                rts.LookAt(nightjar.transform.position, 40f * Scale.Camera, 45f);
                 if (!shot && nightjar.BombsLeft < Drone.BomberLoad)
                 {
                     shot = true;
@@ -1107,7 +1116,7 @@ namespace DroneSandbox
                           $"hp {nightjar.hp:F0}/{nightjar.maxHp:F0}");
             for (t = 0f; t < 60f && nightjar != null && nightjar.BombsLeft == 0; t += 0.5f)
             {
-                rts.LookAt(nightjar.transform.position, 30f, 45f);
+                rts.LookAt(nightjar.transform.position, 30f * Scale.Lens, 45f);
                 yield return new WaitForSeconds(0.5f);
             }
             if (nightjar != null)
@@ -1143,10 +1152,10 @@ namespace DroneSandbox
             var recon = game.SpawnDrone(DroneType.Scout);
             if (recon != null)
             {
-                recon.MoveTo(new Vector3(-30f, 0f, -85f)); // south of the AA gun's ring
+                recon.MoveTo(Old(-30f, -85f)); // south of the AA gun's ring
                 foreach (var site in game.enemies.FindAll(e => e.isTarget || e.isDecoy)) recon.MoveTo(site.ContactPosition, true);
             }
-            rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 75f, 70f);
+            rts.LookAt(targets.Count > 0 ? targets[0].transform.position : game.basePosition, 75f * Scale.Camera, 70f);
             for (float t = 0f; t < 60f && game.Phase == MissionPhase.Recon && game.Result == MissionResult.None; t += 0.5f)
                 yield return new WaitForSecondsRealtime(0.5f);
             log.WriteLine($"Mission 1 recon: phase {game.Phase} after {game.MissionTime:F1}s");
@@ -1168,7 +1177,7 @@ namespace DroneSandbox
 
             // Extract: bring the Scout home.
             game.Recall(new List<Drone>());
-            rts.LookAt(game.basePosition, 70f, 70f);
+            rts.LookAt(game.basePosition, 70f * Scale.Camera, 70f);
             for (float t = 0f; t < 40f && game.Result == MissionResult.None; t += 0.5f)
                 yield return new WaitForSecondsRealtime(0.5f);
             log.WriteLine($"Mission 1: {game.Result}, {game.ResultReason} Stars {game.Stars}, drones used {game.DronesUsed}, " +
@@ -1212,7 +1221,7 @@ namespace DroneSandbox
                     var next = trucks.Find(e => e != null && e.IsAlive);
                     if (next != null) bomber.Attack(next);
                 }
-                rts.LookAt(bomber.transform.position, 50f, 60f);
+                rts.LookAt(bomber.transform.position, 50f * Scale.Camera, 60f);
                 if (!thermalShot && flown >= 8f)
                 {
                     thermalShot = true;
@@ -1235,7 +1244,7 @@ namespace DroneSandbox
             game.StartMission(2);
             game.CloseBriefing();
             var hidden = game.enemies.FindAll(e => e.Hidden);
-            rts.LookAt(new Vector3(-10f, 0f, 30f), 105f, 30f);
+            rts.LookAt(Old(-10f, 30f), 105f * Scale.Camera, 30f);
             yield return new WaitForSecondsRealtime(1f);
             yield return Shot("10_search_areas");
             if (hidden.Count > 0)
@@ -1246,14 +1255,14 @@ namespace DroneSandbox
                     yield return new WaitForSecondsRealtime(0.5f);
                 bool spotted = hidden[0] != null && !hidden[0].Hidden;
                 log.WriteLine($"Hidden Guns: {hidden.Count} hidden targets, first spotted by a Scout: {spotted}");
-                if (hidden[0] != null) rts.LookAt(hidden[0].transform.position, 30f, 200f);
+                if (hidden[0] != null) rts.LookAt(hidden[0].transform.position, 30f * Scale.Lens, 200f);
                 yield return new WaitForSecondsRealtime(1f);
                 yield return Shot("11_spotted");
             }
 
             game.StartMission(4);
             game.CloseBriefing();
-            rts.LookAt(game.enemyHqPosition, 55f, 210f);
+            rts.LookAt(game.enemyHqPosition, 55f * Scale.Camera, 210f);
             yield return new WaitForSecondsRealtime(1f);
             yield return Shot("12_command_post");
             log.WriteLine($"Command Post: {game.TargetsTotal} target, {game.enemies.Count} enemies");
@@ -1291,7 +1300,7 @@ namespace DroneSandbox
                         Vector3 dir = watchRoute[i] - watchRoute[i - 1];
                         dir.y = 0f;
                         if (dir.sqrMagnitude < 0.01f) continue;
-                        closest = Mathf.Min(closest, GunClearance(watchRoute[i] + Vector3.Cross(Vector3.up, dir.normalized) * sign * 38f));
+                        closest = Mathf.Min(closest, GunClearance(watchRoute[i] + Vector3.Cross(Vector3.up, dir.normalized) * sign * Scale.D(38f)));
                     }
                     if (closest > safest)
                     {
@@ -1299,12 +1308,12 @@ namespace DroneSandbox
                         shadowSide = sign;
                     }
                 }
-                for (float t = 0f; t < 120f && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
+                for (float t = 0f; t < 120f * Scale.TravelTime && shadow != null && lead != null && game.Result == MissionResult.None; t += 0.5f)
                 {
                     if (game.Phase == MissionPhase.Extract)
                     {
                         shadow.MoveTo(game.basePosition);
-                        rts.LookAt(shadow.transform.position, 70f, 60f);
+                        rts.LookAt(shadow.transform.position, 70f * Scale.Camera, 60f);
                         if (!extractShot)
                         {
                             extractShot = true;
@@ -1320,8 +1329,8 @@ namespace DroneSandbox
                         if (alive == 0) break;
                         middle /= alive;
                         Vector3 side = Vector3.Cross(Vector3.up, lead.transform.forward).normalized * shadowSide;
-                        shadow.MoveTo(middle + side * 38f);
-                        rts.LookAt(middle, 70f, 60f);
+                        shadow.MoveTo(middle + side * Scale.D(38f));
+                        rts.LookAt(middle, 70f * Scale.Camera, 60f);
                         if (Mathf.Approximately(t, 25f)) yield return Shot("12b_long_watch");
                     }
                     yield return new WaitForSecondsRealtime(0.5f);
@@ -1345,7 +1354,7 @@ namespace DroneSandbox
                         shadow = game.SpawnDrone(DroneType.Scout);
                     }
                     shadow.MoveTo(lead.transform.position);
-                    rts.LookAt(lead.transform.position, 70f, 60f);
+                    rts.LookAt(lead.transform.position, 70f * Scale.Camera, 60f);
                     if (!detectedShot && game.ShadowDetections > 0)
                     {
                         detectedShot = true;
@@ -1402,7 +1411,7 @@ namespace DroneSandbox
                         foreach (var d in game.drones)
                             if (d != null) d.MoveTo(game.basePosition);
                     Vector3 look = loaded != null ? loaded.transform.position : game.basePosition;
-                    rts.LookAt(look, 90f, 30f);
+                    rts.LookAt(look, 90f * Scale.Camera, 30f);
                     if (!divertShot && game.Diverted)
                     {
                         divertShot = true;
@@ -1448,7 +1457,7 @@ namespace DroneSandbox
                     if (!pinnedShot && pinned > 0)
                     {
                         pinnedShot = true;
-                        rts.LookAt(guns.Find(g => g != null && g.Suppressed).transform.position, 70f, 30f);
+                        rts.LookAt(guns.Find(g => g != null && g.Suppressed).transform.position, 70f * Scale.Camera, 30f);
                         yield return Shot("14a_corridor_pinned");
                     }
                     if (nightjar == null && (open || t > 30f) && depot != null)
@@ -1461,8 +1470,8 @@ namespace DroneSandbox
                             if (d != null) d.MoveTo(game.basePosition);
                     if (nightjar != null)
                     {
-                        rts.LookAt(nightjar.transform.position, 80f, 30f);
-                        if (!bombingShot && depot != null && Vector3.Distance(nightjar.transform.position, depot.transform.position) < 20f)
+                        rts.LookAt(nightjar.transform.position, 80f * Scale.Camera, 30f);
+                        if (!bombingShot && depot != null && Vector3.Distance(nightjar.transform.position, depot.transform.position) < Scale.D(20f))
                         {
                             bombingShot = true;
                             yield return Shot("14b_corridor_bombing");
@@ -1614,10 +1623,10 @@ namespace DroneSandbox
                     {
                         Vector3 a = subject.transform.position, b = subject.AttackTarget.transform.position;
                         float gap = Vector3.Distance(a, b);
-                        if (gap > 90f) Aim(a + (b - a).normalized * 25f, 50f);
-                        else Aim(Vector3.Lerp(b, a, 0.35f), Mathf.Clamp(gap * 0.6f + 28f, 30f, 70f));
+                        if (gap > Scale.D(90f)) Aim(a + (b - a).normalized * Scale.D(25f), 50f * Scale.Camera);
+                        else Aim(Vector3.Lerp(b, a, 0.35f), Mathf.Clamp(gap * 0.6f * Scale.Lens + 28f * Scale.Camera, 30f * Scale.Camera, 70f * Scale.Camera));
                     }
-                    else Aim(Lead(), 55f);
+                    else Aim(Lead(), 55f * Scale.Camera);
                 }
                 Glide(rts, 2f);
                 clock += 1f / DemoFps;
@@ -1635,7 +1644,7 @@ namespace DroneSandbox
         }
 
         Vector3 shotFocus;
-        float shotDistance = 55f;
+        float shotDistance = 55f * Scale.Camera;
 
         void Aim(Vector3 focus, float distance)
         {
@@ -1649,7 +1658,7 @@ namespace DroneSandbox
         {
             if (shotFocus == Vector3.zero) shotFocus = camFocus;
             float k = 1f - Mathf.Exp(-1.8f / DemoFps);
-            camFocus = Vector3.Distance(camFocus, shotFocus) > 120f ? shotFocus : Vector3.Lerp(camFocus, shotFocus, k);
+            camFocus = Vector3.Distance(camFocus, shotFocus) > Scale.D(120f) ? shotFocus : Vector3.Lerp(camFocus, shotFocus, k);
             camDistance = Mathf.Lerp(camDistance, shotDistance, k);
             camYaw += turnPerSecond / DemoFps;
             rts.LookAt(camFocus, camDistance, camYaw);
@@ -1669,7 +1678,7 @@ namespace DroneSandbox
                     best = d;
                     bestGap = Gap(d);
                 }
-            return Busy(current) && Gap(current) < bestGap + 40f ? current : best;
+            return Busy(current) && Gap(current) < bestGap + Scale.D(40f) ? current : best;
         }
 
         // The n-th of the targets still alive (counting round).

@@ -19,9 +19,9 @@ namespace DroneSandbox
     public class SandboxGame : MonoBehaviour
     {
         public const int MaxDrones = 30;
-        public const float MapHalfSize = 90f;
-        public const float SpotRange = 26f;     // a drone this close (across the ground) spots a hidden enemy
-        public const float SearchRadius = 24f;  // size of the circle the HUD draws around a hidden target
+        public const float MapHalfSize = 90f * Scale.Distance;
+        public const float SpotRange = 26f * Scale.Distance;     // a drone this close (across the ground) spots a hidden enemy
+        public const float SearchRadius = 24f * Scale.Distance;  // size of the circle the HUD draws around a hidden target
         const float EnemyRespawnSeconds = 30f;
         const float ResultsDelay = 1.5f;        // let the last explosion play before the results panel
 
@@ -57,7 +57,7 @@ namespace DroneSandbox
         public MissionPhase Phase { get; private set; }
         public float ExtractEndsAt { get; private set; } // MissionTime the extraction window closes
         public int DronesHome { get; private set; }      // drones back over the base when the mission ended
-        public static float ExtractSeconds => 60f + Difficulty.ExtraExtractSeconds;
+        public static float ExtractSeconds => 60f * Scale.TravelTime + Difficulty.ExtraExtractSeconds; // home is further than it was
         public const float HomeRadius = 18f;
         public float ShadowProgress { get; private set; } // seconds the column has been watched unseen (Shadow missions)
         public bool ShadowSpotted { get; private set; }   // the column has noticed us (watching doesn't count for now)
@@ -66,7 +66,7 @@ namespace DroneSandbox
         public int ShadowIntel { get; private set; }       // milestones logged so far, of three
         public const int ShadowDetectionLimit = 3;
         // How close a drone can get before the column grows suspicious; further while its escort sweeps the flanks.
-        public float ShadowNoticeRange => (Time.time < escortSweepUntil ? 34f : 26f) * Recon.WeatherFactor;
+        public float ShadowNoticeRange => Scale.D(Time.time < escortSweepUntil ? 34f : 26f) * Recon.WeatherFactor;
         float escortSweepUntil;
         public bool IsShadow => Mode == GameMode.Mission && Mission != null && Mission.shadowSeconds > 0f;
         public bool IsHunt => Mode == GameMode.Mission && Mission != null && Mission.huntRobots > 0;
@@ -96,7 +96,7 @@ namespace DroneSandbox
 
             rts = gameObject.AddComponent<RtsController>();
             var hud = gameObject.AddComponent<SandboxHud>();
-            rts.Init(this, hud, cam, basePosition + new Vector3(12f, 0f, 12f));
+            rts.Init(this, hud, cam, basePosition + new Vector3(Scale.D(12f), 0f, Scale.D(12f)));
             gameObject.AddComponent<ShadowFit>().Init(rts);
             hud.Init(this, rts);
             gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
@@ -133,7 +133,7 @@ namespace DroneSandbox
             for (int i = 0; i < 3; i++) SpawnDrone(DroneType.Scout);
             for (int i = 0; i < 2; i++) SpawnDrone(DroneType.Strike);
             for (int i = 0; i < 2; i++) SpawnDrone(DroneType.Kamikaze);
-            rts.LookAt(basePosition + new Vector3(12f, 0f, 12f), 55f, 45f);
+            rts.LookAt(basePosition + new Vector3(Scale.D(12f), 0f, Scale.D(12f)), 55f * Scale.Camera, 45f);
         }
 
         // ---- Sectors ----
@@ -226,7 +226,7 @@ namespace DroneSandbox
                 {
                     // The lead starts 24 points (about 48 m) along the route, the rest 10 m apart behind it.
                     var route = Mission.convoyRoute;
-                    routeStart = Mathf.Clamp(Mission.convoyStart - (u.convoy - 1) * 5, 0, route.Count - 2);
+                    routeStart = Mathf.Clamp(Mission.convoyStart - (u.convoy - 1) * Missions.Points(5), 0, route.Count - 2);
                     position = route[routeStart];
                     Vector3 ahead = route[routeStart + 1] - position;
                     yaw = Mathf.Atan2(ahead.x, ahead.z) * Mathf.Rad2Deg;
@@ -252,7 +252,7 @@ namespace DroneSandbox
                 else if (enemy.IsMobile) enemy.Park();
                 if (u.hidden)
                 {
-                    float angle = (float)rng.NextDouble() * Mathf.PI * 2f, off = 4f + (float)rng.NextDouble() * 10f;
+                    float angle = (float)rng.NextDouble() * Mathf.PI * 2f, off = Scale.D(4f + (float)rng.NextDouble() * 10f);
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
                 // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
@@ -271,7 +271,7 @@ namespace DroneSandbox
         {
             BriefingOpen = false;
             Time.timeScale = 1f;
-            ShowMessage(Phase == MissionPhase.Recon ? "RECON: find the targets. Each drone sees about 45 m around it."
+            ShowMessage(Phase == MissionPhase.Recon ? "RECON: find the targets. Each drone sees about {Recon.IdentifyRange:0} m around it."
                 : "STRIKE: the targets are known. Destroy them.", 5f);
         }
 
@@ -539,7 +539,7 @@ namespace DroneSandbox
                 if (!spotted)
                 {
                     if (nearest < ShadowNoticeRange) ShadowSuspicion += Time.deltaTime / 2.5f;
-                    else if (nearest > ShadowNoticeRange + 4f) ShadowSuspicion -= Time.deltaTime / 5f;
+                    else if (nearest > ShadowNoticeRange + Scale.D(4f)) ShadowSuspicion -= Time.deltaTime / 5f;
                     ShadowSuspicion = Mathf.Clamp01(ShadowSuspicion);
                     if (ShadowSuspicion >= 1f && tail != null)
                     {
@@ -584,22 +584,23 @@ namespace DroneSandbox
         {
             Wildlife.Clear();
             Vector3 b = basePosition;
-            Vector3 village = MapLayout.Villages.Count > 0 ? new Vector3(MapLayout.Villages[0].x, 0f, MapLayout.Villages[0].y) : b + new Vector3(70f, 0f, 70f);
+            const float S = Scale.Distance;
+            Vector3 village = MapLayout.Villages.Count > 0 ? new Vector3(MapLayout.Villages[0].x, 0f, MapLayout.Villages[0].y) : b + new Vector3(70f, 0f, 70f) * S;
             Vector3 toVillage = village - b;
             toVillage.y = 0f;
             toVillage = toVillage.sqrMagnitude > 1f ? toVillage.normalized : Vector3.forward;
-            Vector3 overlook = b + toVillage * 55f + Vector3.Cross(Vector3.up, toVillage) * 25f;
-            Wildlife.AddFlock(b + new Vector3(35f, 0f, 25f), 30f, 4, 101);
-            Wildlife.AddFlock(overlook, 30f, 2, 104);
-            Wildlife.AddFlock(village + new Vector3(-20f, 0f, 10f), 30f, 3, 102);
-            Wildlife.AddFlock((b + village) / 2f, 35f, 3, 103);
+            Vector3 overlook = b + (toVillage * 55f + Vector3.Cross(Vector3.up, toVillage) * 25f) * S;
+            Wildlife.AddFlock(b + new Vector3(35f, 0f, 25f) * S, 30f * S, 4, 101);
+            Wildlife.AddFlock(overlook, 30f * S, 2, 104);
+            Wildlife.AddFlock(village + new Vector3(-20f, 0f, 10f) * S, 30f * S, 3, 102);
+            Wildlife.AddFlock((b + village) / 2f, 35f * S, 3, 103);
             Vector3[] posts = { overlook, village, (b + village) / 2f };
             for (int k = 0; k < Mission.huntRobots; k++)
             {
                 Vector3 c = posts[k % posts.Length];
-                float r = 26f + 4f * k;
+                float r = (26f + 4f * k) * S;
                 var route = new List<Vector3> { c + new Vector3(-r, 0f, r * 0.8f), c + new Vector3(r, 0f, r), c + new Vector3(r * 0.9f, 0f, -r), c + new Vector3(-r, 0f, -r * 0.7f) };
-                Wildlife.AddRobot(route, 18f + 3f * k, 201 + k); // up with the crows, above the treetops
+                Wildlife.AddRobot(route, (18f + 3f * k) * S, 201 + k); // up with the crows, above the treetops
             }
             TargetsTotal = Mission.huntRobots;
             Phase = MissionPhase.Strike;
@@ -867,7 +868,7 @@ namespace DroneSandbox
             }
             foreach (var e in enemies)
                 if (e != null && e.isTarget) e.Alert(tail.transform.position, false);
-            ShowMessage($"DETECTED {ShadowDetections}/{ShadowDetectionLimit} - they've seen the tail. Watch paused: drop back past {ShadowNoticeRange + 4f:0} m", 4.5f);
+            ShowMessage($"DETECTED {ShadowDetections}/{ShadowDetectionLimit} - they've seen the tail. Watch paused: drop back past {ShadowNoticeRange + Scale.D(4f):0} m", 4.5f);
             Sound.Alert("warning", 0.5f);
         }
 
@@ -882,7 +883,7 @@ namespace DroneSandbox
             else if (ShadowIntel == 2)
             {
                 escortSweepUntil = Time.time + 8f;
-                ShowMessage("INTEL 2/3: the escort is sweeping its flanks - 34 m for 8 s. Open the gap!", 5f);
+                ShowMessage("INTEL 2/3: the escort is sweeping its flanks - {Scale.D(34f):0} m for 8 s. Open the gap!", 5f);
             }
             else ShowMessage("INTEL 3/3: route confirmed - they're heading out on the north road", 4f);
             Sound.Alert("objective", 0.3f);

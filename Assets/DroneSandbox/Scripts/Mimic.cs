@@ -63,6 +63,9 @@ namespace DroneSandbox
     {
         public const int Shots = 3;
         public const float JamSeconds = 45f;
+        // How near a drone has to be to shoot (ShotRange), and to be sure of a moving bird (SureRange): the old map's
+        // 40 m and 25 m, brought over by Scale.
+        public const float ShotRange = 40f * Scale.Distance, SureRange = 25f * Scale.Distance;
 
         // Hide and Seek: a confirmed robot's uplink is jammed while a drone keeps it in view, and for 45 s after; one
         // that isn't jammed, down or gone is spotting for the guns.
@@ -128,7 +131,7 @@ namespace DroneSandbox
         {
             if (b == null || drone == null) return false;
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
-            return Of(b).Aim >= 1f && d <= 40f && (d < 25f || b.Hovering) && !Hidden(b, drone);
+            return Of(b).Aim >= 1f && d <= ShotRange && (d < SureRange || b.Hovering) && !Hidden(b, drone);
         }
 
         // Trees in the way of this drone's shot: as the feed shows it when this is the feed's drone (the same verdict
@@ -144,8 +147,8 @@ namespace DroneSandbox
         {
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
             if (Hidden(b, drone)) return "OBSTRUCTED: trees in the way";
-            if (d > 40f) return $"out of range ({d:0} m)";
-            if (d >= 25f && !b.Hovering) return $"{d:0} m: closer, or wait for a hover";
+            if (d > ShotRange) return $"out of range ({d:0} m)";
+            if (d >= SureRange && !b.Hovering) return $"{d:0} m: closer, or wait for a hover";
             return "steadying: match its speed";
         }
 
@@ -166,9 +169,9 @@ namespace DroneSandbox
                 return false;
             }
             float d = Vector3.Distance(drone.transform.position, b.transform.position);
-            if (d > 40f)
+            if (d > ShotRange)
             {
-                game?.ShowMessage($"Out of range ({d:0} m): get within 40 m", 2.5f);
+                game?.ShowMessage($"Out of range ({d:0} m): get within {ShotRange:0} m", 2.5f);
                 return false;
             }
             shotsLeft[drone] = ShotsLeftFor(drone) - 1;
@@ -214,7 +217,7 @@ namespace DroneSandbox
                 var e = Of(b);
                 // A radio burst near one of our drones: traced to the contact if it's the one being tracked, otherwise
                 // only a warning that one of the crows out there is transmitting.
-                if (b.Robot && b.BurstNow && game != null && game.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, b.transform.position) < 100f))
+                if (b.Robot && b.BurstNow && game != null && game.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, b.transform.position) < Scale.D(100f)))
                 {
                     if (b == Tracked && e.Add(Clue.Electronic, 2, "radio burst traced to it", true)) Announce(b, "Signal intercept: the data burst came from this one");
                     else if (b != Tracked) game.ShowMessage("Signal intercept: a data burst nearby. One of these crows is transmitting", 3f);
@@ -224,7 +227,7 @@ namespace DroneSandbox
                 if (b.Robot && !b.Spooked && game != null && b != Tracked) e.TooClose = 0f;
                 else if (b.Robot && !b.Spooked && game != null)
                 {
-                    bool close = game.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, b.transform.position) < 10f);
+                    bool close = game.drones.Exists(d => d != null && Vector3.Distance(d.transform.position, b.transform.position) < Scale.D(10f));
                     e.TooClose = close ? e.TooClose + dt : 0f;
                     if (e.TooClose > 2f)
                     {
@@ -259,7 +262,7 @@ namespace DroneSandbox
                 {
                     Vector3 v = cam.WorldToViewportPoint(b.transform.position);
                     d = Vector3.Distance(source.transform.position, b.transform.position);
-                    inView = v.z > 0f && v.x >= 0f && v.x <= 1f && v.y >= 0f && v.y <= 1f && d <= 150f;
+                    inView = v.z > 0f && v.x >= 0f && v.x <= 1f && v.y >= 0f && v.y <= 1f && d <= Scale.D(150f);
                     // Hidden after two blocked looks 0.1 s apart, back in sight after 0.2 s clear, so the marker doesn't
                     // flicker on a line grazing a crown; the line runs from the camera itself, as the picture does.
                     bool blocked = inView && Canopy.Blocks(cam.transform.position, b.transform.position);
@@ -272,22 +275,22 @@ namespace DroneSandbox
                 // drone matching its speed (holding still with a hovering one, or flying with it), and slower on one
                 // that's running; it slips away otherwise.
                 float drift = (sourceVelocity - b.Velocity).magnitude;
-                float rate = !inView || e.Occluded || d > 40f ? -1f
-                    : (d < 25f ? 1f / 1.5f : 1f / 3.5f) * (b.Hovering ? 2f : 1f) * (drift < 4f ? 1f : 0.35f) * (b.Spooked ? 0.5f : 1f);
+                float rate = !inView || e.Occluded || d > ShotRange ? -1f
+                    : (d < SureRange ? 1f / 1.5f : 1f / 3.5f) * (b.Hovering ? 2f : 1f) * (drift < 4f * Scale.Speed ? 1f : 0.35f) * (b.Spooked ? 0.5f : 1f);
                 e.Aim = Mathf.Clamp01(e.Aim + rate * dt);
                 if (!inView) continue;
                 if (e.Confirmed && !e.Occluded) e.JammedUntil = Time.time + JamSeconds;
                 e.Watched += dt;
                 bool zoomed = feed.Zoom >= 1.9f;
-                if (zoomed && d < 45f) e.Close += dt;
+                if (zoomed && d < Scale.D(45f)) e.Close += dt;
                 if (!b.Robot) continue; // a crow shows nothing a machine would
-                if (b.Hovering && d < 80f) e.HoverWatched += dt;
+                if (b.Hovering && d < Scale.D(80f)) e.HoverWatched += dt;
                 if (e.HoverWatched > 2f && e.Add(Clue.Movement, 1, "holds still in the air", true)) Announce(b, "It's holding still in the air");
                 if (e.Watched > 25f && e.Add(Clue.Movement, 1, "flies the same loop again", true)) Announce(b, "Same loop again: it's patrolling");
                 if (e.Close > 6f && e.Add(Clue.Mechanical, 2, "wingbeat perfectly even", true)) Announce(b, "Its wingbeat never varies: a motor");
-                if (b.GlintNow && zoomed && d < 40f && e.Add(Clue.Mechanical, 1, "metal glint at the shoulder")) Announce(b, "A glint of metal at the wing");
-                if (d < 15f && e.Add(Clue.Acoustic, 2, "servo whine")) Announce(b, "Servo whine on the microphone");
-                if (DayNight.Instance != null && DayNight.Instance.Thermal && d < 50f && e.Add(Clue.Thermal, 1, "hot spot at the shoulders"))
+                if (b.GlintNow && zoomed && d < Scale.D(40f) && e.Add(Clue.Mechanical, 1, "metal glint at the shoulder")) Announce(b, "A glint of metal at the wing");
+                if (d < Scale.D(15f) && e.Add(Clue.Acoustic, 2, "servo whine")) Announce(b, "Servo whine on the microphone");
+                if (DayNight.Instance != null && DayNight.Instance.Thermal && d < Scale.D(50f) && e.Add(Clue.Thermal, 1, "hot spot at the shoulders"))
                     Announce(b, "Thermal: a hot spot at the shoulders, not body heat");
                 if (e.Confirmed && !e.Announced)
                 {
@@ -318,7 +321,7 @@ namespace DroneSandbox
             nextShadowOrder = Time.time + 0.4f;
             Vector3 back = shadowed.Velocity.sqrMagnitude > 1f ? -shadowed.Velocity.normalized : (shadowing.transform.position - shadowed.transform.position).normalized;
             back.y = 0f;
-            shadowing.MoveTo(shadowed.transform.position + back.normalized * 22f);
+            shadowing.MoveTo(shadowed.transform.position + back.normalized * Scale.D(22f));
         }
     }
 }

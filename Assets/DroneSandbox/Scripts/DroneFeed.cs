@@ -41,7 +41,7 @@ namespace DroneSandbox
             feed = go.AddComponent<Camera>();
             feed.fieldOfView = 48f;
             feed.nearClipPlane = 0.2f;
-            feed.farClipPlane = 600f;
+            feed.farClipPlane = 600f * Scale.Distance;
             feed.targetTexture = Picture;
             feed.enabled = false;
             var data = go.AddComponent<HDAdditionalCameraData>();
@@ -85,7 +85,7 @@ namespace DroneSandbox
             }
             // A tracked bird (Mimic): the gimbal stays on it while it's in sight.
             var bird = Mimic.Tracked;
-            if (bird != null && !bird.Down && Vector3.Distance(eye, bird.transform.position) < 150f)
+            if (bird != null && !bird.Down && Vector3.Distance(eye, bird.transform.position) < Scale.D(150f))
                 look = (bird.transform.position - eye).normalized;
             float fov = Source.type == DroneType.Scout ? 75f : Source.type == DroneType.Kamikaze ? 85f : Source.type == DroneType.Strike ? 60f : 70f;
             feed.fieldOfView = fov / Mathf.Clamp(Zoom, 1f, 3f);

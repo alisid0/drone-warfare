@@ -20,8 +20,10 @@ namespace DroneSandbox
     //   warns everything it covers, and anything hit or near a unit that's hit goes on alert (EnemyUnit.Alert).
     public class Recon : MonoBehaviour
     {
-        public const float IdentifyRange = 46f, ConfirmRange = 26f, NightRange = 24f, ThermalRange = 52f;
-        public const float BaseSensorRange = 42f, OpticsBonus = 12f;
+        // The old 480 m map's sight distances, brought over by Scale.
+        public const float IdentifyRange = 46f * Scale.Distance, ConfirmRange = 26f * Scale.Distance,
+            NightRange = 24f * Scale.Distance, ThermalRange = 52f * Scale.Distance;
+        public const float BaseSensorRange = 42f * Scale.Distance, OpticsBonus = 12f * Scale.Distance;
         public const float GhostSeconds = 25f;
         const float Interval = 0.15f;
 

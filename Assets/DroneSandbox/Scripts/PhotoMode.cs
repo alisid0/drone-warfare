@@ -13,8 +13,8 @@ namespace DroneSandbox
     // move the time of day, and saves a picture to Pictures/Drone Warfare.
     public class PhotoMode : MonoBehaviour
     {
-        const float Speed = 12f, FastMultiplier = 3.5f, LookSpeed = 0.15f, TurnSpeed = 60f;
-        const float Clearance = 1.2f, Ceiling = 170f, Limit = 228f;
+        const float Speed = 12f * Scale.Speed, FastMultiplier = 3.5f, LookSpeed = 0.15f, TurnSpeed = 60f;
+        const float Clearance = 1.2f, Ceiling = 170f * Scale.Distance, Limit = Ground.Size / 2f - 12f;
         const float HintSeconds = 7f;
 
         public static PhotoMode Instance { get; private set; }
@@ -213,7 +213,7 @@ namespace DroneSandbox
         // Focus on whatever is in the middle of the frame.
         void UpdateFocus()
         {
-            float distance = 300f;
+            float distance = 300f * Scale.Distance;
             var ray = new Ray(cam.transform.position, cam.transform.forward);
             if (Ground.Raycast(ray, out Vector3 hit)) distance = Vector3.Distance(cam.transform.position, hit);
             // Something nearer in the middle of the frame takes the focus: a unit, or a bird (which has no collider).
@@ -225,7 +225,7 @@ namespace DroneSandbox
                 float along = Vector3.Dot(to, ray.direction);
                 if (along > 0.5f && along < distance && (to - ray.direction * along).magnitude < 0.8f) distance = along;
             }
-            focusDistance = Mathf.Lerp(focusDistance, Mathf.Clamp(distance, 2f, 300f), 0.25f);
+            focusDistance = Mathf.Lerp(focusDistance, Mathf.Clamp(distance, 2f, 300f * Scale.Distance), 0.25f);
             if (focus != null) SetRanges(focus, focusDistance);
         }
 

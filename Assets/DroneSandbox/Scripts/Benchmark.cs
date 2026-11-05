@@ -70,16 +70,19 @@ namespace DroneSandbox
 
             var village = MapLayout.Villages[0];
             var bridge = MapLayout.BridgePoint;
+            // The old map's views, brought over (Scale): the land at its distances, the close-up at the narrower lens.
+            var plan = MapLayout.Plan;
+            float far = Scale.Camera;
             var views = new (string name, Vector3 at, float distance, float yaw)[]
             {
-                ("overview", new Vector3(10f, 0f, 10f), 110f, 45f),
-                ("play_base", game.basePosition, 55f, 30f),
-                ("play_woods", new Vector3(-32f, 0f, -26f), 55f, 45f),
-                ("farmland", new Vector3(-20f, 0f, -30f), 100f, 40f),
-                ("village", new Vector3(village.x, 0f, village.y), 45f, 200f),
-                ("bridge", new Vector3(bridge.x, 0f, bridge.y), 40f, 135f),
-                ("enemy_hq", game.enemyHqPosition, 38f, 210f),
-                ("closeup", game.basePosition, 18f, 30f),
+                ("overview", plan.FromOld(new Vector3(10f, 0f, 10f)), 110f * far, 45f),
+                ("play_base", game.basePosition, 55f * far, 30f),
+                ("play_woods", plan.FromOld(new Vector3(-32f, 0f, -26f)), 55f * far, 45f),
+                ("farmland", plan.FromOld(new Vector3(-20f, 0f, -30f)), 100f * far, 40f),
+                ("village", new Vector3(village.x, 0f, village.y), 45f * far, 200f),
+                ("bridge", new Vector3(bridge.x, 0f, bridge.y), 40f * far, 135f),
+                ("enemy_hq", game.enemyHqPosition, 38f * far, 210f),
+                ("closeup", game.basePosition, 18f * Scale.Lens, 30f),
             };
             log.WriteLine();
             log.WriteLine("view               frame ms (5% slowest)   main   render    gpu (5% slowest)  | batches setpass  tris   shadow casters");
@@ -94,9 +97,9 @@ namespace DroneSandbox
             }
 
             // Explosions and smoke in the play view, the photo mode view of the valley (bounce light on), night.
-            rts.LookAt(game.basePosition, 55f, 30f);
+            rts.LookAt(game.basePosition, 55f * far, 30f);
             yield return new WaitForSecondsRealtime(0.5f);
-            Vector3 blastAt = Ground.OnGround(game.basePosition + new Vector3(20f, 0f, 25f));
+            Vector3 blastAt = Ground.OnGround(game.basePosition + new Vector3(20f, 0f, 25f) * Scale.Distance);
             for (int i = 0; i < 4; i++) Effects.Explosion(blastAt + new Vector3(i * 6f, 1f, (i % 2) * 5f), 5f);
             yield return new WaitForSecondsRealtime(0.4f);
             {
@@ -107,7 +110,7 @@ namespace DroneSandbox
             }
             yield return new WaitForSecondsRealtime(4f);
             var photo = PhotoMode.Instance;
-            photo.PlaceLooking(new Vector3(75f, 70f, -150f), new Vector3(-35f, 0f, 0f), 60f);
+            photo.PlaceLooking(plan.FromOld(new Vector3(75f, 0f, -150f)) + Vector3.up * 70f * Scale.Distance, plan.FromOld(new Vector3(-35f, 0f, 0f)), 60f);
             yield return new WaitForSecondsRealtime(1.5f);
             {
                 Times t = default;
@@ -117,7 +120,7 @@ namespace DroneSandbox
             }
             photo.Exit();
             DayNight.Instance.SetTime(23.5f, 0f);
-            rts.LookAt(game.basePosition, 55f, 30f);
+            rts.LookAt(game.basePosition, 55f * far, 30f);
             yield return new WaitForSecondsRealtime(1.5f);
             {
                 Times t = default;

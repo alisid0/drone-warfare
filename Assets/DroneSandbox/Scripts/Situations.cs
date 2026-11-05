@@ -125,7 +125,7 @@ namespace DroneSandbox
                         Vector2 bridge = plan.bridges.Count > 0 ? plan.bridges[rng.Next(plan.bridges.Count)] : RoadNear(mid);
                         var route = RouteThrough(bridge, out string from);
                         Convoy(route, (EnemyType.APC, true), (EnemyType.Tank, true), (EnemyType.APC, true), (EnemyType.Tank, true));
-                        Guns(bridge + fwd * 22f, 1, false, 8f);
+                        Guns(bridge + fwd * Scale.D(22f), 1, false, 8f);
                         Stock(2, 2, 6, 6);
                         Brief($"An armoured column is driving in {from} to force the bridge over the {plan.riverName}. Stop all four vehicles before they get across.",
                             "The column crossed the river.");
@@ -142,7 +142,7 @@ namespace DroneSandbox
                     {
                         Vector2 c = EnemySide(20f, 45f);
                         Unit(EnemyType.Jammer, Open(c, 10f), true);
-                        Unit(EnemyType.Jammer, Open(c + Side() * 40f, 10f), true);
+                        Unit(EnemyType.Jammer, Open(c + Side() * Scale.D(40f), 10f), true);
                         Guns(c, 2, true, 16f);
                         Stock(2, 4, 4, 6);
                         Brief("Two jammer trucks are cutting the links of every drone that flies into their circles. Hit them from outside: Strike drones' missiles outrange the jamming.");
@@ -202,7 +202,7 @@ namespace DroneSandbox
                     {
                         Vector2 c = High(EnemySide(20f, 60f));
                         Unit(EnemyType.Radar, Open(c, 6f), true);
-                        Unit(EnemyType.Radar, Open(c + Side() * 30f, 6f), true);
+                        Unit(EnemyType.Radar, Open(c + Side() * Scale.D(30f), 6f), true);
                         Guns(c, 3, false, 16f);
                         Stock(2, 4, 4, 5);
                         Brief("Two radars on the high ground give every AA gun around them extra reach. Knock both out.");
@@ -246,7 +246,7 @@ namespace DroneSandbox
                     {
                         Vector2 c = Wild(10f, 50f), along = Side();
                         for (int i = 0; i < 4; i++) Unit(EnemyType.Artillery, c + along * (i - 1.5f) * 10f, true, i % 2 == 0);
-                        Guns(c - fwd * 10f, 1, false, 8f);
+                        Guns(c - fwd * Scale.D(10f), 1, false, 8f);
                         Stock(3, 2, 5, 5);
                         Brief("Four guns stand in a line behind a tree line, two of them under nets. Silence the whole line.");
                         break;
@@ -277,7 +277,7 @@ namespace DroneSandbox
                         Vector2 bank = Riverbank();
                         for (int i = 0; i < 4; i++) Unit(EnemyType.Truck, Open(bank, 10f), true);
                         Unit(EnemyType.APC, Open(bank, 10f), false);
-                        Guns(bank + fwd * 15f, 1, false, 8f);
+                        Guns(bank + fwd * Scale.D(15f), 1, false, 8f);
                         Stock(2, 2, 5, 5);
                         Brief($"Trucks are queueing on the bank of the {plan.riverName} for a ferry. Catch all four before they get across.");
                         break;
@@ -398,7 +398,7 @@ namespace DroneSandbox
                         // One hit per target, plus one spare for a mistaken strike; no AA interrupts the observation.
                         Stock(2, 0, targets + 1, targets + 1);
                         count = targets + AdjustDecoys(c, 18f);
-                        m.contactRadius = 20f;
+                        m.contactRadius = Scale.D(20f);
                         string vehicles = empty ? "fuel tankers" : "supply trucks";
                         string real = targets == 1 ? "one is a real target" : "two are real targets";
                         string falseTargets = empty ? "empty" : "inflatable decoys";
@@ -483,17 +483,20 @@ namespace DroneSandbox
                 {
                     // Frame the whole hunt group, so the opening camera does not point out the real targets.
                     if (!u.target && (situation != Situation.IdentificationHunt || !u.decoy)) continue;
-                    Vector3 p = u.convoy > 0 && m.convoyRoute != null ? m.convoyRoute[Mathf.Min(m.convoyRoute.Count - 1, 24)] : u.position;
+                    Vector3 p = u.convoy > 0 && m.convoyRoute != null ? m.convoyRoute[Mathf.Min(m.convoyRoute.Count - 1, Mathf.RoundToInt(24 * Scale.Distance))] : u.position;
                     if (u.type == EnemyType.Command) p = plan.enemyHqPosition;
                     sum += p;
                     n++;
                 }
                 m.cameraFocus = n > 0 ? sum / n : plan.enemyHqPosition;
                 m.cameraYaw = Mathf.Atan2(fwd.x, fwd.y) * Mathf.Rad2Deg;
-                m.cameraDistance = 100f;
+                m.cameraDistance = 100f * Scale.Camera;
             }
 
             // ---- Where things go ----
+            // Distances handed to these are in the old 480 m map's metres (the recipes were tuned there) and come
+            // out Scale.Distance times larger; real sizes (a village's houses, a river's bank, a compound's gate)
+            // stay.
 
             Vector2 Side() => new Vector2(-fwd.y, fwd.x);
             static Vector3 V3(Vector2 v) => new Vector3(v.x, 0f, v.y);
@@ -503,10 +506,10 @@ namespace DroneSandbox
             {
                 for (int attempt = 0; attempt < 80; attempt++)
                 {
-                    Vector2 p = mid + fwd * R(minF, maxF) + Side() * R(wide ? -80f : -55f, wide ? 80f : 55f);
+                    Vector2 p = mid + (fwd * R(minF, maxF) + Side() * R(wide ? -80f : -55f, wide ? 80f : 55f)) * Scale.Distance;
                     if (OpenGround(p, 4f)) return p;
                 }
-                return mid + fwd * maxF + Side() * R(-30f, 30f);
+                return mid + (fwd * maxF + Side() * R(-30f, 30f)) * Scale.Distance;
             }
 
             // Somewhere wild on the enemy's side (woods, scrub, meadow), or out in the fields.
@@ -514,7 +517,7 @@ namespace DroneSandbox
             {
                 for (int attempt = 0; attempt < 120; attempt++)
                 {
-                    Vector2 p = mid + fwd * R(minF, maxF) + Side() * R(-70f, 70f);
+                    Vector2 p = mid + (fwd * R(minF, maxF) + Side() * R(-70f, 70f)) * Scale.Distance;
                     if (!OpenGround(p, 4f)) continue;
                     if (fields ? MapLayout.InField(p, 0f) : MapLayout.IsWild(p, 0f)) return p;
                 }
@@ -526,25 +529,25 @@ namespace DroneSandbox
             {
                 for (int attempt = 0; attempt < 80; attempt++)
                 {
-                    float a = R(0f, Mathf.PI * 2f), r = R(3f, attempt < 40 ? spread : spread * 2f);
+                    float a = R(0f, Mathf.PI * 2f), r = R(3f, attempt < 40 ? spread : spread * 2f) * Scale.Distance;
                     Vector2 p = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
                     if (OpenGround(p, 2.5f)) return p;
                 }
-                return c + new Vector2(R(-6f, 6f), R(-6f, 6f));
+                return c + new Vector2(R(-6f, 6f), R(-6f, 6f)) * Scale.Distance;
             }
 
             bool OpenGround(Vector2 p, float margin)
             {
-                if (Mathf.Abs(p.x) > 120f || Mathf.Abs(p.y) > 120f) return false;
+                if (Mathf.Abs(p.x) > Scale.D(120f) || Mathf.Abs(p.y) > Scale.D(120f)) return false;
                 if (MapLayout.LakeDistance(p.x, p.y) < margin || MapLayout.NearDam(p, margin)) return false;
                 if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + margin) return false;
                 if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 1f) return false;
-                if (MapLayout.OnWorks(p, 0f) || Vector2.Distance(p, basePos) < MapLayout.BaseRadius + 25f) return false;
+                if (MapLayout.OnWorks(p, 0f) || Vector2.Distance(p, basePos) < MapLayout.BaseRadius + Scale.D(25f)) return false;
                 if (Undergrowth.UnderTrees(p, 7f)) return false; // seen from a drone, not lost under a canopy
-                float spacing = situation == Situation.IdentificationHunt ? 12f : 5f; // inspect look-alikes separately, outside one blast
+                float spacing = Scale.D(situation == Situation.IdentificationHunt ? 12f : 5f); // inspect look-alikes separately, outside one blast
                 foreach (var u in m.units) // and not parked on top of another unit
                     if ((new Vector2(u.position.x, u.position.z) - p).sqrMagnitude < spacing * spacing) return false;
-                return !MapLayout.NearFlatSite(p, 1f) || Vector2.Distance(p, hqPos) < MapLayout.HqRadius + 25f;
+                return !MapLayout.NearFlatSite(p, 1f) || Vector2.Distance(p, hqPos) < MapLayout.HqRadius + Scale.D(25f);
             }
 
             // The highest open ground near p.
@@ -554,7 +557,7 @@ namespace DroneSandbox
                 float top = Ground.HeightAt(V3(p));
                 for (int k = 0; k < 30; k++)
                 {
-                    Vector2 q = p + new Vector2(R(-40f, 40f), R(-40f, 40f));
+                    Vector2 q = p + new Vector2(R(-40f, 40f), R(-40f, 40f)) * Scale.Distance;
                     float h = Ground.HeightAt(V3(q));
                     if (h > top && OpenGround(q, 4f))
                     {
@@ -570,7 +573,7 @@ namespace DroneSandbox
             {
                 var options = new List<int>();
                 for (int i = 0; i < plan.villages.Count; i++)
-                    if (Vector2.Dot(plan.villages[i] - mid, fwd) > -10f && Mathf.Abs(plan.villages[i].x) < 120f && Mathf.Abs(plan.villages[i].y) < 120f)
+                    if (Vector2.Dot(plan.villages[i] - mid, fwd) > Scale.D(-10f) && Mathf.Abs(plan.villages[i].x) < Scale.D(120f) && Mathf.Abs(plan.villages[i].y) < Scale.D(120f))
                         options.Add(i);
                 if (options.Count > 0)
                 {
@@ -600,7 +603,7 @@ namespace DroneSandbox
                     if (Vector2.Dot(side, fwd) < 0f) side = -side;
                     Vector2 p = line[i] + side * (MapLayout.RiverHalfWidth + 8f);
                     bool nearBridge = false;
-                    foreach (var b in plan.bridges) if (Vector2.Distance(b, p) < 30f) nearBridge = true;
+                    foreach (var b in plan.bridges) if (Vector2.Distance(b, p) < Scale.D(30f)) nearBridge = true;
                     if (!nearBridge && OpenGround(p, 3f)) return p;
                 }
                 return EnemySide(0f, 20f);
@@ -666,12 +669,12 @@ namespace DroneSandbox
             // A road point some 60 m past the bridge on your side.
             Vector2 Beyond(Vector2 bridge)
             {
-                Vector2 best = bridge - fwd * 50f;
+                Vector2 best = bridge - fwd * Scale.D(50f);
                 float score = float.MaxValue;
                 foreach (var line in MapLayout.RoadLines)
                     foreach (var q in line)
                     {
-                        float s = Mathf.Abs(Vector2.Distance(q, bridge) - 60f) + (Vector2.Dot(q - bridge, fwd) > -20f ? 1000f : 0f);
+                        float s = Mathf.Abs(Vector2.Distance(q, bridge) - Scale.D(60f)) + (Vector2.Dot(q - bridge, fwd) > Scale.D(-20f) ? 100000f : 0f);
                         if (s < score)
                         {
                             score = s;
@@ -684,14 +687,14 @@ namespace DroneSandbox
             // A road point near the terrain's edge, as far towards the enemy as possible.
             Vector2 Entry(out string from)
             {
-                Vector2 best = hqPos + fwd * 120f;
+                Vector2 best = hqPos + fwd * Scale.D(120f);
                 float score = float.MinValue;
                 foreach (var line in MapLayout.RoadLines)
                     foreach (var q in line)
                     {
                         float edge = Mathf.Max(Mathf.Abs(q.x), Mathf.Abs(q.y));
-                        if (edge < 185f || edge > 225f) continue;
-                        float s = Vector2.Dot(q - mid, fwd) + R(0f, 60f);
+                        if (edge < Scale.D(185f) || edge > Scale.D(225f)) continue;
+                        float s = Vector2.Dot(q - mid, fwd) + R(0f, 60f) * Scale.Distance;
                         if (s > score)
                         {
                             score = s;

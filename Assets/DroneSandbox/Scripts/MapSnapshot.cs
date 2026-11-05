@@ -11,7 +11,7 @@ namespace DroneSandbox
     {
         public const int Size = 512;
         public static Texture2D Picture { get; private set; }
-        public static float Half => SandboxGame.MapHalfSize + 20f; // metres from the middle to each edge
+        public static float Half => SandboxGame.MapHalfSize + Scale.D(20f); // metres from the middle to each edge
 
         static readonly HashSet<string> Buildings = new HashSet<string>
         {
@@ -99,12 +99,12 @@ namespace DroneSandbox
                             if (d < roadHalf + 0.5f) c = d < roadHalf - 0.3f ? Road : Verge;
                         }
                         c *= shade;
-                        // 5 m contours, where the height band changes from one pixel to the next.
-                        int band = Mathf.FloorToInt(h / 5f);
-                        if (band != Mathf.FloorToInt(hr / 5f) || band != Mathf.FloorToInt(hu / 5f)) c *= 0.8f;
+                        // 20 m contours, where the height band changes from one pixel to the next.
+                        int band = Mathf.FloorToInt(h / 20f);
+                        if (band != Mathf.FloorToInt(hr / 20f) || band != Mathf.FloorToInt(hu / 20f)) c *= 0.8f;
                     }
-                    // A faint 50 m grid, and the land outside the battle area dimmed.
-                    if (Mathf.Abs(Mathf.Repeat(x + 25f, 50f) - 25f) < step * 0.5f || Mathf.Abs(Mathf.Repeat(z + 25f, 50f) - 25f) < step * 0.5f)
+                    // A faint 200 m grid, and the land outside the battle area dimmed.
+                    if (Mathf.Abs(Mathf.Repeat(x + 100f, 200f) - 100f) < step * 0.5f || Mathf.Abs(Mathf.Repeat(z + 100f, 200f) - 100f) < step * 0.5f)
                         c = Color.Lerp(c, Color.white, 0.12f);
                     if (Mathf.Abs(x) > SandboxGame.MapHalfSize || Mathf.Abs(z) > SandboxGame.MapHalfSize) c *= 0.6f;
                     c.a = 1f;
