@@ -179,7 +179,7 @@ namespace DroneSandbox
             float heading = Mathf.Repeat(d.transform.eulerAngles.y, 360f);
             var tele = Tinted(small, new Color(0.9f, 1f, 0.95f));
             var shadow = Tinted(small, new Color(0f, 0f, 0f, 0.8f));
-            string text = $"ALT {altitude:0} m   HDG {heading:000}°   HP {Mathf.CeilToInt(d.hp)}   {d.StatusTag}";
+            string text = $"ALT {altitude:0} m   HDG {heading:000}°   HP {Mathf.CeilToInt(d.hp)}   BAT {Mathf.RoundToInt(d.Battery * 100f)}%   {d.StatusTag}";
             var at = new Rect(r.x + 6f * s, r.yMax - 18f * s, r.width, 16f * s);
             GUI.Label(new Rect(at.x + 1f, at.y + 1f, at.width, at.height), text, shadow);
             GUI.Label(at, text, tele);

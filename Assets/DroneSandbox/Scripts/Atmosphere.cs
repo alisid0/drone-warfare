@@ -53,7 +53,7 @@ namespace DroneSandbox
         public static void SetUpCamera(Camera cam)
         {
             cam.nearClipPlane = 0.3f;
-            cam.farClipPlane = 16000f; // the far ridges (see Backdrop)
+            cam.farClipPlane = 80000f; // the whole 56 km world, corner to corner (see FarTerrain)
             cam.allowHDR = true;
             var data = cam.GetComponent<HDAdditionalCameraData>();
             if (data == null) data = cam.gameObject.AddComponent<HDAdditionalCameraData>();
@@ -202,7 +202,7 @@ namespace DroneSandbox
             var fog = Get<Fog>(profile);
             fog.enabled.Override(true);
             fog.colorMode.Override(FogColorMode.SkyColor);
-            fog.meanFreePath.Override(2400f);
+            fog.meanFreePath.Override(6000f); // a clear day: hills 10-20 km off still show through the haze
             fog.baseHeight.Override(0f);
             fog.maximumHeight.Override(450f);
             fog.enableVolumetricFog.Override(true);
@@ -253,7 +253,10 @@ namespace DroneSandbox
             var field = typeof(VolumetricClouds).GetField("m_CloudPreset", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             (field?.GetValue(clouds) as VolumeParameter<VolumetricClouds.CloudPresets>)?.Override(preset); // ...and makes it count
             clouds.shadows.Override(weather != Weather.Fog); // cloud shadows drifting over the ground
-            fog.meanFreePath.Override(weather == Weather.Fog ? Scale.D(110f) : weather == Weather.Rain ? 1200f : 1900f);
+            // Real cloud shadows only take 15-30% off sunlit ground (the sky still lights it): at full opacity they
+            // were near-black blotches that hid the fields' colours.
+            clouds.shadowOpacity.Override(0.4f);
+            fog.meanFreePath.Override(weather == Weather.Fog ? Scale.D(110f) : weather == Weather.Rain ? 2200f : 3800f);
             fog.maximumHeight.Override(weather == Weather.Fog ? Scale.D(60f) : 450f);
         }
 

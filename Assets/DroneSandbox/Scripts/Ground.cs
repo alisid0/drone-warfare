@@ -30,8 +30,13 @@ namespace DroneSandbox
 
         public static Terrain Current => terrain;
 
-        public static float HeightAt(Vector3 p) =>
-            terrain != null ? terrain.SampleHeight(p) + terrain.transform.position.y : 0f;
+        // Beyond the sector's terrain, in the big world, the far terrain's ground (drones fly out over it).
+        public static float HeightAt(Vector3 p)
+        {
+            if (terrain == null) return 0f;
+            if (FarTerrain.Active && (Mathf.Abs(p.x) > Size / 2f || Mathf.Abs(p.z) > Size / 2f)) return FarTerrain.SurfaceAt(new Vector2(p.x, p.z));
+            return terrain.SampleHeight(p) + terrain.transform.position.y;
+        }
 
         public static Vector3 OnGround(Vector3 p) => new Vector3(p.x, HeightAt(p), p.z);
 
@@ -51,6 +56,7 @@ namespace DroneSandbox
                 point = hit.point;
                 return true;
             }
+            if (FarTerrain.Active && FarTerrain.Raycast(ray, out point)) return true;
             var plane = new Plane(Vector3.up, Vector3.zero);
             if (plane.Raycast(ray, out float enter))
             {
@@ -67,13 +73,14 @@ namespace DroneSandbox
             sites.Clear();
             sites.AddRange(MapLayout.FlatSites);
             IndexSites();
-            worn.Clear();
+            ClearWorn();
 
             FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
             data.size = new Vector3(Size, HeightRange, Size);
             data.SetHeights(0, 0, BuildHeights());
             data.terrainLayers = BuildLayers();
+            lieHeights = BoxAverage(worldHeights, Mathf.RoundToInt(40f / (Size / (HeightRes - 1))));
             data.SetAlphamaps(0, 0, BuildSplat(data));
 
             var go = Terrain.CreateTerrainGameObject(data);
@@ -215,7 +222,39 @@ namespace DroneSandbox
         // painter and the grass can ask from any thread (the terrain's own GetSteepness is main-thread only).
         static float[,] worldHeights, steepness;
 
+        // The lie of the land: the average height within about 40 m of each heightmap point, so the painter can tell
+        // a hollow (where water gathers and the grass grows dark) from a rise. Made once per sector, before the splat.
+        static float[,] lieHeights;
+
         public static float SteepnessAt(float x, float z) => steepness != null ? Sample(steepness, new Vector2(x, z)) : 0f;
+
+        // A box average of a grid over +-radius points, from a summed-area table (one pass, any radius).
+        static float[,] BoxAverage(float[,] grid, int radius)
+        {
+            int rows = grid.GetLength(0), cols = grid.GetLength(1);
+            var sums = new double[rows + 1, cols + 1];
+            for (int z = 0; z < rows; z++)
+            {
+                double line = 0.0;
+                for (int x = 0; x < cols; x++)
+                {
+                    line += grid[z, x];
+                    sums[z + 1, x + 1] = sums[z, x + 1] + line;
+                }
+            }
+            var result = new float[rows, cols];
+            for (int z = 0; z < rows; z++)
+            {
+                int z0 = Mathf.Max(0, z - radius), z1 = Mathf.Min(rows, z + radius + 1);
+                for (int x = 0; x < cols; x++)
+                {
+                    int x0 = Mathf.Max(0, x - radius), x1 = Mathf.Min(cols, x + radius + 1);
+                    double total = sums[z1, x1] - sums[z0, x1] - sums[z1, x0] + sums[z0, x0];
+                    result[z, x] = (float)(total / ((z1 - z0) * (x1 - x0)));
+                }
+            }
+            return result;
+        }
 
         static float[,] Slopes(float[,] world, float step)
         {
@@ -475,46 +514,115 @@ namespace DroneSandbox
         // farmyard, a vegetable patch): earth along the line from `from` to `to`, `width` wide with soft, uneven
         // edges, by `strength` (1 for bare earth). Grass is planted afterwards and keeps off it (Worn); writing
         // the grass layers a second time brought back the black tussocks.
+        // Painting waits for FlushWear (World calls it after the villages), which writes every strip with one
+        // GetAlphamaps and one SetAlphamaps: each SetAlphamaps re-uploads the terrain's whole splat textures, and a
+        // village cluster's few hundred paths, one call each, queued over 5 GB in one frame and lost the GPU (hd127).
         public static void Wear(Vector2 from, Vector2 to, float width, float strength)
         {
             if (terrain == null) return;
-            var data = terrain.terrainData;
-            float reach = width * 0.5f + 1.2f;
-            worn.Add(new WornStrip { a = from, b = to, width = width, strength = strength, lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach });
-            Vector2 lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach;
+            var strip = Strip(from, to, width, strength, 2);
+            IndexWorn(strip, worn.Count);
+            worn.Add(strip);
+            pending.Add(strip);
+        }
 
+        // Paints a strip of another ground layer the same way (1, the dark damp grass, draws the hedge lines between
+        // village gardens). Grass still grows on it.
+        public static void Paint(Vector2 from, Vector2 to, float width, float strength, int layer)
+        {
+            if (terrain != null) pending.Add(Strip(from, to, width, strength, layer));
+        }
+
+        // Writes the strips Wear and Paint have collected into the terrain's layers, over the one rectangle that
+        // holds them all.
+        public static void FlushWear()
+        {
+            if (terrain == null || pending.Count == 0) return;
+            var data = terrain.terrainData;
             int res = data.alphamapResolution;
             float cell = Size / res;
+            Vector2 lo = pending[0].lo, hi = pending[0].hi;
+            foreach (var strip in pending)
+            {
+                lo = Vector2.Min(lo, strip.lo);
+                hi = Vector2.Max(hi, strip.hi);
+            }
             int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x + Size / 2f) / cell), 0, res - 1), x1 = Mathf.Clamp(Mathf.CeilToInt((hi.x + Size / 2f) / cell), 0, res - 1);
             int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y + Size / 2f) / cell), 0, res - 1), z1 = Mathf.Clamp(Mathf.CeilToInt((hi.y + Size / 2f) / cell), 0, res - 1);
-            var maps = data.GetAlphamaps(x0, z0, x1 - x0 + 1, z1 - z0 + 1);
+            int w = x1 - x0 + 1, h = z1 - z0 + 1;
+            var maps = data.GetAlphamaps(x0, z0, w, h);
             int layers = maps.GetLength(2);
-            for (int j = 0; j <= z1 - z0; j++)
+            foreach (var strip in pending)
             {
-                for (int i = 0; i <= x1 - x0; i++)
-                {
-                    var p = new Vector2(-Size / 2f + (x0 + i + 0.5f) * cell, -Size / 2f + (z0 + j + 0.5f) * cell);
-                    float wear = WearAt(p, from, to, width) * strength;
-                    if (wear <= 0f) continue;
-                    for (int k = 0; k < layers; k++) maps[j, i, k] *= 1f - wear;
-                    maps[j, i, 2] += wear; // dirt
-                }
+                int i0 = Mathf.Max(0, Mathf.FloorToInt((strip.lo.x + Size / 2f) / cell) - x0), i1 = Mathf.Min(w - 1, Mathf.CeilToInt((strip.hi.x + Size / 2f) / cell) - x0);
+                int j0 = Mathf.Max(0, Mathf.FloorToInt((strip.lo.y + Size / 2f) / cell) - z0), j1 = Mathf.Min(h - 1, Mathf.CeilToInt((strip.hi.y + Size / 2f) / cell) - z0);
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                    {
+                        var p = new Vector2(-Size / 2f + (x0 + i + 0.5f) * cell, -Size / 2f + (z0 + j + 0.5f) * cell);
+                        float wear = WearAt(p, strip.a, strip.b, strip.width) * strip.strength;
+                        if (wear <= 0f) continue;
+                        for (int k = 0; k < layers; k++) maps[j, i, k] *= 1f - wear;
+                        maps[j, i, strip.layer] += wear;
+                    }
             }
             data.SetAlphamaps(x0, z0, maps);
+            pending.Clear();
         }
 
         struct WornStrip
         {
             public Vector2 a, b, lo, hi;
             public float width, strength;
+            public int layer;
         }
-        static readonly List<WornStrip> worn = new List<WornStrip>();
+        static readonly List<WornStrip> worn = new List<WornStrip>();    // bare earth, which grass keeps off
+        static readonly List<WornStrip> pending = new List<WornStrip>(); // painted at the next FlushWear
+        // Which worn strips reach each 16 m square, so Worn looks at a handful instead of every path on the map.
+        const float WornCell = 16f;
+        static List<int>[] wornCells;
+        static int WornCellCount => Mathf.CeilToInt(Size / WornCell);
+
+        static WornStrip Strip(Vector2 from, Vector2 to, float width, float strength, int layer)
+        {
+            float reach = width * 0.5f + 1.2f;
+            return new WornStrip { a = from, b = to, width = width, strength = strength, layer = layer,
+                lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach };
+        }
+
+        static void IndexWorn(WornStrip strip, int index)
+        {
+            int n = WornCellCount;
+            wornCells ??= new List<int>[n * n];
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((strip.lo.x + Size / 2f) / WornCell), 0, n - 1), x1 = Mathf.Clamp(Mathf.FloorToInt((strip.hi.x + Size / 2f) / WornCell), 0, n - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((strip.lo.y + Size / 2f) / WornCell), 0, n - 1), z1 = Mathf.Clamp(Mathf.FloorToInt((strip.hi.y + Size / 2f) / WornCell), 0, n - 1);
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                    (wornCells[z * n + x] ??= new List<int>()).Add(index);
+        }
+
+        // Forgets the last sector's worn strips (Build, before anything wears the new one).
+        static void ClearWorn()
+        {
+            worn.Clear();
+            pending.Clear();
+            wornCells = null;
+        }
 
         // Whether Wear has worn the ground at p bare enough that no grass grows there.
         public static bool Worn(Vector2 p)
         {
-            foreach (var s in worn)
+            if (wornCells == null) return false;
+            int n = WornCellCount;
+            int x = Mathf.FloorToInt((p.x + Size / 2f) / WornCell), z = Mathf.FloorToInt((p.y + Size / 2f) / WornCell);
+            if (x < 0 || z < 0 || x >= n || z >= n) return false;
+            var near = wornCells[z * n + x];
+            if (near == null) return false;
+            foreach (int i in near)
+            {
+                var s = worn[i];
                 if (p.x >= s.lo.x && p.x <= s.hi.x && p.y >= s.lo.y && p.y <= s.hi.y && WearAt(p, s.a, s.b, s.width) * s.strength > 0.35f) return true;
+            }
             return false;
         }
 
@@ -578,21 +686,20 @@ namespace DroneSandbox
 
         // ---- Texturing ----
 
-        // Layer order: 0 grass, 1 a second grass in patches (breaks up the tiling), 2 dirt, 3 rock.
-        // The grass textures are tinted to a lush summer green.
+        // Layer order: 0 pasture, 1 damp grass, 2 dirt, 3 rock, 4 rough meadow.
+        // The tints take each photo's average colour to the ground cover of aerial photos of farmland in summer
+        // (ChatGPT's environment review): pasture (96, 118, 72), damp grass (74, 100, 70), rough uncut meadow
+        // (122, 124, 84) and bare soil (115, 99, 76). The terrain shader multiplies in linear space, so each tint is
+        // (wanted / photo average) to the power 2.2. More blue than before: the old tints made every meadow olive.
         static TerrainLayer[] BuildLayers()
         {
             return new[]
             {
-                // Both photos are brownish ground with grass through it; the tints make the meadow a sunlit summer
-                // green and the lush grass (in damp hollows, by woods and water) a deeper, bluer green, so from the
-                // game camera, where the texture is a blur, the two read as the light and dark of a real meadow.
-                // The dry grass is the meadow photo again, tinted to the pale olive of grass on high, thin ground.
-                Layer("meadow", "meadow", 7f, new Color(0.45f, 0.76f, 0.37f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
-                Layer("lush", "lush", 6f, new Color(0.25f, 0.57f, 0.27f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
-                Layer("dirt", "dirt", 5f, Color.white, new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
+                Layer("meadow", "meadow", 7f, new Color(0.40f, 0.74f, 0.57f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
+                Layer("lush", "lush", 6f, new Color(0.21f, 0.55f, 0.59f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
+                Layer("dirt", "dirt", 5f, new Color(1.2f, 1.23f, 1.28f), new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
                 Layer("rock", "rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
-                Layer("dry", "meadow", 8f, new Color(0.66f, 0.66f, 0.38f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
+                Layer("dry", "meadow", 8f, new Color(0.68f, 0.83f, 0.80f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
             };
         }
 
@@ -720,27 +827,31 @@ namespace DroneSandbox
                     }
                     // A few worn patches.
                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
-                    // Light and dark grass in big drifts, smaller patches and a fine mottle, so from above a meadow
-                    // has the uneven colour of real grass, and deeper green in the damp along the river and the lake.
+                    // Ground cover with a reason, as aerial photos show it. How wet the ground lies decides it: damp
+                    // grass along the river and the lake and in hollows, pale rough grass on higher, drier ground,
+                    // pasture between. Broad drifts (80 m and 25 m across) and a fine one (12 m) move it a little either
+                    // way, so a meadow varies by about 10 RGB levels instead of breaking into dark blotches.
+                    var here = new Vector2(x, z);
                     float damp = Mathf.Max(1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw) / 16f), 1f - Mathf.SmoothStep(0f, 1f, lake / 14f));
-                    float patches = Mathf.PerlinNoise(x * 0.012f + 70f, z * 0.012f + 20f) * 0.55f
-                        + Mathf.PerlinNoise(x * 0.045f + 9f, z * 0.045f + 4f) * 0.3f + Mathf.PerlinNoise(x * 0.2f + 31f, z * 0.2f + 17f) * 0.15f;
-                    float variation = Mathf.Max(Mathf.SmoothStep(0f, 1f, (patches - 0.42f) * 3.5f), damp * 0.85f);
-                    // A verge of rank, darker grass round each field, where the plough doesn't reach.
-                    if (MapLayout.InField(new Vector2(x, z), 2.2f) && !MapLayout.InField(new Vector2(x, z), 0f)) variation = Mathf.Max(variation, 0.9f);
+                    float hollow = Mathf.SmoothStep(0f, 1f, (Sample(lieHeights, here) - Sample(worldHeights, here) - 0.3f) / 1.6f);
+                    float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, here) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
+                    float drift = Mathf.PerlinNoise(x * 0.0125f + 70f, z * 0.0125f + 20f) * 0.65f + Mathf.PerlinNoise(x * 0.04f + 9f, z * 0.04f + 4f) * 0.35f;
+                    float wetness = 0.5f + 0.6f * hollow - 0.45f * high - 0.7f * (drift - 0.5f)
+                                  + 0.16f * (Mathf.PerlinNoise(x * 0.08f + 31f, z * 0.08f + 17f) - 0.5f);
+                    wetness = Mathf.Max(Mathf.Clamp01(wetness), damp);
+                    float wet = 0.8f * Mathf.SmoothStep(0f, 1f, (wetness - 0.55f) / 0.4f);
+                    float rough = 0.55f * Mathf.SmoothStep(0f, 1f, (0.45f - wetness) / 0.4f);
+                    // An uncut margin round each field, where the plough doesn't reach: a paler line that separates
+                    // neighbouring fields from the air.
+                    if (MapLayout.InField(here, 2.2f) && !MapLayout.InField(here, 0f)) rough = Mathf.Max(rough, 0.85f);
                     // And along the roads, in stretches: long uncut grass a couple of metres wide each side.
                     float verge = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRoad - laneHw - 1.6f) / 1.4f);
-                    if (verge > 0f) variation = Mathf.Max(variation, 0.8f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
-                    // Regions with a reason, as aerial photos show them: grass thin and pale on the higher, drier
-                    // ground and in broad drifts of old pasture, never in the damp by water.
-                    float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, new Vector2(x, z)) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
-                    float region = Mathf.PerlinNoise(x * 0.011f + 120f, z * 0.011f + 60f) * 0.7f + Mathf.PerlinNoise(x * 0.09f + 3f, z * 0.09f + 77f) * 0.3f;
-                    float dry = Mathf.SmoothStep(0f, 1f, (region + 0.3f * high - 0.56f) * 5f) * (1f - damp);
+                    if (verge > 0f) rough = Mathf.Max(rough, 0.75f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
 
                     // Each layer covers the ones before it.
-                    float w3 = rock, w2 = dirt * (1f - rock), w1 = variation * (1f - rock) * (1f - dirt);
-                    float w4 = dry * (1f - rock) * (1f - dirt) * (1f - variation);
-                    float w0 = (1f - rock) * (1f - dirt) * (1f - variation) * (1f - dry);
+                    float w3 = rock, w2 = dirt * (1f - rock), w1 = wet * (1f - rock) * (1f - dirt);
+                    float w4 = rough * (1f - rock) * (1f - dirt) * (1f - wet);
+                    float w0 = (1f - rock) * (1f - dirt) * (1f - wet) * (1f - rough);
                     float sum = w0 + w1 + w2 + w3 + w4;
                     splat[zi, xi, 0] = w0 / sum;
                     splat[zi, xi, 1] = w1 / sum;

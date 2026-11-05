@@ -112,16 +112,22 @@ namespace DroneSandbox.EditorTools
             if (!AssetDatabase.IsValidFolder(Root + "/Materials")) AssetDatabase.CreateFolder(Root, "Materials");
         }
 
-        // HDRP's terrain shader. The keyword turns on the layers' normal maps, which the terrain inspector would
-        // set in the editor but a terrain built in a player never does.
+        // HDRP's terrain shader. The keywords turn on the layers' normal maps and layers 5-8, which the terrain
+        // inspector would set in the editor but a terrain built in a player never does. Without the second, the fifth
+        // layer (rough grass) was simply left out, and wherever it lay the ground went near black: the dark
+        // blotches in the meadows.
         static void CreateTerrainMaterial()
         {
             var shader = Shader.Find("HDRP/TerrainLit");
             if (shader == null) return;
             EnsureMaterialsFolder();
             var material = HdrpSetup.LoadOrCreate(Root + "/Materials/TerrainLit.mat", shader);
-            material.EnableKeyword("_NORMALMAP");
             HdrpSetup.Finish(material, instancing: false);
+            // After Finish: HDRP's validation resets every keyword it doesn't drive itself, so set before it they
+            // never reached the saved material (it had none at all).
+            material.EnableKeyword("_NORMALMAP");
+            material.EnableKeyword("_TERRAIN_8_LAYERS");
+            EditorUtility.SetDirty(material);
         }
 
         // Saves the post-processing grade as an asset. URP strips post-processing shader variants that no saved
@@ -1009,11 +1015,15 @@ namespace DroneSandbox.EditorTools
             ("LeavesPoplar", "leaves_poplar", new Color(0.82f, 0.82f, 0.82f)),
             ("LeavesSpruce", "leaves_spruce", new Color(0.82f, 0.82f, 0.82f)),
             ("LeavesPine", "leaves_pine", new Color(0.82f, 0.82f, 0.82f)),
-            ("ImpostorOak", "impostor_oak", new Color(0.82f, 0.82f, 0.82f)),
-            ("ImpostorBirch", "impostor_birch", new Color(0.82f, 0.82f, 0.82f)),
-            ("ImpostorPoplar", "impostor_poplar", new Color(0.82f, 0.82f, 0.82f)),
-            ("ImpostorSpruce", "impostor_spruce", new Color(0.82f, 0.82f, 0.82f)),
-            ("ImpostorPine", "impostor_pine", new Color(0.82f, 0.82f, 0.82f)),
+            // The billboard pictures came out of Blender greyer and bluer than the leaves they stand for (the oak's
+            // average is (100, 115, 85) against its leaves' (98, 120, 66)), so far woods read pale grey. Each tint
+            // takes the picture's average back to its own leaves' (0.82 x leaves / picture per channel: SetColor
+            // takes the tint as sRGB, like the pictures).
+            ("ImpostorOak", "impostor_oak", new Color(0.80f, 0.86f, 0.64f)),
+            ("ImpostorBirch", "impostor_birch", new Color(0.82f, 0.85f, 0.63f)),
+            ("ImpostorPoplar", "impostor_poplar", new Color(0.86f, 0.89f, 0.69f)),
+            ("ImpostorSpruce", "impostor_spruce", new Color(0.74f, 0.84f, 0.69f)),
+            ("ImpostorPine", "impostor_pine", new Color(0.82f, 0.86f, 0.72f)),
         };
 
         // Alpha-cut, double-sided materials for the leaf cards.

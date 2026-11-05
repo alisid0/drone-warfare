@@ -579,13 +579,13 @@ namespace DroneSandbox
                 {
                     int i = options[rng.Next(options.Count)];
                     place = (plan.farmsteads[i] ? "at " : "in ") + plan.villageNames[i];
-                    // Just outside the houses, on open ground.
+                    // Just outside the houses and gardens (the village runs along its street), on open ground.
                     Vector2 v = plan.villages[i];
                     for (int attempt = 0; attempt < 30; attempt++)
                     {
                         float a = R(0f, Mathf.PI * 2f);
-                        Vector2 p = v + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * R(MapLayout.VillageRadius + 4f, MapLayout.VillageRadius + 18f);
-                        if (OpenGround(p, 6f)) return p;
+                        Vector2 p = v + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * R(MapLayout.VillageReach + 6f, MapLayout.VillageReach + 30f);
+                        if (OpenGround(p, 6f) && !MapLayout.NearVillage(p, 4f)) return p;
                     }
                     return v;
                 }

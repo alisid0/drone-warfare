@@ -88,6 +88,9 @@ namespace DroneSandbox
         public const float FieldScale = 2f;
         public const float RoadHalfWidth = 2f, RailHalfWidth = 2f;
         public const float VillageRadius = 45f;
+        // How far a village's plots reach back from its streets: the road, a 4-10 m front garden, the house and a
+        // garden behind it, 30-65 m in all.
+        public const float VillageReach = 55f;
         public static readonly float Edge = Ground.Size / 2f - 15f; // keep fields and scenery inside the terrain
         const float Far = 100000f;
 
@@ -101,6 +104,7 @@ namespace DroneSandbox
         {
             plan = sector;
             prepared = false;
+            VillageField = null; // the last sector's streets
         }
 
         public static float RiverHalfWidth => Plan.riverHalfWidth;
@@ -173,6 +177,8 @@ namespace DroneSandbox
             foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
             Wander(RoadLines);
             Lap("roads");
+            PlanVillages();
+            Lap("villages");
             RailLines = new List<List<Vector2>>();
             foreach (var rail in p.railways) RailLines.Add(Smooth(rail, 2f));
             RoadField = new PathField(RoadLines, 12f, Ground.Size);
@@ -280,6 +286,135 @@ namespace DroneSandbox
             return tracks;
         }
 
+        // ---- Villages ----
+
+        // Each village's streets: the stretch of its road it lines (250-450 m, cut short by water, a bridge, a site,
+        // the map's edge or the next village) and one to three lanes off it, 70-140 m long. The lanes join the roads,
+        // so the terrain wears them and every builder keeps off them. A farmstead, or a village off the roads, keeps
+        // just its yard. Their own random numbers, so the rest of the map comes out as before.
+        public static readonly List<List<Vector2>> VillageStreets = new List<List<Vector2>>();
+        public static readonly List<int> VillageOfStreet = new List<int>(); // which village each street belongs to
+        public static PathField VillageField { get; private set; }
+
+        static void PlanVillages()
+        {
+            VillageStreets.Clear();
+            VillageOfStreet.Clear();
+            VillageField = null;
+            var villages = Plan.villages;
+            var lanes = new List<List<Vector2>>();
+            for (int v = 0; v < villages.Count; v++)
+            {
+                Vector2 center = villages[v];
+                int road = -1, nearest = -1;
+                float best = float.MaxValue;
+                for (int k = 0; k < RoadLines.Count; k++)
+                    for (int i = 0; i < RoadLines[k].Count; i++)
+                    {
+                        float d = (RoadLines[k][i] - center).sqrMagnitude;
+                        if (d < best) { best = d; road = k; nearest = i; }
+                    }
+                if (Plan.farmsteads[v])
+                {
+                    VillageStreets.Add(new List<Vector2> { center, center + new Vector2(0.5f, 0f) });
+                    VillageOfStreet.Add(v);
+                    continue;
+                }
+                var rng = new System.Random(Plan.fieldSeed * 7919 + v * 104729);
+                List<Vector2> street;
+                if (road < 0 || best > 30f * 30f)
+                {
+                    // Off the roads: a lane of its own, 80 m through the centre.
+                    float angle = Range(rng, 0f, Mathf.PI);
+                    Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                    street = new List<Vector2>();
+                    for (float t = -40f; t <= 40f; t += 2f) street.Add(center + dir * t);
+                    lanes.Add(street);
+                    road = -1;
+                }
+                else
+                {
+                    var line = RoadLines[road];
+                    int first = StreetEnd(line, nearest, -1, Range(rng, 125f, 225f), v);
+                    int last = StreetEnd(line, nearest, 1, Range(rng, 125f, 225f), v);
+                    street = line.GetRange(first, last - first + 1);
+                    if (street.Count < 2) street.Add(street[0] + new Vector2(0.5f, 0f));
+                }
+                VillageStreets.Add(street);
+                VillageOfStreet.Add(v);
+
+                // Lanes leave the middle of the street at about a right angle, on either side, bending a little.
+                int count = 1 + rng.Next(3);
+                for (int l = 0; l < count && street.Count > 20; l++)
+                {
+                    int at = Mathf.RoundToInt(Mathf.Lerp(0.2f, 0.8f, (l + 0.5f + Range(rng, -0.3f, 0.3f)) / count) * (street.Count - 1));
+                    Vector2 dir = (street[Mathf.Min(at + 1, street.Count - 1)] - street[Mathf.Max(at - 1, 0)]).normalized;
+                    float side = rng.NextDouble() < 0.5 ? 1f : -1f;
+                    Vector2 heading = Rotate(new Vector2(-dir.y, dir.x) * side, Range(rng, -15f, 15f) * Mathf.Deg2Rad);
+                    float length = Range(rng, 70f, 140f), bend = Range(rng, -0.3f, 0.3f);
+                    var lane = new List<Vector2> { street[at] };
+                    for (float walked = 2f; walked <= length; walked += 2f)
+                    {
+                        heading = Rotate(heading, bend * 2f / length);
+                        Vector2 q = lane[lane.Count - 1] + heading * 2f;
+                        if (StreetBlocked(q, v) || (walked > 12f && NearOtherRoad(q, road, 16f))) break;
+                        lane.Add(q);
+                    }
+                    if (lane.Count < 20) continue; // under 40 m: not worth a lane
+                    lanes.Add(lane);
+                    VillageStreets.Add(lane);
+                    VillageOfStreet.Add(v);
+                    Junctions.Add(lane[0]);
+                }
+            }
+            RoadLines.AddRange(lanes); // after the sector's own roads, whose numbers the missions use
+            VillageField = new PathField(VillageStreets, VillageReach + 45f, Ground.Size);
+        }
+
+        // The last point a street reaches walking from `from` along the road (step +1 or -1), up to `length` metres.
+        // The first 40 m always count: that's the village's own core, which the old 45 m villages kept, even by a
+        // bridge or the water.
+        static int StreetEnd(List<Vector2> line, int from, int step, float length, int village)
+        {
+            int i = from;
+            float walked = 0f;
+            while (i + step >= 0 && i + step < line.Count)
+            {
+                Vector2 q = line[i + step];
+                walked += Vector2.Distance(line[i], q);
+                if (walked > length || (walked > 40f && StreetBlocked(q, village))) break;
+                i += step;
+            }
+            return i;
+        }
+
+        // Where a village's houses can't go: by water, a bridge or the dam, on a works site, close to a flat site (the
+        // base, the HQ, emplacements), near the map's edge or another village's centre.
+        static bool StreetBlocked(Vector2 q, int village)
+        {
+            if (Mathf.Abs(q.x) > Edge - 30f || Mathf.Abs(q.y) > Edge - 30f) return true;
+            if (LakeDistance(q.x, q.y) < 12f || (HasRiver && RiverField.Distance(q.x, q.y) < RiverHalfWidth + 12f)) return true;
+            if (NearDam(q, 30f) || InGorge(q, 20f) || OnWorks(q, 20f) || NearFlatSite(q, 30f)) return true;
+            foreach (var b in Plan.bridges)
+                if (Vector2.Distance(q, b) < 30f) return true;
+            for (int u = 0; u < Plan.villages.Count; u++)
+                if (u != village && Vector2.Distance(q, Plan.villages[u]) < 2f * VillageReach + 20f) return true;
+            return false;
+        }
+
+        // Whether a road other than `own` passes within `distance` of q (RoadField isn't built yet).
+        static bool NearOtherRoad(Vector2 q, int own, float distance)
+        {
+            float limit = distance * distance;
+            for (int k = 0; k < RoadLines.Count; k++)
+            {
+                if (k == own) continue;
+                foreach (var r in RoadLines[k])
+                    if ((r - q).sqrMagnitude < limit) return true;
+            }
+            return false;
+        }
+
         // ---- Questions the builders ask ----
 
         // How much of the farmed valley floor (the middle 1250 m square, less water, villages and sites) is under
@@ -307,8 +442,11 @@ namespace DroneSandbox
             return false;
         }
 
+        // Within margin of a village's houses and gardens: the strip either side of its streets once they're planned
+        // (fields, woods and scrub keep out of it), the old circle round its centre before.
         public static bool NearVillage(Vector2 p, float margin)
         {
+            if (VillageField != null) return VillageField.Distance(p.x, p.y) < VillageReach + margin;
             foreach (var v in Plan.villages)
                 if (Vector2.Distance(p, v) < VillageRadius + margin) return true;
             return false;

@@ -41,12 +41,24 @@ namespace DroneSandbox
         bool returning;    // a bomber out of bombs (or a Strike drone out of missiles), on its way home
         float rearmTimer;  // a bomber loading up over its pad
         Vector3 homePad;
+        bool lowBattery;   // turned back to charge: the flight home needed what was left
+
+        // How long the drone can stay up (seconds) and how long it has been flying since it last charged: 18 min for a
+        // Scout, 22 for a Strike drone, 14 for a Kamikaze and 50 for the Nightjar (ChatGPT's figures for the big
+        // world). Flying away from the base drains it; hovering over a pad charges it again in a minute. It turns
+        // back on its own when the flight home needs what's left (with a fifth in hand), and if it runs dry it falls.
+        public float Endurance { get; private set; }
+        public float Flown { get; private set; }
+        public float Battery => Endurance > 0f ? Mathf.Clamp01(1f - Flown / Endurance) : 1f;
+        const float ChargeSeconds = 60f;
+        const float TransitAltitude = 90f; // metres above the ground on long flights outside the battle area
 
         public bool IsKamikaze => type == DroneType.Kamikaze;
         public bool IsBomber => type == DroneType.Bomber;
         public int BombsLeft { get; private set; }
         public int MissilesLeft { get; private set; }
         bool OutOfAmmo => (IsBomber && BombsLeft == 0) || (type == DroneType.Strike && MissilesLeft == 0);
+        bool GoingHome => OutOfAmmo || lowBattery;
         float RearmTime => (IsBomber ? RearmSeconds : 10f) * Theatre.RearmFactor; // the campaign's forward strips shorten it
         public Unit AttackTarget => attackTarget;
         public Vector3? MoveTarget => moveTarget;
@@ -79,7 +91,7 @@ namespace DroneSandbox
             get
             {
                 if (IsJammed) return "JAMMED";
-                if (OutOfAmmo) return returning ? "RETURNING" : "REARMING";
+                if (GoingHome) return returning ? "RETURNING" : "REARMING";
                 if (UnderFire) return "UNDER FIRE";
                 if (Holding) return $"SYNC  T-{Mathf.CeilToInt(StrikeAt - Time.time)}";
                 if (attackTarget != null) return IsKamikaze ? "DIVING" : IsBomber ? "BOMBING" : "ATTACKING";
@@ -96,6 +108,7 @@ namespace DroneSandbox
             get
             {
                 if (IsJammed) return "Jammed: link lost";
+                if (lowBattery) return returning ? "Battery low: flying home" : $"Charging ({Mathf.RoundToInt(Battery * 100f)}%)";
                 if (OutOfAmmo) return returning ? "Returning to rearm" : $"Rearming ({Mathf.CeilToInt(rearmTimer)} s)";
                 string fire = UnderFire ? "Under fire - " : "";
                 string queued = waypoints.Count > 0 ? $" (+{waypoints.Count} queued)" : "";
@@ -162,6 +175,7 @@ namespace DroneSandbox
             speed *= Scale.Speed;
             altitude *= Scale.Distance;
             weaponRange *= Scale.Distance;
+            Endurance = 60f * (droneType == DroneType.Scout ? 18f : droneType == DroneType.Strike ? 22f : droneType == DroneType.Kamikaze ? 14f : 50f);
 
             // Upgrades from the tech shop.
             if (Tech.Active(TechId.Armour)) maxHp *= Tech.ArmourBonus;
@@ -270,7 +284,7 @@ namespace DroneSandbox
         // ---- Orders ----
 
         // A bomber out of bombs ignores orders until it has rearmed.
-        bool BusyRearming => OutOfAmmo;
+        bool BusyRearming => GoingHome;
 
         // A move order. queue adds it after the moves already given (Shift); attackMove engages anything that
         // comes in range on the way (Ctrl), then carries on.
@@ -336,6 +350,7 @@ namespace DroneSandbox
             fireCooldown -= dt;
 
             if (attackTarget != null && !attackTarget.IsAlive) attackTarget = null;
+            if (!UpdateBattery(dt)) return;
             if (BusyRearming)
             {
                 Rearm(dt);
@@ -495,8 +510,18 @@ namespace DroneSandbox
         // Its cruise altitude over the ground, and at least 2.5 m over any tree tops below it or ahead (Canopy).
         float CruiseHeight(Vector3 destination)
         {
-            float overGround = Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)) + altitude;
-            Vector3 ahead = transform.position + Vector3.ClampMagnitude(new Vector3(velocity.x, 0f, velocity.z) * 1.2f, 12f * Scale.Speed);
+            // The ground here, at the destination, and where the drone will be in 2 and 5 s, so on a long flight
+            // over the big world it climbs before a hill instead of into it.
+            Vector3 flat = new Vector3(velocity.x, 0f, velocity.z);
+            float ground = Mathf.Max(Mathf.Max(Ground.HeightAt(destination), Ground.HeightAt(transform.position)),
+                Mathf.Max(Ground.HeightAt(transform.position + flat * 2f), Ground.HeightAt(transform.position + flat * 5f)));
+            // Out past the battle area, in the big world, it cruises higher, as a drone in transit does: the ground
+            // out there rises and falls far more than the look-ahead covers at 4x.
+            float half = SandboxGame.MapHalfSize + Scale.D(40f);
+            bool transit = Mathf.Abs(transform.position.x) > half || Mathf.Abs(transform.position.z) > half
+                        || Mathf.Abs(destination.x) > half || Mathf.Abs(destination.z) > half;
+            float overGround = ground + (transit ? Mathf.Max(altitude, TransitAltitude) : altitude);
+            Vector3 ahead = transform.position + Vector3.ClampMagnitude(flat * 1.2f, 12f * Scale.Speed);
             float trees = Mathf.Max(Canopy.TopNear(transform.position, 5f), Canopy.TopNear(ahead, 5f));
             return Mathf.Max(overGround, trees + 2.5f);
         }
@@ -535,13 +560,38 @@ namespace DroneSandbox
             }
             rearmTimer -= dt;
             Fly(pad + Vector3.up * 1.6f, false, dt);
-            if (rearmTimer > 0f) return;
+            if (rearmTimer > 0f || (lowBattery && Flown > 0f)) return;
+            lowBattery = false;
             if (IsBomber)
             {
                 BombsLeft = BomberLoad;
                 foreach (var bomb in bombModels) bomb.SetActive(true);
             }
-            else MissilesLeft = StrikeLoad;
+            else if (type == DroneType.Strike) MissilesLeft = StrikeLoad;
+        }
+
+        // The battery, every frame: drains while the drone is out, charges over the base, turns it home in time
+        // (not a Kamikaze: it isn't coming back), and brings it down if it's empty. False once it has fallen.
+        bool UpdateBattery(float dt)
+        {
+            Vector3 home = SandboxGame.Instance.basePosition;
+            float fromHome = Vector2.Distance(new Vector2(transform.position.x, transform.position.z), new Vector2(home.x, home.z));
+            if (fromHome > Scale.D(25f)) Flown += dt;
+            else Flown = Mathf.Max(0f, Flown - dt * Endurance / ChargeSeconds);
+            if (Flown >= Endurance)
+            {
+                SandboxGame.Instance.ShowMessage($"{unitName} ran out of battery and came down");
+                TakeDamage(maxHp * 10f);
+                return false;
+            }
+            float left = Endurance - Flown;
+            if (!IsKamikaze && !lowBattery && left < fromHome / speed * 1.2f + 15f)
+            {
+                lowBattery = true;
+                GoRearm();
+                SandboxGame.Instance.ShowMessage($"{unitName} turning back: battery for the flight home ({Mathf.RoundToInt(Battery * 100f)}%)");
+            }
+            return true;
         }
 
         void DropBomb()

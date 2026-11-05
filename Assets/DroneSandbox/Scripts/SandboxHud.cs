@@ -476,7 +476,7 @@ namespace DroneSandbox
                 var d = sel[0];
                 string bombs = d.IsBomber ? $"     Bombs {d.BombsLeft}/{Drone.BomberLoad}"
                     : d.type == DroneType.Strike ? $"     Missiles {d.MissilesLeft}/{Drone.StrikeLoad}" : "";
-                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP{bombs}", label);
+                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP{bombs}     Battery {Mathf.RoundToInt(d.Battery * 100f)}%", label);
                 // Hull as a bar under the name, and what it's doing, red when it's in trouble.
                 Fill(new Rect(x, y - 4f * s, r.width - 20f * s, 3f * s), new Color(0f, 0f, 0f, 0.5f));
                 Fill(new Rect(x, y - 4f * s, (r.width - 20f * s) * Mathf.Clamp01(d.hp / d.maxHp), 3f * s), d.UnderFire ? Amber : Teal);

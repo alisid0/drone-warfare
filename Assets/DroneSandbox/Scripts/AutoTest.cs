@@ -277,6 +277,7 @@ namespace DroneSandbox
             yield return PlayMissions(game, rts);
             yield return CampaignToVictory(game);
             yield return QualityCheck(game, rts);
+            yield return WorldCheck(game, rts);
             yield return WildlifeShots(game, rts);
             yield return HuntMission(game, rts, false);
             yield return HuntMission(game, rts, true);
@@ -629,6 +630,57 @@ namespace DroneSandbox
             log.WriteLine($"Graphics quality: High {fps[2]:F0} fps, Medium {fps[1]:F0} fps, Low {fps[0]:F0} fps over the sandbox's wide view");
             Settings.Quality = 2;
         }
+
+        // The big world round the sector: the wide view from 9 km back (and its fps) and the horizon from 2.5 km, then
+        // a Scout flown 5 km out over the far terrain, away from the enemy, at 4x. Its height above the ground there
+        // has to stay positive all the way.
+        IEnumerator WorldCheck(SandboxGame game, RtsController rts)
+        {
+            game.StartSandbox();
+            log.WriteLine($"World: {WorldPlan.Size / 1000f:F0} km square, seed {WorldPlan.Seed}, ready {WorldPlan.Ready}, far terrain {FarTerrain.Active}, " +
+                          $"sector at ({FarTerrain.Origin.x:F0}, {FarTerrain.Origin.y:F0}), {WorldPlan.Rivers.Count} rivers, {WorldPlan.Roads.Count} roads, " +
+                          $"{WorldPlan.Settlements.Count} settlements, {WorldPlan.Sites.Count} sites; build ms: {World.Timings}");
+            if (!FarTerrain.Active)
+            {
+                errors++;
+                yield break;
+            }
+            rts.LookAt(Vector3.zero, 9000f, 35f);
+            yield return new WaitForSecondsRealtime(2.5f);
+            int frames = Time.frameCount;
+            float start = Time.realtimeSinceStartup;
+            yield return new WaitForSecondsRealtime(2f);
+            float wideFps = (Time.frameCount - frames) / (Time.realtimeSinceStartup - start);
+            yield return Shot("80_world_wide");
+            rts.LookAt(new Vector3(1200f, 0f, 400f), 2500f, 60f);
+            yield return new WaitForSecondsRealtime(1.5f);
+            yield return Shot("81_world_horizon");
+
+            var scout = game.SpawnDrone(DroneType.Scout);
+            Vector3 away = game.basePosition - game.enemyHqPosition;
+            away.y = 0f;
+            Vector3 target = game.basePosition + away.normalized * 6000f;
+            if (scout != null) scout.MoveTo(target);
+            Time.timeScale = 4f;
+            float lowest = float.MaxValue, flown = 0f;
+            for (float t = 0f; t < 300f && scout != null && scout.IsAlive; t += 0.5f)
+            {
+                flown = Vector3.Distance(Flat(scout.transform.position), Flat(game.basePosition));
+                if (flown > 5000f) break;
+                if (flown > 200f) lowest = Mathf.Min(lowest, scout.transform.position.y - Ground.HeightAt(scout.transform.position));
+                if (t % 10f < 0.5f) rts.LookAt(scout.transform.position, 900f, 30f);
+                yield return new WaitForSeconds(0.5f);
+            }
+            Time.timeScale = 1f;
+            if (scout != null) rts.LookAt(scout.transform.position, 700f, 30f);
+            yield return new WaitForSecondsRealtime(1.5f);
+            yield return Shot("82_world_drone_out");
+            log.WriteLine($"World flight: wide view {wideFps:F0} fps; Scout alive {scout != null && scout.IsAlive}, flew {flown:F0} m from base, " +
+                          $"lowest {lowest:F1} m above the ground, ground there {(scout != null ? Ground.HeightAt(scout.transform.position) : 0f):F0} m");
+            if (scout == null || !scout.IsAlive || flown < 5000f || lowest < 2f) errors++;
+        }
+
+        static Vector3 Flat(Vector3 p) => new Vector3(p.x, 0f, p.z);
 
         // Mimic: crows and spy robots over the sandbox, from close by and from the game camera; then the hunt, played
         // by a bot that knows only what the drone's camera shows: it shadows a crow for 20 s (which must stay merely

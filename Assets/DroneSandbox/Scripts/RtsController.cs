@@ -25,6 +25,7 @@ namespace DroneSandbox
         // view brought over (Scale.Camera), at the narrower lens.
         public const float MinZoom = 25f;
         public static readonly float MaxZoom = 110f * Scale.Camera;
+        public const float WorldZoom = 12000f; // how far the view pulls back in the big world, to see a good part of it
         bool orbiting;
         Drone following;          // double-clicked: the camera keeps it in the middle until you pan
         Drone lastClicked;
@@ -97,9 +98,19 @@ namespace DroneSandbox
             if (following != null && following.IsAlive)
                 focus = Vector3.Lerp(focus, following.transform.position, 1f - Mathf.Exp(-6f * dt));
             focus += Quaternion.Euler(0f, yaw, 0f) * Vector3.ClampMagnitude(pan, 1f) * distance * 0.9f * dt;
-            float limit = SandboxGame.MapHalfSize;
-            focus.x = Mathf.Clamp(focus.x, -limit, limit);
-            focus.z = Mathf.Clamp(focus.z, -limit, limit);
+            if (FarTerrain.Active)
+            {
+                // In the big world the view can go anywhere in its 56 km.
+                Vector2 o = FarTerrain.Origin;
+                focus.x = Mathf.Clamp(focus.x, -WorldPlan.Half - o.x, WorldPlan.Half - o.x);
+                focus.z = Mathf.Clamp(focus.z, -WorldPlan.Half - o.y, WorldPlan.Half - o.y);
+            }
+            else
+            {
+                float limit = SandboxGame.MapHalfSize;
+                focus.x = Mathf.Clamp(focus.x, -limit, limit);
+                focus.z = Mathf.Clamp(focus.z, -limit, limit);
+            }
             focus.y = Mathf.Lerp(focus.y, Ground.HeightAt(focus), 1f - Mathf.Exp(-5f * dt)); // glide over hills
 
             if (GameInput.Held(GameKey.RotateLeft)) yaw += 90f * dt;
@@ -111,7 +122,7 @@ namespace DroneSandbox
             if (feed != null) feed.Inspecting = inspecting;
             if (inspecting && scroll != 0f) feed.Zoom = Mathf.Clamp(feed.Zoom * (scroll > 0f ? 1.2f : 1f / 1.2f), 1f, 3f); // the wheel zooms the drone's camera
             else if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
-                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), MinZoom, MaxZoom);
+                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), MinZoom, FarTerrain.Active ? WorldZoom : MaxZoom);
             distance = Mathf.Lerp(distance, zoomTarget, 1f - Mathf.Exp(-dt / 0.15f)); // eased over about 0.15 s
 
             ApplyCamera();
@@ -124,6 +135,7 @@ namespace DroneSandbox
         {
             // Look more steeply down when zoomed out, flatter when zoomed in.
             float pitch = Mathf.Lerp(42f, 64f, Mathf.InverseLerp(15f * Scale.Camera, MaxZoom, distance));
+            if (distance > MaxZoom) pitch = Mathf.Lerp(64f, 72f, Mathf.InverseLerp(MaxZoom, WorldZoom, distance)); // the wide view looks further down
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Cam.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             Cam.transform.rotation = rotation;

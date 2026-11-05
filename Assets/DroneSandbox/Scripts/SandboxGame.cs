@@ -167,6 +167,7 @@ namespace DroneSandbox
             yield return null; // let the HUD show "loading" first
             yield return null;
             var plan = hotspot.Plan();
+            FarTerrain.SetOrigin(FarTerrain.SpotFor(hotspot.mapPosition)); // its place in the big world
             LoadSector(plan);
             var mission = Situations.Generate(MapLayout.Plan, hotspot.situation, hotspot.seed, hotspot.daylight);
             Loading = false;
@@ -175,8 +176,12 @@ namespace DroneSandbox
 
         public void StartMission(int index)
         {
-            // The Asset Hunt missions are set in the Varrow Valley.
-            if (MapLayout.Plan.kind != SectorKind.VarrowValley) LoadSector(SectorPlan.Varrow());
+            // The Asset Hunt missions are set in the Varrow Valley, at the middle of the big world.
+            if (MapLayout.Plan.kind != SectorKind.VarrowValley)
+            {
+                FarTerrain.SetOrigin(Vector2.zero);
+                LoadSector(SectorPlan.Varrow());
+            }
             Begin(Missions.All[index], index, null);
         }
 

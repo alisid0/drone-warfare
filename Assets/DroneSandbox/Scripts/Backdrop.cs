@@ -42,7 +42,12 @@ namespace DroneSandbox
             var vertices = new List<Vector3>();
             var uvs = new List<Vector2>();
             var triangles = new List<int>();
-            int rings = Steps.Length;
+            // In the big world the ring only joins the sector to the far terrain, over its first 1.5 km, on the
+            // world's own heights; without it, it's the whole horizon.
+            bool world = FarTerrain.Active;
+            float reach = world ? FarTerrain.NearReach : Reach;
+            int rings = 0;
+            while (rings < Steps.Length && Steps[rings] <= reach + 0.01f) rings++;
             for (int s = 0; s < Segments; s++)
             {
                 float a = s * Mathf.PI * 2f / Segments;
@@ -55,7 +60,7 @@ namespace DroneSandbox
                 {
                     Vector2 p = start + dir * Steps[r];
                     float blend = Mathf.SmoothStep(0f, 1f, Steps[r] / 400f);
-                    float h = Mathf.Lerp(edgeHeight, Hills(p, Steps[r]), blend);
+                    float h = world ? FarTerrain.SurfaceAt(p) : Mathf.Lerp(edgeHeight, Hills(p, Steps[r]), blend);
                     if (r > 0) h -= 0.3f; // tucked just under the terrain's edge
                     vertices.Add(new Vector3(p.x, h, p.y));
                     uvs.Add(p);
@@ -90,11 +95,21 @@ namespace DroneSandbox
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             var material = Art.NewMaterial(Color.white);
             builtMaterial = material;
-            var texture = Resources.Load<Texture2D>("Textures/Patchwork");
-            if (texture == null) texture = builtTexture = Patchwork();
-            material.mainTexture = texture;
-            material.mainTextureScale = Vector2.one / TextureSpan;
-            material.mainTextureOffset = Vector2.one * 0.5f;
+            if (world)
+            {
+                // The world's own picture, lined up with the far terrain's.
+                material.mainTexture = FarTerrain.WorldTexture;
+                material.mainTextureScale = Vector2.one / WorldPlan.Size;
+                material.mainTextureOffset = (FarTerrain.Origin + Vector2.one * WorldPlan.Half) / WorldPlan.Size;
+            }
+            else
+            {
+                var texture = Resources.Load<Texture2D>("Textures/Patchwork");
+                if (texture == null) texture = builtTexture = Patchwork();
+                material.mainTexture = texture;
+                material.mainTextureScale = Vector2.one / TextureSpan;
+                material.mainTextureOffset = Vector2.one * 0.5f;
+            }
             material.SetFloat("_Smoothness", 0.05f);
             renderer.sharedMaterial = material;
         }
