@@ -89,7 +89,7 @@ namespace DroneSandbox
             foreach (var c in go.GetComponentsInChildren<Collider>()) Discard(c);
             UsePhotoMaterials(go);
             var lods = go.GetComponent<LODGroup>();
-            if (lods != null) TuneLods(lods);
+            if (lods != null) TuneLods(lods, name.StartsWith("Scenery_Spruce"));
             return go;
         }
 
@@ -110,19 +110,47 @@ namespace DroneSandbox
             return pick == 0 ? name : name + "_V" + (pick + 1);
         }
 
-        // Models with _LOD0/_LOD1/_LOD2 meshes get a LOD group from the importer. Trees (three levels): full detail
-        // while the model fills more than about a third of the screen's height (zoomed right in, or photo mode),
-        // the lighter version (half the triangles, the same crown seen from above) down to a twentieth, then the
-        // flat billboard; gone when it's a speck. The photo scans (Tools/Blender/import_scans.py)
-        // have no billboard, so their last level has to last until they're a speck: rocks and shrubs (two levels)
-        // switch to the decimated mesh below about a seventh of the screen, and small plants (one level) only drop
-        // out when they're a few pixels tall.
-        static void TuneLods(LODGroup group)
+        static readonly Dictionary<string, int> rendererCounts = new Dictionary<string, int>();
+
+        // Counts all LOD renderers of the same variant TryModel will use, so decoration budgets include hidden
+        // levels too. Missing models cost one renderer for World's primitive fallback. Cached once per asset.
+        public static int ModelRendererCount(string name, Vector3 at)
+        {
+            string variant = Variant(name, at);
+            if (!rendererCounts.TryGetValue(variant, out int count))
+            {
+                var prefab = Resources.Load<GameObject>("Models/" + variant);
+                count = prefab != null ? Mathf.Max(1, prefab.GetComponentsInChildren<Renderer>(true).Length) : 1;
+                rendererCounts[variant] = count;
+            }
+            return count;
+        }
+
+        // The existing trees have two meshes and a billboard, not a third mesh. At 45 degrees and lodBias 1,
+        // keep full detail to 65 m, the lighter mesh to 250 m, then the billboard to 2 km. Spruce's lighter mesh
+        // still has up to 12k triangles, so it switches at 200 m. Derive screen heights from each group's world size
+        // to keep variants and differently sized trees within the same distance budget.
+        // Scans retain screen-size culling, since their smallest leaves and stones disappear much nearer.
+        static void TuneLods(LODGroup group, bool heavyTree)
         {
             var lods = group.GetLODs();
-            float[] heights = lods.Length >= 3 ? new[] { 0.35f, 0.05f, 0.003f }
-                : lods.Length == 2 ? new[] { 0.15f, 0.005f } : new[] { 0.008f };
-            for (int i = 0; i < lods.Length && i < heights.Length; i++) lods[i].screenRelativeTransitionHeight = heights[i];
+            if (lods.Length == 3)
+            {
+                Vector3 scale = group.transform.lossyScale;
+                float size = group.size * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+                float projected = size / (2f * Mathf.Tan(Scale.CameraFov * 0.5f * Mathf.Deg2Rad));
+                lods[0].screenRelativeTransitionHeight = Mathf.Clamp(projected / 65f, 0.002f, 0.9f);
+                lods[1].screenRelativeTransitionHeight = Mathf.Min(lods[0].screenRelativeTransitionHeight * 0.9f, projected / (heavyTree ? 200f : 250f));
+                lods[2].screenRelativeTransitionHeight = Mathf.Min(lods[1].screenRelativeTransitionHeight * 0.9f, projected / Scale.D(480f));
+                foreach (var renderer in lods[2].renderers)
+                    if (renderer != null) renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+            else if (lods.Length == 2)
+            {
+                lods[0].screenRelativeTransitionHeight = 0.15f;
+                lods[1].screenRelativeTransitionHeight = 0.008f;
+            }
+            else if (lods.Length == 1) lods[0].screenRelativeTransitionHeight = 0.01f;
             group.SetLODs(lods);
         }
 

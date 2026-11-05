@@ -27,6 +27,7 @@ namespace DroneSandbox
     {
         public const float NoonLux = 100000f; // the sun at midday, in lux
 
+        // Applies lighting and a private runtime profile so saved assets also receive the larger-world distances.
         public static void Setup(Camera cam, Light sun)
         {
             ApplyLighting(sun);
@@ -43,6 +44,7 @@ namespace DroneSandbox
             volume.isGlobal = true;
             volume.priority = 10f;
             volume.sharedProfile = profile;
+            ConfigureScenery(volume.profile); // also update existing saved profiles, without changing the asset
         }
 
         // Temporal anti-aliasing, and water, clouds, volumetric fog, reflections, ambient occlusion, contact shadows
@@ -94,7 +96,7 @@ namespace DroneSandbox
                 data.deepLearningSuperSamplingQuality = (uint)(q == 2 ? UnityEngine.NVIDIA.DLSSQuality.MaximumQuality
                     : q == 1 ? UnityEngine.NVIDIA.DLSSQuality.Balanced : UnityEngine.NVIDIA.DLSSQuality.MaximumPerformance);
             }
-            QualitySettings.lodBias = q == 0 ? 1f : q == 1 ? 1.5f : 2f; // the project's own setting (2) at High
+            QualitySettings.lodBias = q == 0 ? 0.65f : q == 1 ? 0.85f : 1f; // Art calibrates tree transitions at 45 degrees and bias 1
             if (Ground.Current != null) Ground.Current.detailObjectDensity = GrassDensity;
         }
 
@@ -102,7 +104,7 @@ namespace DroneSandbox
         public static float GrassDensity => Settings.Quality == 0 ? 0.35f : Settings.Quality == 1 ? 0.7f : 1f;
 
         // How far out the grass is drawn at this quality (DayNight shortens it further as the sun sets).
-        public static float GrassDistance => Settings.Quality == 0 ? 60f : Settings.Quality == 1 ? 90f : Grass.DrawDistance;
+        public static float GrassDistance => Settings.Quality == 0 ? 90f : Settings.Quality == 1 ? 135f : Grass.DrawDistance;
 
         // The sun as an HDRP light in lux, casting soft shadows. Also saved into the scene by the editor setup.
         public static void ApplyLighting(Light sun)
@@ -117,6 +119,7 @@ namespace DroneSandbox
             RenderSettings.sun = sun;
         }
 
+        // Creates the shared editor/runtime environment settings, including the bounded scenery distances.
         public static void ConfigureProfile(VolumeProfile profile)
         {
             var environment = Get<VisualEnvironment>(profile);
@@ -134,19 +137,7 @@ namespace DroneSandbox
             clouds.enable.Override(true);
             clouds.cloudPreset = VolumetricClouds.CloudPresets.Sparse; // fair-weather summer cumulus
 
-            // Haze that thickens near the ground and lights up in the sun (volumetric), for depth and sun shafts.
-            var fog = Get<Fog>(profile);
-            fog.enabled.Override(true);
-            fog.colorMode.Override(FogColorMode.SkyColor);
-            // Thin near the ground but reaching higher, so the battlefield stays as clear as before while the far
-            // ridges (which rise well above 90 m) fade into a haze instead of standing out sharp.
-            fog.meanFreePath.Override(1100f);
-            fog.baseHeight.Override(0f);
-            fog.maximumHeight.Override(140f);
-            fog.enableVolumetricFog.Override(true);
-            fog.albedo.Override(Color.white);
-            fog.anisotropy.Override(0.65f);
-            fog.depthExtent.Override(180f);
+            ConfigureScenery(profile);
 
             var exposure = Get<Exposure>(profile);
             exposure.mode.Override(ExposureMode.AutomaticHistogram);
@@ -159,9 +150,6 @@ namespace DroneSandbox
             // No motion blur: panning a strategy camera smeared the whole battlefield (and the HUD reads against it).
             Get<MotionBlur>(profile).intensity.Override(0f);
 
-            var shadows = Get<HDShadowSettings>(profile);
-            shadows.maxShadowDistance.Override(350f);
-            shadows.cascadeShadowSplitCount.Override(4);
             // Skylight in the shade: on a clear summer day the open sky lights shadows to about a quarter of full
             // sun. The sky's own ambient left them near black under the trees, so it counts for more (sunlit
             // ground barely changes, it's nearly all sun).
@@ -206,6 +194,29 @@ namespace DroneSandbox
             split.balance.Override(-15f);
         }
 
+        // A gentle kilometre-scale haze gives the hills depth, with volumetric light reaching the ground from
+        // the high play camera. Four bounded cascades cover its far corners without scaling 350 m by Distance.
+        // Used by the editor's profile creator and on a runtime copy of existing profiles.
+        static void ConfigureScenery(VolumeProfile profile)
+        {
+            var fog = Get<Fog>(profile);
+            fog.enabled.Override(true);
+            fog.colorMode.Override(FogColorMode.SkyColor);
+            fog.meanFreePath.Override(2400f);
+            fog.baseHeight.Override(0f);
+            fog.maximumHeight.Override(450f);
+            fog.enableVolumetricFog.Override(true);
+            fog.albedo.Override(Color.white);
+            fog.anisotropy.Override(0.65f);
+            fog.depthExtent.Override(1000f);
+            var shadows = Get<HDShadowSettings>(profile);
+            shadows.maxShadowDistance.Override(1000f);
+            shadows.cascadeShadowSplitCount.Override(4);
+            shadows.cascadeShadowSplit0.Override(0.18f);
+            shadows.cascadeShadowSplit1.Override(0.42f);
+            shadows.cascadeShadowSplit2.Override(0.7f);
+        }
+
         static Volume weatherVolume;
 
         // How much of the sun gets through the weather (DayNight multiplies the sunlight by it).
@@ -222,7 +233,7 @@ namespace DroneSandbox
             {
                 var profile = ScriptableObject.CreateInstance<VolumeProfile>();
                 profile.Add<VolumetricClouds>(true).enable.Override(true);
-                profile.Add<Fog>(true).enabled.Override(true);
+                profile.Add<Fog>().enabled.Override(true); // inherit the base profile's volumetric light and colour
                 weatherVolume = new GameObject("Weather").AddComponent<Volume>();
                 weatherVolume.isGlobal = true;
                 weatherVolume.priority = 15f;
@@ -242,13 +253,14 @@ namespace DroneSandbox
             var field = typeof(VolumetricClouds).GetField("m_CloudPreset", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             (field?.GetValue(clouds) as VolumeParameter<VolumetricClouds.CloudPresets>)?.Override(preset); // ...and makes it count
             clouds.shadows.Override(weather != Weather.Fog); // cloud shadows drifting over the ground
-            fog.meanFreePath.Override(weather == Weather.Fog ? 110f : weather == Weather.Rain ? 380f : 650f);
-            fog.maximumHeight.Override(weather == Weather.Fog ? 60f : 120f);
+            fog.meanFreePath.Override(weather == Weather.Fog ? Scale.D(110f) : weather == Weather.Rain ? 1200f : 1900f);
+            fog.maximumHeight.Override(weather == Weather.Fog ? Scale.D(60f) : 450f);
         }
 
         static ParticleSystem rain;
 
-        // Rain: thin streaks falling through a box that rides along above the camera (Resources/Materials/Rain).
+        // Rain stays in a real-size box above the camera, even when it is hundreds of metres from the focus.
+        // Increasing the box with the map would waste particles and overdraw (Resources/Materials/Rain).
         static void Rain(bool on)
         {
             if (!on)

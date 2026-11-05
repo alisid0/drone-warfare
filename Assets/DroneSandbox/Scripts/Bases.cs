@@ -136,11 +136,16 @@ namespace DroneSandbox
                 World.Place("Enemy_" + d.type, d.position, 0f, 1f, 0f, root);
             var vehicles = new (string model, Vector3 at, float yaw)[]
             {
-                ("Enemy_Tank", new Vector3(10f, 0f, 20f), 30f), ("Enemy_Tank", new Vector3(30f, 0f, -10f), 120f),
-                ("Enemy_Tank", new Vector3(60f, 0f, 20f), 250f), ("Enemy_Truck", new Vector3(-5f, 0f, 30f), 200f),
-                ("Enemy_Truck", new Vector3(40f, 0f, 70f), 90f),
+                ("Enemy_Tank", new Vector3(Scale.D(10f), 0f, Scale.D(20f)), 30f), ("Enemy_Tank", new Vector3(Scale.D(30f), 0f, Scale.D(-10f)), 120f),
+                ("Enemy_Tank", new Vector3(Scale.D(60f), 0f, Scale.D(20f)), 250f), ("Enemy_Truck", new Vector3(Scale.D(-5f), 0f, Scale.D(30f)), 200f),
+                ("Enemy_Truck", new Vector3(Scale.D(40f), 0f, Scale.D(70f)), 90f),
             };
-            foreach (var v in vehicles) World.Place(v.model, v.at, v.yaw, 1f, 0f, root);
+            foreach (var v in vehicles)
+            {
+                var at = new Vector3(Mathf.Clamp(v.at.x, -MapLayout.Edge, MapLayout.Edge), 0f,
+                    Mathf.Clamp(v.at.z, -MapLayout.Edge, MapLayout.Edge));
+                World.Place(v.model, at, v.yaw, 1f, 0f, root);
+            }
             var b = MapLayout.BasePosition;
             string[] drones = { "Drone_Scout", "Drone_Strike", "Drone_Kamikaze" };
             for (int i = 0; i < 3; i++)

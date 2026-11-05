@@ -192,7 +192,8 @@ namespace DroneSandbox
 
             // Grass tufts: the terrain draws them without the sky's ambient light, so in a low sun they'd go black
             // against the lit ground. They thin out as the sun drops below 20 degrees and are gone below 8, and the
-            // thermal camera, which sees the grass as one cool even field, doesn't show them at all.
+            // thermal camera, which sees the grass as one cool even field, doesn't show them at all. Keep the
+            // range in real detail metres (Atmosphere.GrassDistance), independent of map and camera scale.
             if (Ground.Current != null)
             {
                 float grass = Thermal ? 0f : Mathf.Round(Atmosphere.GrassDistance * Mathf.InverseLerp(8f, 20f, sunElevation) / 10f) * 10f;
