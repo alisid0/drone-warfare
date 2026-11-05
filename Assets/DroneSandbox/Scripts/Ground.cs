@@ -132,7 +132,7 @@ namespace DroneSandbox
                         float wx = x + source.center.x, wz = z + source.center.y;
                         float detail = (Mathf.PerlinNoise(wx * 0.024f + 17.3f, wz * 0.024f + 63.1f) - 0.5f) * 1.6f
                                      + (Mathf.PerlinNoise(wx * 0.09f + 5.5f, wz * 0.09f + 91.2f) - 0.5f) * 0.6f;
-                        if (source.DryDistance(new Vector2(x, z)) <= 0f) detail = 0f;
+                        if (source.NearWater(new Vector2(x, z), 0f)) detail = 0f;
                         world[zi, xi] = FlattenToSiteElevation(x, z, source.Height(x, z) + detail);
                     }
                 }

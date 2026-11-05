@@ -1059,7 +1059,8 @@ namespace DroneSandbox
                 stock[(int)type]--;
                 DronesUsed += type == DroneType.Bomber ? 2 : 1; // the Nightjar counts double towards the stars
             }
-            Vector3 pad = basePosition + new Vector3(Random.Range(-5f, 5f), 1f, Random.Range(-5f, 5f));
+            // On the ground at the pad: in a sector cut from the world the base can stand 200 m up.
+            Vector3 pad = Ground.OnGround(basePosition + new Vector3(Random.Range(-5f, 5f), 0f, Random.Range(-5f, 5f))) + Vector3.up;
             var drone = Drone.Create(type, pad);
             drones.Add(drone);
             Sound.At("launch", pad, 0.8f);

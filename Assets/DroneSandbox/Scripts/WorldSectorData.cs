@@ -178,6 +178,19 @@ namespace DroneSandbox
             return VectorClearance(p);
         }
 
+        // Whether p is water or within `margin` of it, cheaply: the snapshot's cover and the precomputed clearance
+        // only, never the exact vector distance. Ground asks this of a million terrain samples to keep its small
+        // roughness off the water; near a reservoir the exact fallback made the terrain take 4.5 s.
+        public bool NearWater(Vector2 p, float margin)
+        {
+            Cover c = CoverAt(p.x, p.y);
+            if (c == Cover.Water || c == Cover.Wetland) return true;
+            if (dryClearance == null) return DryDistance(p) <= margin;
+            int k = Index(p.x, p.y);
+            Vector2 sample = gridOrigin + new Vector2(k % columns, k / columns) * WorldPlan.HeightStep;
+            return dryClearance[k] - 2f * Vector2.Distance(p, sample) <= margin;
+        }
+
         // Precompute a cheap rejection bound once after all water geometry is copied, saving route-grid queries.
         internal void PrepareDryGround()
         {

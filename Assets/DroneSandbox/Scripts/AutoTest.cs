@@ -1172,7 +1172,10 @@ namespace DroneSandbox
                 Vector3 baseAt = game.basePosition, hq = game.enemyHqPosition;
                 Vector3 back = (baseAt - hq).normalized;
                 DayNight.Instance.SetTime(10.5f, 0f);
-                photo.PlaceLooking(baseAt + back * 60f + Vector3.up * 140f, (baseAt + hq) / 2f, 55f);
+                // Heights from the ground: a sector cut from the world can stand 200 m up.
+                Vector3 eye = baseAt + back * 60f;
+                eye.y = Ground.HeightAt(eye) + 140f;
+                photo.PlaceLooking(eye, Ground.OnGround((baseAt + hq) / 2f), 55f);
                 yield return new WaitForSeconds(1.5f);
                 yield return Shot($"31_sector_{n:00}_{kind}");
                 photo.Exit();
