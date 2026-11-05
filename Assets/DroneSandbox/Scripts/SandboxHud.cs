@@ -115,6 +115,7 @@ namespace DroneSandbox
         // Mouse position is in screen space (origin bottom-left), as the input backends report it.
         public bool IsPointerOverHud(Vector2 screenPosition)
         {
+            if (WorldMapBlocksInput) return true;
             if (game != null && game.UiBlocking) return true;
             var p = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
             float pad = 6f * Scale;
@@ -134,6 +135,12 @@ namespace DroneSandbox
         {
             if (game == null || rts == null || rts.Cam == null) return;
             BuildStyles();
+            if (WorldMapOpen && (game.UiBlocking || game.Loading || !FarTerrain.Active)) CloseWorldMap();
+            if (WorldMapOpen)
+            {
+                DrawWorldMap();
+                return;
+            }
 
             if (game.Loading)
             {

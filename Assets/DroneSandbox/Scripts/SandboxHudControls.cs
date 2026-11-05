@@ -24,6 +24,7 @@ namespace DroneSandbox
             (GameKey.Stop, "Stop drones"),
             (GameKey.Recall, "Recall drones"),
             (GameKey.Pause, "Tactical pause"),
+            (GameKey.WorldMap, "Open world map"),
             (GameKey.Sync, "Coordinate strike"),
             (GameKey.Combat, "Look at the fight"),
             (GameKey.Feed, "Toggle drone feed"),
