@@ -4,18 +4,18 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Trees and houses on the far terrain round the camera, so flying out over the big world shows woods and villages
-    // instead of a painted picture: tree cards on WorldPlan's forest within 3 km, and houses (townhouse rows,
-    // apartments and shops in the towns) on its villages and towns within 5 km. Built in 250 m cells as the camera
-    // moves (a few a frame), from the world's own seed, so a place always gets the same trees; drawn with GPU
-    // instancing, no GameObjects. The detailed sector keeps its own trees and houses: nothing is scattered on it.
+    // Streams a small tree bubble and batches photo models by species, tier and stand tint. Larger shapes belong
+    // to ForestHlod and SettlementHlod, so a high camera never submits thousands of sub-pixel tree cards.
     public class FarScatter : MonoBehaviour
     {
-        const float CellSize = 250f, TreeReach = 3000f, HouseReach = 5000f;
-        const float TreeSpacing = 12f, HouseSpacing = 30f;
-        const int CellsPerFrame = 6, Batch = 1023;
+        public const float MeshReach = 120f, TreeReach = 700f, HouseReach = 1500f;
+        const float CellSize = 120f;
+        const int Batch = 511, CellsPerFrame = 4; // non-uniform crown scales also need inverse instance matrices
+        static readonly string[] Trees = { "Scenery_Tree", "Scenery_Birch", "Scenery_Spruce", "Scenery_Pine" };
+        static readonly string[] Houses = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_C", "Scenery_House_D",
+            "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop" };
 
-        // One drawable piece of a model: a mesh at its last LOD, its photo materials, and where it sits in the model.
+        // A model may have several renderers at one LOD; retain every piece and its imported transform.
         sealed class Part
         {
             public Mesh mesh;
@@ -23,233 +23,244 @@ namespace DroneSandbox
             public Matrix4x4 local;
         }
 
-        sealed class Cell
+        // The model's full height normalizes both real meshes and cards to the stand's same 8-24 m trees.
+        sealed class Model
         {
-            public Vector3 center; // local
-            public Matrix4x4[][] instances; // per part
-            public int[] counts;
+            public Part[] parts;
+            public float height;
+            public readonly List<Matrix4x4> instances = new List<Matrix4x4>();
         }
 
-        static readonly string[] TreeModels = { "Scenery_Tree", "Scenery_Birch", "Scenery_Spruce", "Scenery_Pine" };
-        static readonly string[] HouseModels = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_C", "Scenery_House_D",
-                                                 "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop" };
-        Part[] parts; // the trees, then the houses
+        // Root transforms stay immutable when the camera changes tiers; the world grid owns the trees.
+        struct Tree
+        {
+            public Vector3 position;
+            public ForestPattern.Stand stand;
+            public Matrix4x4 mesh, card;
+        }
+
+        // Small cells bound generation work and culling without creating scenery GameObjects.
+        sealed class Cell
+        {
+            public Bounds bounds;
+            public Tree[] trees;
+        }
+
+        Model[] models;
         readonly Dictionary<long, Cell> cells = new Dictionary<long, Cell>();
         readonly List<long> stale = new List<long>();
+        readonly List<Material> ownedMaterials = new List<Material>();
+        readonly Matrix4x4[] batch = new Matrix4x4[Batch];
+        readonly Plane[] planes = new Plane[6];
+        readonly ForestHlod forest = new ForestHlod();
+        readonly SettlementHlod settlements = new SettlementHlod();
         Vector2 builtOrigin;
         int builtSeed = -1;
 
-        // Forgets every cell (a new sector moves the world under the camera).
-        public void Clear() => cells.Clear();
-
-        // How many trees and houses the last frame drew, for the test log.
-        public static int TreesDrawn { get; private set; }
+        public static int MeshTreesDrawn { get; private set; }
+        public static int CardTreesDrawn { get; private set; }
+        public static int TreesDrawn => MeshTreesDrawn + CardTreesDrawn;
         public static int HousesDrawn { get; private set; }
+        public static int InstanceDrawCalls { get; private set; }
 
+        // Release generated resources on sector/seed changes, not just their dictionary entries.
+        public void Clear()
+        {
+            cells.Clear(); forest.Clear(); settlements.Clear();
+            MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
+        }
+
+        // Also release cloned instancing materials when the persistent terrain object is destroyed.
+        void OnDestroy()
+        {
+            Clear();
+            foreach (var material in ownedMaterials) Art.Discard(material);
+            ownedMaterials.Clear();
+        }
+
+        // Keep the ground lookup in one place for FarDetail's independent height-source change.
+        // On the streamed detail tile's surface where one is (or will be), else the far terrain's ground. The tiered
+        // trees stand on the ground itself (no canopy lift), so this is the bare-ground form of FarDetail's lookup.
+        internal static float GroundAt(Vector2 local) => FarDetail.ScatterHeight(local, false);
+
+        // 3D distance includes camera altitude, so the 2.5/9 km views submit no individual trees or houses.
         void LateUpdate()
         {
+            MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
             var cam = Camera.main;
             if (cam == null || !FarTerrain.Active) return;
-            if (parts == null) LoadParts();
+            if (models == null) LoadModels();
             if (builtSeed != WorldPlan.Seed || builtOrigin != FarTerrain.Origin)
             {
-                cells.Clear();
-                builtSeed = WorldPlan.Seed;
-                builtOrigin = FarTerrain.Origin;
+                Clear(); builtSeed = WorldPlan.Seed; builtOrigin = FarTerrain.Origin;
             }
-            Vector2 local = new Vector2(cam.transform.position.x, cam.transform.position.z);
-            Vector2 world = local + FarTerrain.Origin;
-            int reach = Mathf.CeilToInt(HouseReach / CellSize);
-            int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
-
-            // Build the missing cells nearest first, a few a frame; drop the ones left well behind.
-            int built = 0;
-            for (int ring = 0; ring <= reach && built < CellsPerFrame; ring++)
-                for (int dj = -ring; dj <= ring && built < CellsPerFrame; dj++)
-                    for (int di = -ring; di <= ring && built < CellsPerFrame; di++)
-                    {
-                        if (Mathf.Max(Mathf.Abs(di), Mathf.Abs(dj)) != ring) continue;
-                        long key = Key(ci + di, cj + dj);
-                        if (cells.ContainsKey(key)) continue;
-                        cells[key] = Build(ci + di, cj + dj);
-                        built++;
-                    }
+            GeometryUtility.CalculateFrustumPlanes(cam, planes);
+            foreach (var model in models) if (model != null) model.instances.Clear();
+            Vector3 position = cam.transform.position;
+            Vector2 local = new Vector2(position.x, position.z), world = local + FarTerrain.Origin;
+            float altitude = position.y - GroundAt(local);
+            if (altitude < TreeReach + 150f)
+            {
+                int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize), built = 0;
+                int reach = Mathf.CeilToInt(TreeReach / CellSize);
+                for (int ring = 0; ring <= reach && built < CellsPerFrame; ring++)
+                    for (int dz = -ring; dz <= ring && built < CellsPerFrame; dz++)
+                        for (int dx = -ring; dx <= ring && built < CellsPerFrame; dx++)
+                        {
+                            if (Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dz)) != ring) continue;
+                            long key = Key(ci + dx, cj + dz);
+                            if (cells.ContainsKey(key)) continue;
+                            cells.Add(key, Build(ci + dx, cj + dz)); built++;
+                        }
+            }
             stale.Clear();
             foreach (var pair in cells)
             {
-                Vector2 c = new Vector2(pair.Value.center.x, pair.Value.center.z);
-                if ((c - local).magnitude > HouseReach + 2f * CellSize) stale.Add(pair.Key);
-            }
-            foreach (var key in stale) cells.Remove(key);
-
-            // From high up a tree is a pixel or two and a house not much more: leave them to the far terrain's
-            // picture and canopy. Nearer, trees thin out with distance (all of them to 1.2 km, half to 2 km, a quarter
-            // beyond), a random part of each cell's list, which is shuffled when it's built.
-            float height = cam.transform.position.y - FarTerrain.GroundAt(local);
-            bool showTrees = height < 2500f, showHouses = height < 4500f;
-            int trees = 0, houses = 0;
-            foreach (var cell in cells.Values)
-            {
-                float distance = (new Vector2(cell.center.x, cell.center.z) - local).magnitude;
-                float share = distance < 1200f ? 1f : distance < 2000f ? 0.5f : 0.25f;
-                for (int p = 0; p < parts.Length; p++)
+                var cell = pair.Value;
+                if (cell.bounds.SqrDistance(position) > 1100f * 1100f) { stale.Add(pair.Key); continue; }
+                if (!GeometryUtility.TestPlanesAABB(planes, cell.bounds)) continue;
+                foreach (var tree in cell.trees)
                 {
-                    if (parts[p] == null || cell.counts[p] == 0) continue;
-                    bool tree = p < TreeModels.Length;
-                    if (distance > (tree ? TreeReach : HouseReach) + CellSize || !(tree ? showTrees : showHouses)) continue;
-                    int count = tree ? Mathf.CeilToInt(cell.counts[p] * share) : cell.counts[p];
-                    if (tree) trees += count;
-                    else houses += count;
-                    var part = parts[p];
-                    for (int sub = 0; sub < part.mesh.subMeshCount; sub++)
-                    {
-                        var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
-                        if (material == null) continue;
-                        var rp = new RenderParams(material)
-                        {
-                            camera = cam, // not the drone feed's camera as well: it renders the near world only
-                            shadowCastingMode = ShadowCastingMode.Off,
-                            receiveShadows = true,
-                            worldBounds = new Bounds(cell.center, new Vector3(CellSize + 40f, 400f, CellSize + 40f)),
-                        };
-                        var batches = cell.instances[p];
-                        for (int b = 0; b < count; b += Batch)
-                            Graphics.RenderMeshInstanced(rp, part.mesh, sub, batches, Mathf.Min(Batch, count - b), b);
-                    }
+                    float distance = Vector3.Distance(position, tree.position + Vector3.up * tree.stand.height * 0.7f);
+                    if (distance > TreeReach) continue;
+                    int tier = distance <= MeshReach ? 0 : 1;
+                    int kind = tier * 12 + tree.stand.species * 3 + tree.stand.shade;
+                    var model = models[kind];
+                    if (model == null) continue;
+                    model.instances.Add(tier == 0 ? tree.mesh : tree.card);
+                    if (tier == 0) MeshTreesDrawn++; else CardTreesDrawn++;
                 }
             }
-            TreesDrawn = trees;
-            HousesDrawn = houses;
+            foreach (long key in stale) cells.Remove(key);
+            forest.Update(cam, planes);
+            settlements.Update(cam, planes, this);
+            Draw(cam);
         }
 
+        // Settlement blocks call this only when their corresponding combined roof group is hidden.
+        internal void House(SettlementPattern.House house)
+        {
+            var model = models[24 + house.kind];
+            if (model == null) return;
+            Vector2 p = house.world - FarTerrain.Origin;
+            model.instances.Add(Matrix4x4.TRS(new Vector3(p.x, GroundAt(p) - 0.2f, p.y),
+                Quaternion.Euler(0f, house.yaw, 0f), Vector3.one));
+            HousesDrawn++;
+        }
+
+        // Pack across cells: one draw per populated model/submesh/tint batch, not one per tiny cell.
+        void Draw(Camera cam)
+        {
+            var bounds = new Bounds(cam.transform.position, Vector3.one * 3600f);
+            foreach (var model in models)
+            {
+                if (model == null || model.instances.Count == 0) continue;
+                foreach (var part in model.parts)
+                    for (int start = 0; start < model.instances.Count; start += Batch)
+                    {
+                        int count = Mathf.Min(Batch, model.instances.Count - start);
+                        for (int i = 0; i < count; i++) batch[i] = model.instances[start + i] * part.local;
+                        for (int sub = 0; sub < part.mesh.subMeshCount; sub++)
+                        {
+                            var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
+                            if (material == null) continue;
+                            var rp = new RenderParams(material) { camera = cam, worldBounds = bounds,
+                                shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
+                            Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, count);
+                            InstanceDrawCalls++;
+                        }
+                    }
+            }
+        }
+
+        // A unique signed pair avoids collisions on either side of the world's origin.
         static long Key(int i, int j) => ((long)i << 32) ^ (uint)j;
 
-        // Every tree and house in one cell: trees on a jittered 12 m grid where the world is forest (spruce and pine
-        // more often on high ground, a birch in four of the broadleaves), crowns standing about 9 m clear of the far
-        // terrain's canopy; houses on a jittered 30 m grid in villages (about half the points) and towns (three in
-        // four: rows, apartments and shops near the middle), squared to the block they stand in.
+        // The globally aligned 12 m grid fits exactly in a 120 m cell, preventing duplicate boundary trees.
         Cell Build(int ci, int cj)
         {
-            var lists = new List<Matrix4x4>[parts.Length];
-            for (int p = 0; p < lists.Length; p++) lists[p] = new List<Matrix4x4>();
-            float x0 = ci * CellSize, z0 = cj * CellSize;
-            float edge = Ground.Size / 2f + 10f;
-            var rng = new System.Random(Hash(ci, cj));
-            for (float z = z0; z < z0 + CellSize; z += TreeSpacing)
-                for (float x = x0; x < x0 + CellSize; x += TreeSpacing)
+            var trees = new List<Tree>();
+            var center = new Vector2((ci + 0.5f) * CellSize, (cj + 0.5f) * CellSize) - FarTerrain.Origin;
+            var bounds = new Bounds(new Vector3(center.x, GroundAt(center), center.y), new Vector3(CellSize + 40f, 240f, CellSize + 40f));
+            for (int j = cj * 10; j < (cj + 1) * 10; j++)
+                for (int i = ci * 10; i < (ci + 1) * 10; i++)
                 {
-                    float wx = x + (float)rng.NextDouble() * TreeSpacing, wz = z + (float)rng.NextDouble() * TreeSpacing;
-                    double pick = rng.NextDouble(), size = rng.NextDouble(), turn = rng.NextDouble();
-                    if (!WorldPlan.Inside(wx, wz) || WorldPlan.CoverAt(wx, wz) != Cover.Forest) continue;
-                    Vector2 local = new Vector2(wx, wz) - FarTerrain.Origin;
-                    if (Mathf.Abs(local.x) < edge && Mathf.Abs(local.y) < edge) continue;
-                    float ground = GroundHeight(local, true);
-                    float conifer = Mathf.Clamp01(0.15f + Mathf.SmoothStep(0f, 1f, (WorldPlan.Height(wx, wz) - 120f) / 220f) * 0.7f);
-                    int kind = pick < conifer ? (pick < conifer * 0.55 ? 2 : 3) : (pick - conifer < (1.0 - conifer) * 0.25 ? 1 : 0);
-                    var part = parts[kind];
-                    if (part == null) continue;
-                    float lift = Mathf.Max(0f, FarTerrain.CanopyAt(wx, wz) - 9f);
-                    var at = new Vector3(local.x, ground + lift, local.y);
-                    lists[kind].Add(Matrix4x4.TRS(at, Quaternion.Euler(0f, (float)turn * 360f, 0f), Vector3.one * (0.85f + 0.35f * (float)size)) * part.local);
+                    if (!ForestPattern.Tree(i, j, out Vector2 world, out ForestPattern.Stand stand)) continue;
+                    Vector2 p = world - FarTerrain.Origin;
+                    if (InSector(p)) continue;
+                    var at = new Vector3(p.x, GroundAt(p), p.y);
+                    var tree = new Tree { position = at, stand = stand };
+                    var rotation = Quaternion.Euler(0f, ForestPattern.Unit(i, j, 44) * 360f, 0f);
+                    // Cache both roots once: flight changes the tier, not thousands of TRS matrices each frame.
+                    for (int tier = 0; tier < 2; tier++)
+                    {
+                        var model = models[tier * 12 + stand.species * 3 + stand.shade];
+                        if (model == null) continue;
+                        float size = stand.height / model.height;
+                        var matrix = Matrix4x4.TRS(at, rotation, new Vector3(size * stand.width, size, size * stand.width));
+                        if (tier == 0) tree.mesh = matrix; else tree.card = matrix;
+                    }
+                    trees.Add(tree);
+                    bounds.Encapsulate(at); bounds.Encapsulate(at + Vector3.up * 26f);
                 }
-            for (float z = z0; z < z0 + CellSize; z += HouseSpacing)
-                for (float x = x0; x < x0 + CellSize; x += HouseSpacing)
-                {
-                    float wx = x + 0.5f * HouseSpacing + ((float)rng.NextDouble() - 0.5f) * 8f, wz = z + 0.5f * HouseSpacing + ((float)rng.NextDouble() - 0.5f) * 8f;
-                    double chance = rng.NextDouble(), pick = rng.NextDouble();
-                    if (!WorldPlan.Inside(wx, wz)) continue;
-                    var cover = WorldPlan.CoverAt(wx, wz);
-                    bool town = cover == Cover.Town;
-                    if (!(town || cover == Cover.Village) || chance > (town ? 0.75 : 0.5)) continue;
-                    Vector2 local = new Vector2(wx, wz) - FarTerrain.Origin;
-                    if (Mathf.Abs(local.x) < edge && Mathf.Abs(local.y) < edge) continue;
-                    int kind = TreeModels.Length + (town ? (pick < 0.4 ? 4 : pick < 0.6 ? 5 : pick < 0.7 ? 6 : (int)(pick * 40) % 4) : (int)(pick * 4) % 4);
-                    // Each 300 m block of a settlement has its own street angle; houses face one of its four sides.
-                    float block = Mathf.PerlinNoise(Mathf.Floor(wx / 300f) * 0.37f + 5f, Mathf.Floor(wz / 300f) * 0.37f) * 90f;
-                    float yaw = block + 90f * (Hash(Mathf.FloorToInt(wx), Mathf.FloorToInt(wz)) % 4);
-                    var house = parts[kind];
-                    if (house == null) continue;
-                    var at = new Vector3(local.x, GroundHeight(local, false) - 0.2f, local.y);
-                    lists[kind].Add(Matrix4x4.TRS(at, Quaternion.Euler(0f, yaw, 0f), Vector3.one) * house.local);
-                }
-            var cell = new Cell
-            {
-                center = new Vector3(x0 + CellSize / 2f - FarTerrain.Origin.x, WorldPlan.Height(x0 + CellSize / 2f, z0 + CellSize / 2f), z0 + CellSize / 2f - FarTerrain.Origin.y),
-                instances = new Matrix4x4[parts.Length][],
-                counts = new int[parts.Length],
-            };
-            for (int p = 0; p < parts.Length; p++)
-            {
-                var array = lists[p].ToArray();
-                for (int k = array.Length - 1; k > 0; k--) // shuffled, so the first part of the list is a fair sample
-                {
-                    int other = rng.Next(k + 1);
-                    (array[k], array[other]) = (array[other], array[k]);
-                }
-                cell.instances[p] = array;
-                cell.counts[p] = array.Length;
-            }
-            return cell;
+            return new Cell { trees = trees.ToArray(), bounds = bounds };
         }
 
-        // Keep cached instances on the eventual tile surface; tree lookup also cancels the legacy canopy lift.
-        static float GroundHeight(Vector2 local, bool tree) => FarDetail.ScatterHeight(local, tree);
+        // The detailed sector continues to own its existing scenery, including a small overlap margin.
+        internal static bool InSector(Vector2 local) =>
+            Mathf.Abs(local.x) < Ground.Size / 2f + 10f && Mathf.Abs(local.y) < Ground.Size / 2f + 10f;
 
-        static int Hash(int x, int z)
+        // Keep the photo material path used by Art, with three reusable tint variants for each tree tier.
+        void LoadModels()
         {
-            unchecked
-            {
-                int h = x * 73856093 ^ z * 19349663 ^ WorldPlan.Seed * 83492791;
-                h ^= h >> 13;
-                h *= 0x5bd1e995;
-                return h & 0x7fffffff;
-            }
+            models = new Model[31];
+            for (int tier = 0; tier < 2; tier++)
+                for (int species = 0; species < 4; species++)
+                    for (int shade = 0; shade < 3; shade++)
+                        models[tier * 12 + species * 3 + shade] = LoadModel(Trees[species], tier == 0 ? 1 : 2, ForestPattern.Tint(shade));
+            for (int i = 0; i < Houses.Length; i++) models[24 + i] = LoadModel(Houses[i], 1, 1f);
         }
 
-        // The last LOD of each tree (its crossed cards and crown card) and of each house, with the photo materials
-        // the game uses for them, made instancing-capable.
-        void LoadParts()
+        // Read every renderer of the selected LOD and use its transformed bounds to normalize tree height.
+        Model LoadModel(string name, int lod, float tint)
         {
-            parts = new Part[TreeModels.Length + HouseModels.Length];
-            for (int p = 0; p < parts.Length; p++)
-                parts[p] = LoadPart(p < TreeModels.Length ? TreeModels[p] : HouseModels[p - TreeModels.Length], p < TreeModels.Length ? 2 : 1);
-        }
-
-        static Part LoadPart(string model, int lod)
-        {
-            var prefab = Resources.Load<GameObject>("Models/" + model);
+            var prefab = Resources.Load<GameObject>("Models/" + name);
             if (prefab == null) return null;
-            Renderer renderer = null;
+            Renderer[] renderers = null;
             var group = prefab.GetComponent<LODGroup>();
             if (group != null)
             {
                 var lods = group.GetLODs();
-                if (lods.Length > 0)
+                if (lods.Length > 0) renderers = lods[Mathf.Min(lod, lods.Length - 1)].renderers;
+            }
+            if (renderers == null || renderers.Length == 0) renderers = prefab.GetComponentsInChildren<MeshRenderer>();
+            var parts = new List<Part>();
+            float bottom = float.MaxValue, top = float.MinValue;
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                var filter = renderer.GetComponent<MeshFilter>();
+                if (filter == null || filter.sharedMesh == null || renderer.sharedMaterials.Length == 0) continue;
+                var materials = renderer.sharedMaterials;
+                var local = prefab.transform.worldToLocalMatrix * renderer.transform.localToWorldMatrix;
+                for (int i = 0; i < materials.Length; i++)
                 {
-                    var level = lods[Mathf.Min(lod, lods.Length - 1)];
-                    if (level.renderers.Length > 0) renderer = level.renderers[0];
+                    if (materials[i] == null) continue;
+                    var photo = Resources.Load<Material>("Materials/PBR/" + materials[i].name);
+                    var material = new Material(photo != null ? photo : materials[i]) { enableInstancing = true };
+                    var colour = material.color; colour.r *= tint; colour.g *= tint; colour.b *= tint;
+                    material.color = colour; materials[i] = material; ownedMaterials.Add(material);
                 }
+                var box = filter.sharedMesh.bounds;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    var p = local.MultiplyPoint3x4(box.center + Vector3.Scale(box.extents,
+                        new Vector3((corner & 1) == 0 ? -1f : 1f, (corner & 2) == 0 ? -1f : 1f, (corner & 4) == 0 ? -1f : 1f)));
+                    bottom = Mathf.Min(bottom, p.y); top = Mathf.Max(top, p.y);
+                }
+                parts.Add(new Part { mesh = filter.sharedMesh, materials = materials, local = local });
             }
-            if (renderer == null) renderer = prefab.GetComponentInChildren<MeshRenderer>();
-            var filter = renderer != null ? renderer.GetComponent<MeshFilter>() : null;
-            if (filter == null || filter.sharedMesh == null) return null;
-            var materials = renderer.sharedMaterials;
-            var used = new Material[materials.Length];
-            for (int i = 0; i < materials.Length; i++)
-            {
-                var m = materials[i];
-                if (m == null) continue;
-                var photo = Resources.Load<Material>("Materials/PBR/" + m.name);
-                m = photo != null ? photo : m;
-                if (!m.enableInstancing) m = new Material(m) { enableInstancing = true };
-                used[i] = m;
-            }
-            return new Part
-            {
-                mesh = filter.sharedMesh,
-                materials = used,
-                local = prefab.transform.worldToLocalMatrix * renderer.transform.localToWorldMatrix,
-            };
+            return parts.Count == 0 ? null : new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom) };
         }
     }
 }

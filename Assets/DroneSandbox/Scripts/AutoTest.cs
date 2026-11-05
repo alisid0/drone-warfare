@@ -652,10 +652,17 @@ namespace DroneSandbox
             yield return new WaitForSecondsRealtime(2f);
             float wideFps = (Time.frameCount - frames) / (Time.realtimeSinceStartup - start);
             yield return Shot("80_world_wide");
-            log.WriteLine($"World scatter from 9 km up: {FarScatter.TreesDrawn} trees and {FarScatter.HousesDrawn} houses drawn");
+            log.WriteLine($"World scatter: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, houses {FarScatter.HousesDrawn}; " +
+                          $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
+                          $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
+                          $"forest build {ForestHlod.BuildMs:F2} ms");
             rts.LookAt(new Vector3(1200f, 0f, 400f), 2500f, 60f);
             yield return new WaitForSecondsRealtime(1.5f);
             yield return Shot("81_world_horizon");
+            log.WriteLine($"World scatter: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, houses {FarScatter.HousesDrawn}; " +
+                          $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
+                          $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
+                          $"forest build {ForestHlod.BuildMs:F2} ms");
 
             var scout = game.SpawnDrone(DroneType.Scout);
             Vector3 away = game.basePosition - game.enemyHqPosition;
@@ -733,6 +740,14 @@ namespace DroneSandbox
                 FarDetail.WorstCommitMs > 2.0 || meanCommit > 1.0 || p95 > 16.7f) errors++;
             if (swift == null || !swift.IsAlive || swiftFlown < 15000f || swiftLowest < 2f) errors++;
             yield return WorldMapCheck(game, rts, swift);
+            Vector2 forest = ForestHlod.LargestForest() - FarTerrain.Origin;
+            rts.LookAt(new Vector3(forest.x, 0f, forest.y), 2500f, 35f);
+            yield return new WaitForSecondsRealtime(6f);
+            yield return Shot("88_world_forest_hlod");
+            log.WriteLine($"World scatter: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, houses {FarScatter.HousesDrawn}; " +
+                          $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
+                          $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
+                          $"forest build {ForestHlod.BuildMs:F2} ms");
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)

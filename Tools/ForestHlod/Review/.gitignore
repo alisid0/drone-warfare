@@ -1,0 +1,7 @@
+# Full-resolution contact sheets retain every requested before/after view.
+*.png
+!forest-comparison.png
+!town-comparison.png
+!calibration-comparison.png
+!forest_near_after.png
+!crown-atlas.png

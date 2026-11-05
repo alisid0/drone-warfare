@@ -20,6 +20,9 @@ namespace DroneSandbox
         const int TextureSize = 4096;
         const float Skirt = 40f;
 
+        // HLOD owns the visible forest surface; Elevation retains its conservative flight canopy.
+        public static bool ForestCanopyHlod = true;
+
         public static bool Active => root != null && WorldPlan.Ready;
         public static Vector2 Origin { get; private set; }
 
@@ -163,6 +166,9 @@ namespace DroneSandbox
         // The same without the woods' canopy: the ground itself, where FarScatter stands its trees and houses.
         public static float GroundAt(Vector2 local) => Blend(local, WorldPlan.Height(local.x + Origin.x, local.y + Origin.y));
 
+        // Mesh builders use the bare ground when HLOD owns the canopy; flight keeps SurfaceAt's clearance.
+        public static float VisualSurfaceAt(Vector2 local) => ForestCanopyHlod ? GroundAt(local) : SurfaceAt(local);
+
         // A world height near the sector, joined to the sector's own edge over the near ring's first 400 m.
         static float Blend(Vector2 local, float world)
         {
@@ -202,7 +208,8 @@ namespace DroneSandbox
         {
             float edge = Ground.Size / 2f;
             if (Mathf.Abs(local.x) < edge && Mathf.Abs(local.y) < edge) return Ground.HeightAt(new Vector3(local.x, 0f, local.y)) - 40f;
-            float h = SurfaceAt(local);
+            // Only the visible chunk loses its smooth shell; SurfaceAt also supplies drone flight clearance.
+            float h = VisualSurfaceAt(local);
             Vector2 dir = local.normalized;
             float beyond = local.magnitude - (edge - 0.5f) / Mathf.Max(Mathf.Abs(dir.x), Mathf.Abs(dir.y));
             return beyond < NearReach ? h - 3f : h;

@@ -1,0 +1,636 @@
+{
+  "Scenery_Tree": [
+    {
+      "lod": 0,
+      "lo": [
+        -6.975500583648682,
+        -0.061563074588775635,
+        -7.213888168334961
+      ],
+      "hi": [
+        8.892199516296387,
+        14.649201393127441,
+        7.275736331939697
+      ],
+      "materials": [
+        "BarkOak",
+        "LeavesOak"
+      ],
+      "triangles": 10282
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -7.796263694763184,
+        -0.061563074588775635,
+        -8.424141883850098
+      ],
+      "hi": [
+        9.38105297088623,
+        15.615110397338867,
+        8.215927124023438
+      ],
+      "materials": [
+        "BarkOak",
+        "LeavesOak"
+      ],
+      "triangles": 4906
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -7.944162845611572,
+        -5.194139589548286e-07,
+        -7.944161891937256
+      ],
+      "hi": [
+        7.944162845611572,
+        13.932685852050781,
+        7.944163799285889
+      ],
+      "materials": [
+        "ImpostorOak"
+      ],
+      "triangles": 8
+    }
+  ],
+  "Scenery_Birch": [
+    {
+      "lod": 0,
+      "lo": [
+        -3.9018349647521973,
+        -0.025682274252176285,
+        -3.9695658683776855
+      ],
+      "hi": [
+        3.882093906402588,
+        16.617368698120117,
+        3.9188711643218994
+      ],
+      "materials": [
+        "BarkBirch",
+        "LeavesBirch"
+      ],
+      "triangles": 6780
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -4.683837890625,
+        -0.025682274252176285,
+        -4.465916633605957
+      ],
+      "hi": [
+        4.3328046798706055,
+        16.916072845458984,
+        4.565311908721924
+      ],
+      "materials": [
+        "BarkBirch",
+        "LeavesBirch"
+      ],
+      "triangles": 3374
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -3.3947830200195312,
+        -2.2196144300323795e-07,
+        -3.394782066345215
+      ],
+      "hi": [
+        3.3947830200195312,
+        15.905861854553223,
+        3.3947839736938477
+      ],
+      "materials": [
+        "ImpostorBirch"
+      ],
+      "triangles": 8
+    }
+  ],
+  "Scenery_Spruce": [
+    {
+      "lod": 0,
+      "lo": [
+        -4.952903747558594,
+        -0.013481789268553257,
+        -4.811643600463867
+      ],
+      "hi": [
+        5.379108428955078,
+        18.539493560791016,
+        5.341678142547607
+      ],
+      "materials": [
+        "BarkPine",
+        "LeavesSpruce"
+      ],
+      "triangles": 23134
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -5.339838027954102,
+        -0.01212756521999836,
+        -5.5662641525268555
+      ],
+      "hi": [
+        6.237999439239502,
+        18.53944206237793,
+        5.769543647766113
+      ],
+      "materials": [
+        "BarkPine",
+        "LeavesSpruce"
+      ],
+      "triangles": 12218
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -4.638530731201172,
+        -3.0328152433867217e-07,
+        -4.638530254364014
+      ],
+      "hi": [
+        4.638530731201172,
+        19.408945083618164,
+        4.63853120803833
+      ],
+      "materials": [
+        "ImpostorSpruce"
+      ],
+      "triangles": 8
+    }
+  ],
+  "Scenery_Pine": [
+    {
+      "lod": 0,
+      "lo": [
+        -6.350363731384277,
+        -0.02599157951772213,
+        -5.250431537628174
+      ],
+      "hi": [
+        4.763394832611084,
+        18.804100036621094,
+        5.616202354431152
+      ],
+      "materials": [
+        "BarkPine",
+        "LeavesPine"
+      ],
+      "triangles": 7410
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -6.802632808685303,
+        -0.026566781103610992,
+        -6.179520130157471
+      ],
+      "hi": [
+        5.640447616577148,
+        19.6074161529541,
+        6.545087814331055
+      ],
+      "materials": [
+        "BarkPine",
+        "LeavesPine"
+      ],
+      "triangles": 3572
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -5.392033100128174,
+        -3.5254785757388163e-07,
+        -5.392032146453857
+      ],
+      "hi": [
+        5.392033100128174,
+        18.47736167907715,
+        5.39203405380249
+      ],
+      "materials": [
+        "ImpostorPine"
+      ],
+      "triangles": 8
+    }
+  ],
+  "Scenery_House_A": [
+    {
+      "lod": 0,
+      "lo": [
+        -4.449999809265137,
+        -0.0049998401664197445,
+        -4.699999809265137
+      ],
+      "hi": [
+        4.449999809265137,
+        5.800000190734863,
+        3.450000524520874
+      ],
+      "materials": [
+        "Brick",
+        "Stone",
+        "PlasterWhite",
+        "RoofTile",
+        "WindowFrame",
+        "WindowGlass",
+        "DoorWood",
+        "WeatheredPlanks"
+      ],
+      "triangles": 916
+    }
+  ],
+  "Scenery_House_B": [
+    {
+      "lod": 0,
+      "lo": [
+        -4.599999904632568,
+        -3.3008058153427555e-07,
+        -4.5
+      ],
+      "hi": [
+        4.599999904632568,
+        9.09999942779541,
+        3.8500008583068848
+      ],
+      "materials": [
+        "Concrete",
+        "Stone",
+        "PlasterGrey",
+        "WindowFrame",
+        "RoofMetal",
+        "Brick",
+        "WindowGlass",
+        "DoorWood",
+        "Railing"
+      ],
+      "triangles": 1220
+    }
+  ],
+  "Scenery_House_C": [
+    {
+      "lod": 0,
+      "lo": [
+        -7.300000190734863,
+        -4.605371941579506e-07,
+        -9.299999237060547
+      ],
+      "hi": [
+        7.300000190734863,
+        10.324999809265137,
+        6.3000006675720215
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood",
+        "Concrete",
+        "Galvanized",
+        "WindowGlass",
+        "WindowFrame"
+      ],
+      "triangles": 2632
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -7.300000190734863,
+        -4.605371941579506e-07,
+        -9.299999237060547
+      ],
+      "hi": [
+        7.300000190734863,
+        10.199999809265137,
+        6.3000006675720215
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood",
+        "Concrete",
+        "WindowGlass"
+      ],
+      "triangles": 496
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -7.300000190734863,
+        -4.605371941579506e-07,
+        -9.299999237060547
+      ],
+      "hi": [
+        7.300000190734863,
+        10.199999809265137,
+        6.3000006675720215
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood"
+      ],
+      "triangles": 100
+    }
+  ],
+  "Scenery_House_D": [
+    {
+      "lod": 0,
+      "lo": [
+        -3.8499999046325684,
+        -2.3404348326039326e-07,
+        -4.449999809265137
+      ],
+      "hi": [
+        3.8499999046325684,
+        6.730000019073486,
+        3.4100000858306885
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood",
+        "Concrete",
+        "Galvanized",
+        "WindowGlass",
+        "WindowFrame"
+      ],
+      "triangles": 1140
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -3.8499999046325684,
+        -2.3404348326039326e-07,
+        -4.449999809265137
+      ],
+      "hi": [
+        3.8499999046325684,
+        6.599999904632568,
+        3.3500001430511475
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood",
+        "Concrete",
+        "WindowGlass"
+      ],
+      "triangles": 276
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -3.8499999046325684,
+        -2.3404348326039326e-07,
+        -4.449999809265137
+      ],
+      "hi": [
+        3.8499999046325684,
+        6.599999904632568,
+        3.3500001430511475
+      ],
+      "materials": [
+        "Brick",
+        "ConcreteStained",
+        "PlasterWhite",
+        "RoofTile",
+        "Wood"
+      ],
+      "triangles": 84
+    }
+  ],
+  "Scenery_Townhouse_Row": [
+    {
+      "lod": 0,
+      "lo": [
+        -12.199999809265137,
+        -3.9258907236217055e-07,
+        -5.75
+      ],
+      "hi": [
+        12.199999809265137,
+        13.199999809265137,
+        5.220000743865967
+      ],
+      "materials": [
+        "Brick",
+        "Concrete",
+        "PlasterCream",
+        "RoofTile",
+        "Wood",
+        "Galvanized",
+        "WindowGlass",
+        "WindowFrame",
+        "RoofSlate",
+        "PlasterWhite",
+        "PlasterGrey"
+      ],
+      "triangles": 4828
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -12.199999809265137,
+        -3.9258907236217055e-07,
+        -5.75
+      ],
+      "hi": [
+        12.199999809265137,
+        12.800000190734863,
+        5.199999809265137
+      ],
+      "materials": [
+        "Brick",
+        "Concrete",
+        "PlasterCream",
+        "RoofTile",
+        "Wood",
+        "WindowGlass",
+        "RoofSlate",
+        "PlasterWhite",
+        "PlasterGrey"
+      ],
+      "triangles": 1052
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -12.199999809265137,
+        -3.9258907236217055e-07,
+        -5.199999809265137
+      ],
+      "hi": [
+        12.199999809265137,
+        12.800000190734863,
+        5.199999809265137
+      ],
+      "materials": [
+        "Brick",
+        "Concrete",
+        "PlasterCream",
+        "RoofTile",
+        "Wood",
+        "RoofSlate",
+        "PlasterWhite",
+        "PlasterGrey",
+        "WindowGlass"
+      ],
+      "triangles": 260
+    }
+  ],
+  "Scenery_Apartment": [
+    {
+      "lod": 0,
+      "lo": [
+        -15.25,
+        -4.680869665207865e-07,
+        -7.199999809265137
+      ],
+      "hi": [
+        15.25,
+        14.09999942779541,
+        7.27500057220459
+      ],
+      "materials": [
+        "Brick",
+        "Concrete",
+        "PlasterGrey",
+        "RoofSlate",
+        "WindowGlass",
+        "WindowFrame",
+        "PlasterWhite",
+        "Galvanized",
+        "SteelDark"
+      ],
+      "triangles": 6480
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -15.25,
+        -4.680869665207865e-07,
+        -7.199999809265137
+      ],
+      "hi": [
+        15.25,
+        14.09999942779541,
+        7.27500057220459
+      ],
+      "materials": [
+        "Brick",
+        "Concrete",
+        "PlasterGrey",
+        "RoofSlate",
+        "WindowGlass",
+        "PlasterWhite"
+      ],
+      "triangles": 1152
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -15.25,
+        -4.680869665207865e-07,
+        -6.25
+      ],
+      "hi": [
+        15.25,
+        12.800000190734863,
+        6.250000953674316
+      ],
+      "materials": [
+        "Concrete",
+        "PlasterGrey",
+        "RoofSlate",
+        "WindowGlass",
+        "PlasterWhite"
+      ],
+      "triangles": 156
+    }
+  ],
+  "Scenery_Shop": [
+    {
+      "lod": 0,
+      "lo": [
+        -6.360000133514404,
+        -3.850392999993346e-07,
+        -6.249240398406982
+      ],
+      "hi": [
+        7.249240398406982,
+        8.90000057220459,
+        5.3000006675720215
+      ],
+      "materials": [
+        "Brick",
+        "PlasterCream",
+        "Concrete",
+        "RoofTile",
+        "WindowGlass",
+        "TealMark",
+        "WindowFrame",
+        "PlasterWhite",
+        "SteelDark"
+      ],
+      "triangles": 1308
+    },
+    {
+      "lod": 1,
+      "lo": [
+        -6.360000133514404,
+        -3.850392999993346e-07,
+        -5.299999713897705
+      ],
+      "hi": [
+        6.360000133514404,
+        8.90000057220459,
+        5.3000006675720215
+      ],
+      "materials": [
+        "Brick",
+        "PlasterCream",
+        "Concrete",
+        "RoofTile",
+        "WindowGlass",
+        "TealMark"
+      ],
+      "triangles": 216
+    },
+    {
+      "lod": 2,
+      "lo": [
+        -6.360000133514404,
+        -3.850392999993346e-07,
+        -5.299999713897705
+      ],
+      "hi": [
+        6.360000133514404,
+        8.5,
+        5.3000006675720215
+      ],
+      "materials": [
+        "Concrete",
+        "PlasterCream",
+        "RoofTile",
+        "WindowGlass",
+        "TealMark"
+      ],
+      "triangles": 108
+    }
+  ]
+}
