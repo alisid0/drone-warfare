@@ -7,26 +7,29 @@ namespace DroneSandbox
     // and too even: a stony, weedy band along the lake shore and the riverbanks, ferns, nettles and moss among the
     // trees, bushes and shrubs along the edges of the woods, and stumps and fallen trunks here and there. Each kind
     // is spread by its own noise mask, so it comes in patches with bare stretches between, the way real ground
-    // cover grows, instead of an even sprinkle. Counts are capped (about 270 objects over the whole map) to keep
+    // cover grows, instead of an even sprinkle. Caps of 536 objects and 1,040 renderers for the whole map keep
     // the frame rate: most of the plant scans are clumps of several plants in one mesh, and small ones are culled
     // once they're a few pixels tall (Art.TuneLods).
     public static class Undergrowth
     {
+        const int RendererLimit = 1040;
+        static int rendererCount;
         const float Cell = 8f; // grid for finding nearby trees and undergrowth quickly
 
         static readonly List<Vector2> trees = new List<Vector2>();
         static readonly Dictionary<Vector2Int, List<Vector2>> treeCells = new Dictionary<Vector2Int, List<Vector2>>();
         static readonly Dictionary<Vector2Int, List<Vector2>> placedCells = new Dictionary<Vector2Int, List<Vector2>>();
 
+        // Clears the last sector's occupancy grids and renderer allowance before any new trees are planted.
         public static void Reset()
         {
+            rendererCount = 0;
             trees.Clear();
             treeCells.Clear();
             placedCells.Clear();
         }
 
-        // World.BuildWoods and Reservoir.Forest call this for each tree they plant, so the undergrowth can grow
-        // round them.
+        // World.Place notes trees from every builder, so woods cannot overlap gardens, orchards or each other.
         public static void NoteTree(Vector2 p)
         {
             trees.Add(p);
@@ -50,12 +53,13 @@ namespace DroneSandbox
         // ---- The waterside ----
 
         // The lake shore: a band that widens and narrows between 2 and 6 m from the water. The reservoir lies
-        // upstream of the dam, so points are tried in a box round it in dam coordinates; round natural lakes and
+        // upstream of the dam, so points are tried in the actual lobes' bounds; round natural lakes and
         // pools, in a ring round a random one. Points are kept when they land in the band.
         static void LakeShore(Transform root, System.Random rng)
         {
-            int[] count = new int[3], cap = { 22, 14, 30 }; // pebbles, stones, plants
+            int[] count = new int[3], cap = { 44, 28, 60 }; // pebbles, stones, plants
             var ponds = MapLayout.Plan.ponds;
+            Rect shoreBounds = Water.LakeBounds(6f);
             if (!MapLayout.HasDam && ponds.Count == 0) return;
             for (int attempt = 0; attempt < 30000 && !Full(count, cap); attempt++)
             {
@@ -63,8 +67,7 @@ namespace DroneSandbox
                 float level;
                 if (MapLayout.HasDam && (ponds.Count == 0 || rng.NextDouble() < 0.5))
                 {
-                    var local = new Vector2(Range(rng, -140f, 2f), Range(rng, -50f, 125f));
-                    p = MapLayout.DamPoint + MapLayout.DamDown * local.x + MapLayout.DamAcross * local.y;
+                    p = new Vector2(Range(rng, shoreBounds.xMin, shoreBounds.xMax), Range(rng, shoreBounds.yMin, shoreBounds.yMax));
                     level = MapLayout.LakeLevel;
                 }
                 else
@@ -88,7 +91,7 @@ namespace DroneSandbox
             var field = MapLayout.RiverField;
             var line = field.points;
             float hw = MapLayout.RiverHalfWidth;
-            int[] count = new int[3], cap = { 10, 8, 20 };
+            int[] count = new int[3], cap = { 20, 16, 40 };
             foreach (int i in Shuffled(line.Count, rng))
             {
                 if (Full(count, cap)) break;
@@ -143,7 +146,7 @@ namespace DroneSandbox
             int ferns = 0, moss = 0, nettles = 0;
             foreach (int t in Shuffled(trees.Count, rng))
             {
-                if (ferns >= 60 && moss >= 20 && nettles >= 18) break;
+                if (ferns >= 120 && moss >= 40 && nettles >= 36) break;
                 Vector2 tree = trees[t];
                 if (rng.NextDouble() > Interest(tree)) continue;
                 Vector2 dir = Direction(rng);
@@ -151,7 +154,7 @@ namespace DroneSandbox
                 if (kind < 0.25)
                 {
                     Vector2 p = tree + dir * Range(rng, 0.7f, 1.2f);
-                    if (moss < 20 && rng.NextDouble() < Patches(p, 0.05f, 37f, 0.5f) && MapLayout.IsWild(p, 0f)
+                    if (moss < 40 && rng.NextDouble() < Patches(p, 0.05f, 37f, 0.5f) && MapLayout.IsWild(p, 0f)
                         && Put(Scans.Pick(Scans.Moss, rng.NextDouble()), p, Range(rng, 0f, 360f), Range(rng, 0.9f, 1.3f), root,
                             room: 1f, sink: 0f, tilt: 1f)) moss++;
                 }
@@ -159,14 +162,14 @@ namespace DroneSandbox
                 {
                     // In the gaps, where some light gets through (and the camera can see them past the crowns).
                     Vector2 p = tree + dir * Range(rng, 1.4f, 3.2f);
-                    if (ferns < 60 && NearestTree(p) > 1.2f && rng.NextDouble() < Patches(p, 0.04f, 53f, 0.45f) && MapLayout.IsWild(p, 0f)
+                    if (ferns < 120 && NearestTree(p) > 1.2f && rng.NextDouble() < Patches(p, 0.04f, 53f, 0.45f) && MapLayout.IsWild(p, 0f)
                         && Put(Scans.Pick(Scans.Ferns, rng.NextDouble()), p, Range(rng, 0f, 360f), Range(rng, 0.85f, 1.25f), root,
                             room: 1.6f, sink: 0.03f, tilt: 0.5f)) ferns++;
                 }
                 else
                 {
                     Vector2 p = tree + dir * Range(rng, 1.5f, 3.5f);
-                    if (nettles < 18 && NearestTree(p) > 1.2f && rng.NextDouble() < Patches(p, 0.05f, 89f, 0.5f) && MapLayout.IsWild(p, 0f)
+                    if (nettles < 36 && NearestTree(p) > 1.2f && rng.NextDouble() < Patches(p, 0.05f, 89f, 0.5f) && MapLayout.IsWild(p, 0f)
                         && Put(Scans.Pick(Scans.Nettles, rng.NextDouble()), p, Range(rng, 0f, 360f), Range(rng, 0.9f, 1.15f), root,
                             room: 2f, sink: 0.03f, tilt: 0.3f)) nettles++;
                 }
@@ -180,7 +183,7 @@ namespace DroneSandbox
             int bushes = 0, shrubs = 0, nettles = 0;
             foreach (int t in Shuffled(trees.Count, rng))
             {
-                if (bushes >= 22 && shrubs >= 14 && nettles >= 10) break;
+                if (bushes >= 44 && shrubs >= 28 && nettles >= 20) break;
                 Vector2 tree = trees[t];
                 if (rng.NextDouble() > Interest(tree)) continue;
                 Vector2 middle = Vector2.zero;
@@ -199,15 +202,15 @@ namespace DroneSandbox
                 if (!MapLayout.IsWild(p, 0f) || NearestTree(p) < 1.8f || rng.NextDouble() > Patches(p, 0.05f, 71f, 0.4f)) continue;
                 double kind = rng.NextDouble();
                 float yaw = Range(rng, 0f, 360f);
-                if (kind < 0.5 && bushes < 22)
+                if (kind < 0.5 && bushes < 44)
                 {
                     if (Put(Scans.Pick(Scans.Bushes, rng.NextDouble()), p, yaw, Range(rng, 0.85f, 1.2f), root, room: 3f, sink: 0.04f, tilt: 0f, footprint: 0.5f)) bushes++;
                 }
-                else if (kind < 0.8 && shrubs < 14)
+                else if (kind < 0.8 && shrubs < 28)
                 {
                     if (Put(Scans.Pick(Scans.Shrubs, rng.NextDouble()), p, yaw, Range(rng, 0.85f, 1.15f), root, room: 3f, sink: 0.03f, tilt: 0f, footprint: 0.5f)) shrubs++;
                 }
-                else if (nettles < 10)
+                else if (nettles < 20)
                 {
                     if (Put(Scans.Pick(Scans.Nettles, rng.NextDouble()), p, yaw, Range(rng, 0.9f, 1.2f), root, room: 2f, sink: 0.03f, tilt: 0.3f)) nettles++;
                 }
@@ -220,7 +223,7 @@ namespace DroneSandbox
             int stumps = 0, trunks = 0;
             foreach (int t in Shuffled(trees.Count, rng))
             {
-                if (stumps >= 14 && trunks >= 6) break;
+                if (stumps >= 28 && trunks >= 12) break;
                 Vector2 tree = trees[t];
                 if (rng.NextDouble() > 0.4f * Interest(tree)) continue;
                 Vector2 p = tree + Direction(rng) * Range(rng, 2.5f, 5f);
@@ -229,10 +232,10 @@ namespace DroneSandbox
                 if (rng.NextDouble() < 0.7)
                 {
                     // The stump scans stand on a mound of leaf litter; sunk so the mound's rim meets the ground.
-                    if (stumps < 14 && Put(Scans.Pick(Scans.Stumps, rng.NextDouble()), p, yaw, Range(rng, 0.85f, 1.15f), root,
+                    if (stumps < 28 && Put(Scans.Pick(Scans.Stumps, rng.NextDouble()), p, yaw, Range(rng, 0.85f, 1.15f), root,
                             room: 3f, sink: 0.38f, tilt: 0.6f)) stumps++;
                 }
-                else if (trunks < 6)
+                else if (trunks < 12)
                 {
                     // The trunk lies along its X; both ends must be clear of trees.
                     float a = yaw * Mathf.Deg2Rad;
@@ -252,9 +255,12 @@ namespace DroneSandbox
             float sink = 0.03f, float tilt = 0.6f, float footprint = 0f)
         {
             if (model == null || Crowded(p, room)) return false;
+            int cost = Art.ModelRendererCount(model, At(p));
+            if (rendererCount + cost > RendererLimit) return false;
             bool low = model.StartsWith("Scan_Pebbles") || model.StartsWith("Scan_Moss_") || model.StartsWith("Scan_Celandine")
                        || model.StartsWith("Scan_Dandelions");
             if (Scans.Place(model, At(p), yaw, scale, root, sink, tilt, footprint, shadows: !low) == null) return false;
+            rendererCount += cost;
             Add(placedCells, p);
             return true;
         }
@@ -262,7 +268,7 @@ namespace DroneSandbox
         // Where the camera looks: the battlefield the RTS camera roams (plus what it sees past the edge) and the lake,
         // photo mode's showpiece. The far hills get only a little.
         static float Interest(Vector2 p) =>
-            Mathf.Max(Mathf.Abs(p.x), Mathf.Abs(p.y)) < 130f || MapLayout.LakeDistance(p.x, p.y) < 45f ? 1f : 0.15f;
+            Mathf.Max(Mathf.Abs(p.x), Mathf.Abs(p.y)) < Scale.D(130f) || MapLayout.LakeDistance(p.x, p.y) < Scale.D(45f) ? 1f : 0.15f;
 
         // Patchy cover: two octaves of Perlin noise (offset by seed, so each kind has its own patches) turned into a
         // 0-1 chance with a soft edge at threshold. 0.5 covers about half the ground; higher, less.
@@ -277,7 +283,7 @@ namespace DroneSandbox
         // and the gorge. (MapLayout.IsWild says the same but also keeps a few metres from the water.)
         static bool OpenGround(Vector2 p)
         {
-            if (Mathf.Abs(p.x) > 220f || Mathf.Abs(p.y) > 220f) return false;
+            if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) return false;
             if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 1.5f) return false;
             if (MapLayout.NearDam(p, 4f) || MapLayout.InGorge(p, 2f)) return false;
             return !MapLayout.NearFlatSite(p, 3f) && !MapLayout.NearVillage(p, 0f) && !MapLayout.InField(p, 1f);

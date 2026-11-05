@@ -66,10 +66,12 @@ namespace DroneSandbox
             return m != null ? m : Art.Shared(fallback);
         }
 
+        // Extends real-gauge track to the terrain boundary, combining its sleepers and rails into one mesh.
         static void Railway(Transform root, List<Vector2> line)
         {
             var mesh = new MeshBuilder(3); // ballast, sleepers, rails
-            const float limit = 238f, ballastTop = 0.3f, gauge = 1.435f / 2f + 0.035f;
+            float limit = Ground.Size / 2f - 2f;
+            const float ballastTop = 0.3f, gauge = 1.435f / 2f + 0.035f;
             float travelled = 0f, nextSleeper = 0f;
             for (int i = 0; i < line.Count - 1; i++)
             {
@@ -77,6 +79,7 @@ namespace DroneSandbox
                 if (Mathf.Abs(a.x) > limit || Mathf.Abs(a.y) > limit || Mathf.Abs(b.x) > limit || Mathf.Abs(b.y) > limit)
                 {
                     travelled += Vector2.Distance(a, b);
+                    nextSleeper = travelled; // do not pile skipped sleepers onto the first point inside the map
                     continue;
                 }
                 Vector3 pa = Ground.OnGround(new Vector3(a.x, 0f, a.y)), pb = Ground.OnGround(new Vector3(b.x, 0f, b.y));
@@ -127,6 +130,7 @@ namespace DroneSandbox
             new Vector3(-4.6f, 20.5f, 0f), new Vector3(4.6f, 20.5f, 0f),
         };
 
+        // Places real-size pylons and wire spans along the sector's longer power corridor.
         static void PowerLine(Transform root, Vector2[] line)
         {
             var group = new GameObject("Power Line").transform;
@@ -137,7 +141,7 @@ namespace DroneSandbox
             for (float t = 0f; t <= Vector2.Distance(a, b); t += 55f)
             {
                 Vector2 p = a + dir * t;
-                if (Mathf.Abs(p.x) > 228f || Mathf.Abs(p.y) > 228f) continue;
+                if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) continue;
                 if (MapLayout.LakeDistance(p.x, p.y) < 4f || MapLayout.RoadField.Distance(p.x, p.y) < 5f) continue;
                 if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 4f) continue;
                 if (MapLayout.NearFlatSite(p, 2f)) continue;
@@ -213,20 +217,23 @@ namespace DroneSandbox
                 }
         }
 
+        // Spreads a bounded set of real-size stumps over the enlarged logging clearing.
         static void Clearing(Transform root, Vector2 c, System.Random rng)
         {
             var group = new GameObject("Logging Clearing").transform;
             group.SetParent(root, false);
-            for (int k = 0; k < 14; k++)
+            for (int k = 0; k < 56; k++)
             {
-                float a = Range(rng, 0f, Mathf.PI * 2f), r = Range(rng, 6f, 22f);
+                float a = Range(rng, 0f, Mathf.PI * 2f), r = Scale.D(Range(rng, 6f, 22f));
                 Vector2 p = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
-                if (MapLayout.RoadField.Distance(p.x, p.y) < 3f) continue;
+                if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge
+                    || MapLayout.RoadField.Distance(p.x, p.y) < 3f) continue;
                 Scans.Rock(Scans.Stumps, rng.NextDouble(), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.7f, 1f), group,
                     "Scenery_Rock_B", 0.35f, 0.1f);
             }
         }
 
+        // Repeats real-size fortifications along the line, leaving road crossings and water open.
         static void DragonTeeth(Transform root, Vector2[] fortLine)
         {
             var group = new GameObject("Fortifications").transform;
@@ -239,7 +246,7 @@ namespace DroneSandbox
                 if (walked < next) continue;
                 next = walked + 10.5f;
                 Vector2 p = line[i], dir = (line[i] - line[i - 1]).normalized;
-                if (Mathf.Abs(p.x) > 225f || Mathf.Abs(p.y) > 225f || MapLayout.LakeDistance(p.x, p.y) < 3f) continue;
+                if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge || MapLayout.LakeDistance(p.x, p.y) < 3f) continue;
                 if (MapLayout.RoadField.Distance(p.x, p.y) < 8f || MapLayout.NearFlatSite(p, 4f)) continue; // gaps for the roads
                 if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 3f) continue;
                 World.Place("Scenery_DragonTeeth", new Vector3(p.x, 0f, p.y), Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg, 1f, 0.15f, group, t =>
@@ -250,14 +257,16 @@ namespace DroneSandbox
             }
         }
 
+        // Dresses the quarry at its planned radius without scaling individual boulders.
         static void QuarryRocks(Transform root, SectorPlan plan, System.Random rng)
         {
             var group = new GameObject("Quarry").transform;
             group.SetParent(root, false);
-            for (int k = 0; k < 16; k++)
+            for (int k = 0; k < 64; k++)
             {
                 float a = Range(rng, 0f, Mathf.PI * 2f), r = Range(rng, 0f, plan.quarryRadius * 0.85f);
                 Vector2 p = plan.quarry + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) continue;
                 float scale = Range(rng, 0.5f, 1.4f);
                 Scans.Rock(Scans.Boulders, rng.NextDouble(), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.5f + 0.4f * scale, group,
                     "Scenery_Rock", scale, 0.3f * scale);

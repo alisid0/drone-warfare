@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DroneSandbox
@@ -7,10 +8,15 @@ namespace DroneSandbox
     // editor preview (MapPreview).
     public static class World
     {
+        const int TreeLimit = 11500; // shared by woods, lake, gardens, field edges and orchards
+        public static int TreeCount { get; private set; }
+
+        // Builds one sector and resets the shared scenery budget before any builder plants trees.
         public static Transform Build(Transform parent, bool preview)
         {
             MapLayout.Prepare();
-            Undergrowth.Reset(); // the woods below note their trees for it
+            TreeCount = 0;
+            Undergrowth.Reset(); // every tree builder shares its spacing grid
             var root = new GameObject("World").transform;
             root.SetParent(parent, false);
             var rng = new System.Random(MapLayout.Plan.worldSeed); // same map every time for a sector
@@ -25,9 +31,9 @@ namespace DroneSandbox
             foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
             Grass.Plant(Ground.Current); // after the villages, so it keeps off their worn paths and yards
+            Features.Build(scenery); // reserve orchard trees before filling the wild woods
             BuildWoods(scenery, rng);
             BuildRocks(scenery, rng);
-            Features.Build(scenery);
             Undergrowth.Build(scenery);
             Bases.BuildPlayerBase(root);
             Bases.BuildEnemyHq(root);
@@ -36,10 +42,15 @@ namespace DroneSandbox
         }
 
         // Places Resources/Models/<model> on the ground (sunk a little so it doesn't float on slopes),
-        // or builds a primitive stand-in when the model is missing.
+        // or builds a primitive stand-in when the model is missing. Trees return null when crowded or over budget.
         public static GameObject Place(string model, Vector3 pos, float yaw, float scale, float sink, Transform parent,
             System.Action<Transform> fallback = null)
         {
+            bool tree = model == "Scenery_Tree" || model == "Scenery_Tree_B" || model == "Scenery_Birch"
+                || model == "Scenery_Poplar" || model == "Scenery_Spruce" || model == "Scenery_Pine" || model == "Scenery_Pine_B";
+            var p = new Vector2(pos.x, pos.z);
+            if (tree && (TreeCount >= TreeLimit || Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge
+                || Undergrowth.UnderTrees(p, 3.2f))) return null;
             var root = new GameObject(model).transform;
             root.SetParent(parent, false);
             float r = 1.2f * scale;
@@ -49,6 +60,11 @@ namespace DroneSandbox
             root.position = new Vector3(pos.x, ground - sink, pos.z);
             root.rotation = Quaternion.Euler(0f, yaw, 0f);
             if (Art.TryModel(model, root, scale) == null) (fallback ?? (t => StandIn(t, scale)))(root);
+            if (tree)
+            {
+                TreeCount++;
+                Undergrowth.NoteTree(p);
+            }
             return root.gameObject;
         }
 
@@ -197,8 +213,10 @@ namespace DroneSandbox
             }
         }
 
+        // Keeps village props inside the terrain and off roads, water, fields and levelled sites.
         static bool Buildable(Vector2 p)
         {
+            if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) return false;
             if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 2.5f) return false;
             if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 5f) return false;
             return !MapLayout.NearFlatSite(p, 4f) && !MapLayout.InField(p, 1f);
@@ -206,31 +224,34 @@ namespace DroneSandbox
 
         // ---- Woods ----
 
+        // Plants larger ragged woods at real spacing, bounded by both a local and an all-builder tree allowance.
         static void BuildWoods(Transform parent, System.Random rng)
         {
             var root = new GameObject("Woods").transform;
             root.SetParent(parent, false);
 
-            // Woods inside the battlefield (broadleaf and pine) and darker conifer forest on the hills around it, as
-            // many as the sector's forest share asks for (0.3 in the Varrow Valley: 11 and 28 woods).
+            // Fewer, larger blocks with real tree spacing. Collect candidates first, then sample across all woods
+            // when the budget fills, so neither the last wood nor the last row gets chopped off.
+            var candidates = new List<(Vector2 p, bool outer, float age)>();
             var plan = MapLayout.Plan;
-            int innerWant = Mathf.Min(24, Mathf.RoundToInt(11f * plan.forest / 0.3f));
-            int outerWant = Mathf.Min(44, Mathf.RoundToInt(28f * plan.forest / 0.3f));
+            int innerWant = Mathf.Min(10, Mathf.RoundToInt(6f * plan.forest / 0.3f));
+            int outerWant = Mathf.Min(22, Mathf.RoundToInt(16f * plan.forest / 0.3f));
             int inner = 0, outer = 0;
-            int attempts = plan.kind == SectorKind.VarrowValley ? 600 : 600 + 20 * (innerWant + outerWant);
+            int attempts = 600 + 20 * (innerWant + outerWant);
+            float limit = MapLayout.Edge - 10f, softEdge = Scale.D(7f);
             for (int attempt = 0; attempt < attempts && (inner < innerWant || outer < outerWant); attempt++)
             {
-                var c = new Vector2(Range(rng, -215f, 215f), Range(rng, -215f, 215f));
-                bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > 105f;
+                var c = new Vector2(Range(rng, -limit, limit), Range(rng, -limit, limit));
+                bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > Mathf.Min(Scale.D(105f), MapLayout.Edge * 0.48f);
                 if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
                 if (!MapLayout.IsWild(c, 3f)) continue;
                 if (isOuter) outer++; else inner++;
-                float radius = isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f);
+                float radius = Mathf.Min(Scale.D(isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f)), Ground.Size * 0.075f);
                 float spacing = isOuter ? 5.6f : 4.6f;
                 int seed = rng.Next();
                 // Each wood is stretched along its own axis and lopsided.
                 float axis = (seed % 360) * Mathf.Deg2Rad, stretch = 1f + (seed / 360 % 100) / 100f * 1.4f;
-                float cos = Mathf.Cos(axis), sin = Mathf.Sin(axis), reach = radius * 1.1f * Mathf.Sqrt(stretch) + 7f;
+                float cos = Mathf.Cos(axis), sin = Mathf.Sin(axis), reach = (radius * 1.1f + softEdge) * Mathf.Sqrt(stretch);
                 for (float x = -reach; x <= reach; x += spacing)
                 {
                     for (float z = -reach; z <= reach; z += spacing)
@@ -240,36 +261,52 @@ namespace DroneSandbox
                         float angle = Mathf.Atan2(dv, du), r = Mathf.Sqrt(du * du + dv * dv);
                         float edge = radius * (0.7f + 0.22f * Mathf.PerlinNoise(seed % 1000 + angle * 1.6f, 0.5f)
                                                     + 0.18f * Mathf.PerlinNoise(seed % 997 + angle * 4.3f, 3.7f));
-                        // A soft edge: past it the trees thin out over 7 m, and there are glades inside.
-                        if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / 7f) continue;
-                        if (r > edge + 7f || Mathf.PerlinNoise(p.x * 0.07f + seed % 211, p.y * 0.07f + 5f) < 0.28f) continue;
+                        // A broad, ragged margin and glades inside; the spacing of individual trees stays real.
+                        if (r > edge && Mathf.PerlinNoise(p.x * 0.31f + seed % 113, p.y * 0.31f) > 0.62f - 0.5f * (r - edge) / softEdge) continue;
+                        if (r > edge + softEdge || Mathf.PerlinNoise(p.x * 0.07f / Scale.Distance + seed % 211, p.y * 0.07f / Scale.Distance + 5f) < 0.28f) continue;
                         if (!MapLayout.IsWild(p, 0.5f) || InClearing(p)) continue;
                         // Trees of an age together (a stand planted or seeded at once), 0.7 to 1.3 times the usual size
                         // over 15-25 m, and here and there a young one half the size.
                         float age = 0.7f + 0.6f * Mathf.PerlinNoise(p.x * 0.05f + seed % 89, p.y * 0.05f + 31f);
                         if (Mathf.PerlinNoise(p.x * 0.27f + 12f, p.y * 0.27f + seed % 53) > 0.74f) age *= 0.55f;
-                        Place(PickTree(rng, isOuter, p), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), age * Range(rng, 0.88f, 1.12f), 0.25f, root);
-                        Undergrowth.NoteTree(p);
+                        candidates.Add((p, isOuter, age));
                     }
                 }
             }
 
-            // Trees and bushes along both river banks.
-            var river = MapLayout.RiverField.points;
-            for (int i = 0; i < river.Count - 1; i += 2)
+            int startCount = TreeCount;
+            for (int i = candidates.Count - 1; i >= 0 && TreeCount - startCount < 8000 && TreeCount < TreeLimit; i--)
             {
-                Vector2 dir = (river[i + 1] - river[i]).normalized;
-                Vector2 side = new Vector2(-dir.y, dir.x);
-                foreach (float sign in new[] { -1f, 1f })
+                int pick = rng.Next(i + 1);
+                var tree = candidates[pick];
+                candidates[pick] = candidates[i];
+                Place(PickTree(rng, tree.outer, tree.p), new Vector3(tree.p.x, 0f, tree.p.y), Range(rng, 0f, 360f),
+                    tree.age * Range(rng, 0.88f, 1.12f), 0.25f, root);
+            }
+
+            // Sample by metres, not vertex count, so changing the river curve's tessellation cannot change
+            // the real spacing or pack all the bank trees into one end of the larger map.
+            var river = MapLayout.RiverField.points;
+            float walked = 0f, next = 0f;
+            for (int i = 1; i < river.Count; i++)
+            {
+                float length = Vector2.Distance(river[i - 1], river[i]);
+                if (length < 0.001f) continue;
+                Vector2 dir = (river[i] - river[i - 1]) / length, side = new Vector2(-dir.y, dir.x);
+                for (; next <= walked + length; next += 4f)
                 {
-                    if (rng.NextDouble() > 0.42) continue;
-                    Vector2 p = river[i] + side * sign * (MapLayout.RiverHalfWidth + Range(rng, 3.2f, 9f));
-                    if (Vector2.Distance(p, MapLayout.BridgePoint) < 14f || !MapLayout.IsWild(p, -2f)) continue;
-                    double roll = rng.NextDouble();
-                    string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
-                    Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, root);
-                    if (model != "Scenery_Bush") Undergrowth.NoteTree(p);
+                    Vector2 bank = Vector2.Lerp(river[i - 1], river[i], (next - walked) / length);
+                    foreach (float sign in new[] { -1f, 1f })
+                    {
+                        if (rng.NextDouble() > 0.42) continue;
+                        Vector2 p = bank + side * sign * (MapLayout.RiverHalfWidth + Range(rng, 3.2f, 9f));
+                        if (Vector2.Distance(p, MapLayout.BridgePoint) < 14f || !MapLayout.IsWild(p, -2f)) continue;
+                        double roll = rng.NextDouble();
+                        string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
+                        Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, root);
+                    }
                 }
+                walked += length;
             }
         }
 
@@ -277,7 +314,7 @@ namespace DroneSandbox
         static bool InClearing(Vector2 p)
         {
             foreach (var c in MapLayout.Plan.clearings)
-                if (Vector2.Distance(p, c) < 24f) return true;
+                if (Vector2.Distance(p, c) < Scale.D(24f)) return true;
             return false;
         }
 
@@ -315,9 +352,9 @@ namespace DroneSandbox
             var root = new GameObject("Rocks").transform;
             root.SetParent(parent, false);
             int placed = 0;
-            for (int attempt = 0; attempt < 300 && placed < 34; attempt++)
+            for (int attempt = 0; attempt < 1200 && placed < 136; attempt++)
             {
-                var p = new Vector2(Range(rng, -200f, 200f), Range(rng, -200f, 200f));
+                var p = new Vector2(Range(rng, -MapLayout.Edge, MapLayout.Edge), Range(rng, -MapLayout.Edge, MapLayout.Edge));
                 if (!MapLayout.IsWild(p, 1f)) continue;
                 float scale = Range(rng, 0.6f, 1.8f);
                 double roll = rng.NextDouble();

@@ -12,6 +12,7 @@ namespace DroneSandbox
     {
         const float Tile = 8f;      // metres covered by one repeat of a crop texture
         const int TexSize = 512;
+        const int RendererLimit = 5400; // includes field surfaces and every hidden LOD of their props
         const float Lift = 0.14f;   // fields float this far above the terrain so it never shows through
         const float DetailCell = 0.25f; // metres per texel of a field's detail map
         const float TramSpacing = 24f;  // sprayer width: one pair of wheel tracks every this many metres
@@ -20,30 +21,38 @@ namespace DroneSandbox
         static readonly Dictionary<Crop, Texture2D> textures = new Dictionary<Crop, Texture2D>();
         static Texture2D gravel;
         static Material fieldTemplate;
-        static readonly List<Object> made = new List<Object>(); // each field's own material and detail map, to free
+        static readonly List<Object> made = new List<Object>(); // each field's mesh, material and detail map, to free
 
-        // Frees the per-field materials and detail maps of the last farmland built (a new sector replaces it).
+        // Frees the per-field meshes, materials and detail maps when a new sector replaces them.
         public static void Release()
         {
-            foreach (var o in made) if (o != null) Object.Destroy(o);
+            foreach (var o in made) Art.Discard(o);
             made.Clear();
         }
 
+        // Builds every field surface, then shares the prop allowance between fields so a large farm count
+        // cannot turn into tens of thousands of hedge renderers. Poplar avenues get a separate small allowance.
         public static void Build(Transform parent, System.Random rng)
         {
+            Release();
             var root = new GameObject("Farmland").transform;
             root.SetParent(parent, false);
+            foreach (var plot in MapLayout.Fields) BuildField(plot, root, rng);
+            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count);
+            int rows = Mathf.Min(480, remaining / 8);
+            int perField = (remaining - rows) / Mathf.Max(1, MapLayout.Fields.Count);
             foreach (var plot in MapLayout.Fields)
             {
-                BuildField(plot, root, rng);
-                if (plot.crop == Crop.MownHay) PlaceBales(plot, root, rng);
-                Hedgerows(plot, root, rng);
+                int allowance = perField;
+                if (plot.crop == Crop.MownHay) PlaceBales(plot, root, rng, ref allowance);
+                Hedgerows(plot, root, rng, ref allowance);
             }
-            PoplarRows(root, rng);
+            PoplarRows(root, rng, ref rows);
         }
 
         // ---- Fields ----
 
+        // One ground-following mesh and renderer per field; the 3 m grid keeps the real furrows on the ground.
         static void BuildField(FieldPlot plot, Transform parent, System.Random rng)
         {
             int nu = Mathf.CeilToInt(plot.halfLength * 2f / 3f), nv = Mathf.CeilToInt(plot.halfWidth * 2f / 3f);
@@ -75,7 +84,7 @@ namespace DroneSandbox
                     triangles[t++] = b; triangles[t++] = c; triangles[t++] = d;
                 }
             }
-            var mesh = new Mesh { name = "Field " + plot.crop, vertices = vertices, normals = normals, uv = uvs, triangles = triangles };
+            var mesh = new Mesh { name = "Field " + plot.crop, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32, vertices = vertices, normals = normals, uv = uvs, triangles = triangles };
             // Winding depends on which way 'across' points; make sure the field faces up.
             if (Vector3.Cross(vertices[nu + 1] - vertices[0], vertices[1] - vertices[0]).y < 0f)
             {
@@ -83,6 +92,7 @@ namespace DroneSandbox
                 mesh.triangles = triangles;
             }
             mesh.RecalculateBounds();
+            made.Add(mesh);
 
             var go = new GameObject("Field " + plot.crop);
             go.transform.SetParent(parent, false);
@@ -94,7 +104,7 @@ namespace DroneSandbox
             var tint = new Color(shade, shade, shade * (0.94f + (float)rng.NextDouble() * 0.08f));
             if (fieldTemplate == null) fieldTemplate = Resources.Load<Material>("Materials/FieldLit");
             var material = fieldTemplate != null ? new Material(fieldTemplate) { color = tint } : Art.NewMaterial(tint);
-            if (Application.isPlaying) made.Add(material);
+            made.Add(material);
             material.mainTexture = CropTexture(plot.crop);
             material.SetFloat("_Smoothness", 0f);
             if (fieldTemplate != null)
@@ -111,7 +121,8 @@ namespace DroneSandbox
 
         // A field's detail map, one byte per 25 cm: HDRP darkens or lightens the crop by how far it is from a half
         // (FieldLit ignores the detail map's normal and smoothness, so the red channel is all it needs).
-        // Its pattern is picked by where the field lies, not from the map's random numbers, so the rest of the map
+        // Low-frequency growth is sampled on a 2 m grid (about 64 times fewer noise calls); wheel tracks still
+        // use 25 cm texels. Its pattern is picked by where the field lies, not from the map's random numbers, so the rest of the map
         // (built from the same sequence) comes out as before.
         static Texture2D FieldDetail(FieldPlot plot)
         {
@@ -120,14 +131,31 @@ namespace DroneSandbox
             int h = Mathf.Clamp(Mathf.CeilToInt(length / DetailCell), 4, 1024);
             float seed = Mathf.Repeat(plot.center.x * 12.9898f + plot.center.y * 78.233f, 100f);
             float tramOffset = Mathf.Repeat(plot.center.x * 3.7f + plot.center.y * 1.3f, TramSpacing);
+            int nw = Mathf.CeilToInt(width / 2f) + 1, nh = Mathf.CeilToInt(length / 2f) + 1;
+            var growth = new Vector2[nw * nh];
+            for (int y = 0; y < nh; y++)
+                for (int x = 0; x < nw; x++)
+                {
+                    float across = x * 2f, along = y * 2f;
+                    growth[y * nw + x] = new Vector2(
+                        Mathf.PerlinNoise(across * 0.03f + seed, along * 0.03f + seed * 0.5f) * 0.65f
+                            + Mathf.PerlinNoise(across * 0.11f + seed * 2f, along * 0.11f + 7f) * 0.35f,
+                        plot.crop == Crop.Wheat ? Mathf.PerlinNoise(across * 0.09f + seed * 3f, along * 0.09f + 40f) : 0f);
+                }
             var bytes = new byte[w * h];
             for (int y = 0; y < h; y++)
             {
                 float along = (y + 0.5f) / h * length;
+                int gy = Mathf.Min((int)(along / 2f), nh - 2);
+                float fy = along / 2f - gy;
                 for (int x = 0; x < w; x++)
                 {
                     float across = (x + 0.5f) / w * width;
-                    float f = Brightness(plot.crop, across, along, width, length, seed, tramOffset);
+                    int gx = Mathf.Min((int)(across / 2f), nw - 2), g = gy * nw + gx;
+                    float fx = across / 2f - gx;
+                    Vector2 noise = Vector2.Lerp(Vector2.Lerp(growth[g], growth[g + 1], fx),
+                        Vector2.Lerp(growth[g + nw], growth[g + nw + 1], fx), fy);
+                    float f = Brightness(plot.crop, across, along, width, length, seed, tramOffset, noise);
                     bytes[y * w + x] = (byte)Mathf.Clamp(Mathf.RoundToInt(DetailValue(f) * 255f), 0, 255);
                 }
             }
@@ -137,16 +165,15 @@ namespace DroneSandbox
             };
             tex.SetPixelData(bytes, 0);
             tex.Apply(true, true);
-            if (Application.isPlaying) made.Add(tex);
+            made.Add(tex);
             return tex;
         }
 
         // How much lighter (above 1) or darker the crop is at this spot, in metres across and along the field.
-        static float Brightness(Crop crop, float across, float along, float width, float length, float seed, float tramOffset)
+        static float Brightness(Crop crop, float across, float along, float width, float length, float seed, float tramOffset, Vector2 noise)
         {
             // Drifts of better and worse growth (soil, damp, how the seed fell), bigger and smaller.
-            float drift = Mathf.PerlinNoise(across * 0.03f + seed, along * 0.03f + seed * 0.5f) * 0.65f
-                        + Mathf.PerlinNoise(across * 0.11f + seed * 2f, along * 0.11f + 7f) * 0.35f;
+            float drift = noise.x;
             float patchy = crop == Crop.Ploughed ? 0.5f : crop == Crop.YoungCrop ? 0.34f : crop == Crop.MownHay ? 0.2f : 0.28f;
             float f = 1f + (drift - 0.5f) * patchy;
             // A paddock too small for the big machines shows no headland or tramlines (drawn there they make a
@@ -186,7 +213,7 @@ namespace DroneSandbox
                 float sides = Mathf.Min(Mathf.Abs(across - headlandTrack), Mathf.Abs(across - (width - headlandTrack)));
                 if (worked && sides < 1.5f && inside) f *= Track(sides);
                 // Patches knocked flat by wind and rain, which catch the light.
-                float lodged = Mathf.PerlinNoise(across * 0.09f + seed * 3f, along * 0.09f + 40f);
+                float lodged = noise.y;
                 f *= 1f + 0.14f * Mathf.SmoothStep(0f, 1f, (lodged - 0.72f) * 8f);
             }
             return f;
@@ -202,9 +229,9 @@ namespace DroneSandbox
         }
 
         // Round bales left where the baler dropped them: in a cluster or two, not sprinkled evenly.
-        static void PlaceBales(FieldPlot plot, Transform parent, System.Random rng)
+        static void PlaceBales(FieldPlot plot, Transform parent, System.Random rng, ref int allowance)
         {
-            int count = rng.Next(5, 13), clusters = rng.Next(1, 3);
+            int count = rng.Next(5, 9), clusters = rng.Next(1, 3);
             for (int k = 0; k < clusters; k++)
             {
                 float cu = Range(rng, -0.6f, 0.6f) * plot.halfLength, cv = Range(rng, -0.6f, 0.6f) * plot.halfWidth;
@@ -213,68 +240,89 @@ namespace DroneSandbox
                     float u = Mathf.Clamp(cu + Range(rng, -7f, 7f), -0.85f * plot.halfLength, 0.85f * plot.halfLength);
                     float v = Mathf.Clamp(cv + Range(rng, -5f, 5f), -0.85f * plot.halfWidth, 0.85f * plot.halfWidth);
                     Vector2 p = plot.Point(u, v);
-                    World.Place("Scenery_HayBale", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 1f, 0.05f, parent);
+                    PlaceProp("Scenery_HayBale", p, Range(rng, 0f, 360f), 1f, 0.05f, parent, ref allowance);
                 }
             }
         }
 
         // Bushes (and the odd tree) along some field edges, just outside the field.
-        static void Hedgerows(FieldPlot plot, Transform parent, System.Random rng)
+        static void Hedgerows(FieldPlot plot, Transform parent, System.Random rng, ref int allowance)
         {
-            for (int edge = 0; edge < 4; edge++)
+            int first = rng.Next(4);
+            for (int e = 0; e < 4 && allowance > 0; e++)
             {
+                int edge = (first + e) % 4;
                 if (rng.NextDouble() > (edge % 2 == 0 ? 0.45 : 0.3)) continue; // about two field edges in five
                 bool side = edge % 2 == 0; // a long side, or an end
                 float sign = edge < 2 ? 1f : -1f;
                 Vector2 outward = side ? plot.Across * sign : plot.along * sign;
                 float halfSpan = side ? plot.halfLength : plot.halfWidth;
-                for (float s = -halfSpan; s <= halfSpan; s += Range(rng, 2.4f, 3.4f))
+                // Keep the shrubs close together in a run; leave gaps between runs instead of stretching them.
+                float start = Range(rng, -halfSpan, halfSpan * 0.3f);
+                for (float s = start; s <= halfSpan && allowance > 0; s += Range(rng, 2.4f, 3.4f))
                 {
                     Vector2 rim = side ? plot.Point(s, sign * plot.halfWidth) : plot.Point(sign * plot.halfLength, s);
                     Vector2 p = rim + outward * 1.8f + Random2(rng) * 0.5f;
                     if (!HedgeSpot(p)) continue;
-                    var pos = new Vector3(p.x, 0f, p.y);
                     if (rng.NextDouble() < 0.12)
-                        World.Place(rng.NextDouble() < 0.6 ? "Scenery_Tree" : "Scenery_Birch", pos, Range(rng, 0f, 360f), Range(rng, 0.75f, 1.0f), 0.2f, parent);
+                        PlaceProp(rng.NextDouble() < 0.6 ? "Scenery_Tree" : "Scenery_Birch", p, Range(rng, 0f, 360f), Range(rng, 0.75f, 1.0f), 0.2f, parent, ref allowance);
                     else
-                        World.Place("Scenery_Bush", pos, Range(rng, 0f, 360f), Range(rng, 1.0f, 1.5f), 0.15f, parent);
+                        PlaceProp("Scenery_Bush", p, Range(rng, 0f, 360f), Range(rng, 1.0f, 1.5f), 0.15f, parent, ref allowance);
                 }
             }
         }
 
+        // Pays for the actual model variant before creating it, including renderers in inactive LODs.
+        static void PlaceProp(string model, Vector2 p, float yaw, float scale, float sink, Transform parent, ref int allowance)
+        {
+            var pos = new Vector3(p.x, 0f, p.y);
+            int cost = Art.ModelRendererCount(model, pos);
+            if (cost > allowance) return;
+            if (World.Place(model, pos, yaw, scale, sink, parent) != null) allowance -= cost;
+        }
+
+        // Hedges stay inside the map and clear of roads, water, buildings and the crop itself.
         static bool HedgeSpot(Vector2 p)
         {
+            if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) return false;
             if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 1.2f) return false;
             if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 2f) return false;
             if (MapLayout.NearFlatSite(p, 2f) || MapLayout.NearVillage(p, -4f)) return false;
             return !MapLayout.InField(p, 0.3f);
         }
 
-        // Lines of tall poplars beside stretches of road.
-        static void PoplarRows(Transform parent, System.Random rng)
+        // Lines of tall poplars beside stretches of road. Walk in real metres so avenue spacing is independent
+        // of the road curve's vertex spacing, while the runs and gaps grow with the layout.
+        static void PoplarRows(Transform parent, System.Random rng, ref int allowance)
         {
             foreach (var line in MapLayout.RoadLines)
             {
                 float side = rng.NextDouble() < 0.5 ? -1f : 1f;
                 bool planting = false;
-                float runLeft = Range(rng, 20f, 60f), next = 0f, walked = 0f;
-                for (int i = 1; i < line.Count; i++)
+                float runLeft = Scale.D(Range(rng, 20f, 60f)), next = 0f, walked = 0f;
+                for (int i = 1; i < line.Count && allowance > 0; i++)
                 {
-                    float step = Vector2.Distance(line[i - 1], line[i]);
-                    walked += step;
-                    runLeft -= step;
-                    if (runLeft <= 0f)
+                    float length = Vector2.Distance(line[i - 1], line[i]);
+                    if (length < 0.001f) continue;
+                    Vector2 dir = (line[i] - line[i - 1]) / length;
+                    while (next <= walked + length && allowance > 0)
                     {
-                        planting = !planting && rng.NextDouble() < 0.55;
-                        runLeft = planting ? Range(rng, 40f, 90f) : Range(rng, 30f, 80f);
-                        if (!planting) side = rng.NextDouble() < 0.5 ? -1f : 1f;
+                        Vector2 at = Vector2.Lerp(line[i - 1], line[i], (next - walked) / length);
+                        float step = Range(rng, 5.5f, 7f);
+                        next += step;
+                        runLeft -= step;
+                        if (runLeft <= 0f)
+                        {
+                            planting = !planting && rng.NextDouble() < 0.55;
+                            runLeft = Scale.D(planting ? Range(rng, 40f, 90f) : Range(rng, 30f, 80f));
+                            if (!planting) side = rng.NextDouble() < 0.5 ? -1f : 1f;
+                        }
+                        if (!planting) continue;
+                        Vector2 p = at + new Vector2(-dir.y, dir.x) * side * (MapLayout.RoadHalfWidth + 2.6f);
+                        if (!HedgeSpot(p)) continue;
+                        PlaceProp("Scenery_Poplar", p, Range(rng, 0f, 360f), Range(rng, 0.85f, 1.1f), 0.2f, parent, ref allowance);
                     }
-                    if (!planting || walked < next) continue;
-                    next = walked + Range(rng, 5.5f, 7f);
-                    Vector2 dir = (line[i] - line[i - 1]).normalized;
-                    Vector2 p = line[i] + new Vector2(-dir.y, dir.x) * side * (MapLayout.RoadHalfWidth + 2.6f);
-                    if (Mathf.Abs(p.x) > 215f || Mathf.Abs(p.y) > 215f || !HedgeSpot(p)) continue;
-                    World.Place("Scenery_Poplar", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.85f, 1.1f), 0.2f, parent);
+                    walked += length;
                 }
             }
         }

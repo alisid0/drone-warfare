@@ -17,8 +17,13 @@ namespace DroneSandbox
     {
         const float FoamReach = 50f; // metres from the dam that the river carries foam
 
+        static readonly List<Object> made = new List<Object>();
+
+        // Replaces the previous sector's generated water meshes and masks; HDRP releases its own simulations.
         public static void Build(Transform parent)
         {
+            foreach (var resource in made) Art.Discard(resource);
+            made.Clear();
             var root = new GameObject("Water").transform;
             root.SetParent(parent, false);
             if (MapLayout.HasRiver && MapLayout.RiverField.points.Count > 1) BuildRiver(root);
@@ -95,22 +100,29 @@ namespace DroneSandbox
             // Downstream is the way the water level falls.
             float downstream = field.values[field.values.Length - 1] <= field.values[0] ? 1f : -1f;
             bool dam = MapLayout.HasDam;
-            const int size = 256;
-            current = new Texture2D(size, size, TextureFormat.RGBA32, false, true) { name = "River Current", wrapMode = TextureWrapMode.Clamp };
-            foam = new Texture2D(size, size, TextureFormat.R8, false, true) { name = "River Foam", wrapMode = TextureWrapMode.Clamp };
-            var flow = new Color[size * size];
-            var froth = new Color[size * size];
-            for (int y = 0; y < size; y++)
-                for (int x = 0; x < size; x++)
+            // About 2 m per texel on each axis, capped at 5 MiB for both maps together. Cache bend directions
+            // once per segment rather than normalizing seven vectors for every texel of the larger river box.
+            int width = Mathf.Clamp(Mathf.CeilToInt(extent.x / 2f), 64, 1024);
+            int height = Mathf.Clamp(Mathf.CeilToInt(extent.y / 2f), 64, 1024);
+            var directions = new Vector2[line.Count];
+            for (int i = 0; i < directions.Length; i++)
+            {
+                Vector2 dir = Vector2.zero;
+                for (int k = -3; k <= 3; k++)
+                    if (field.IsValidSegment(i + k)) dir += field.Direction(i + k);
+                directions[i] = dir.sqrMagnitude > 0f ? dir.normalized * downstream : Vector2.right;
+            }
+            current = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { name = "River Current", wrapMode = TextureWrapMode.Clamp };
+            foam = new Texture2D(width, height, TextureFormat.R8, false, true) { name = "River Foam", wrapMode = TextureWrapMode.Clamp };
+            var flow = new Color32[width * height];
+            var froth = new byte[width * height];
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
                 {
-                    float wx = min.x + (x + 0.5f) * extent.x / size, wz = min.y + (y + 0.5f) * extent.y / size;
-                    float d = field.Query(wx, wz, out _, out int s);
-                    // The direction along a few segments either side, so the current turns smoothly round bends.
-                    Vector2 dir = Vector2.zero;
-                    for (int k = -3; k <= 3; k++)
-                        if (field.IsValidSegment(s + k)) dir += field.Direction(s + k);
-                    dir = dir.sqrMagnitude > 0f ? dir.normalized * downstream : Vector2.right;
-                    flow[y * size + x] = new Color(dir.x * 0.5f + 0.5f, dir.y * 0.5f + 0.5f, 1f, 1f);
+                    float wx = min.x + (x + 0.5f) * extent.x / width, wz = min.y + (y + 0.5f) * extent.y / height;
+                    float d = field.Query(wx, wz, out _, out int segment);
+                    Vector2 dir = segment >= 0 ? directions[segment] : Vector2.right;
+                    flow[y * width + x] = new Color(dir.x * 0.5f + 0.5f, dir.y * 0.5f + 0.5f, 1f, 1f);
 
                     float churn = 0f;
                     if (dam)
@@ -120,14 +132,17 @@ namespace DroneSandbox
                     }
                     float riffle = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(wx * 0.018f + 11f, wz * 0.018f + 4f) - 0.56f) / 0.14f) * 0.55f;
                     float v = d < MapLayout.RiverHalfWidth + 4f ? Mathf.Max(churn, riffle) : churn;
-                    froth[y * size + x] = new Color(v, v, v, 1f);
+                    froth[y * width + x] = (byte)Mathf.RoundToInt(Mathf.Clamp01(v) * 255f);
                 }
-            current.SetPixels(flow);
-            current.Apply();
-            foam.SetPixels(froth);
-            foam.Apply();
+            current.SetPixels32(flow);
+            current.Apply(false, true);
+            foam.SetPixelData(froth, 0);
+            foam.Apply(false, true);
+            made.Add(current);
+            made.Add(foam);
         }
 
+        // The reservoir's waves and reflections span its enlarged shore while the dam itself stays real size.
         static void BuildLake(Transform root)
         {
             Vector2 dam = MapLayout.DamPoint;
@@ -139,8 +154,8 @@ namespace DroneSandbox
             // Glossy all the way to the far shore, so it mirrors the hills and trees there.
             lake.startSmoothness = 0.97f;
             lake.endSmoothness = 0.93f;
-            lake.smoothnessFadeStart = 150f;
-            lake.smoothnessFadeDistance = 800f;
+            lake.smoothnessFadeStart = 150f * Scale.Camera;
+            lake.smoothnessFadeDistance = 800f * Scale.Camera;
             // Patches of calm and of ruffled water, as gusts cross a real lake, and calm in the sheltered shallows.
             lake.waterMask = CalmMask(out Vector2 extent);
             lake.waterMaskExtent = extent;
@@ -169,6 +184,7 @@ namespace DroneSandbox
                 var still = Art.NewMaterial(new Color(0.3f, 0.38f, 0.32f));
                 still.SetFloat("_Smoothness", 0.92f);
                 renderer.sharedMaterial = still;
+                made.Add(still);
                 return;
             }
             var first = ponds[0];
@@ -180,8 +196,8 @@ namespace DroneSandbox
             surface.ripplesWindSpeed = lakes ? 7f : 4f;
             surface.startSmoothness = 0.97f;
             surface.endSmoothness = 0.93f;
-            surface.smoothnessFadeStart = 150f;
-            surface.smoothnessFadeDistance = 800f;
+            surface.smoothnessFadeStart = 150f * Scale.Camera;
+            surface.smoothnessFadeDistance = 800f * Scale.Camera;
             // Brighter in colour than the reservoir's: seen from above, a basin of clear water otherwise reads black.
             // Pools are murky, olive-brown with silt and weed, as farm and marsh ponds look in aerial photographs.
             surface.refractionColor = lakes ? new Color(0.06f, 0.46f, 0.52f) : new Color(0.37f, 0.46f, 0.4f); // shallows (94, 118, 101)
@@ -189,10 +205,10 @@ namespace DroneSandbox
             surface.absorptionDistance = lakes ? 9f : 1f;
         }
 
-        // A 2 m grid over every pool, at that pool's own level, kept wherever it's near the water.
+        // A bounded 2-4 m grid over every pool, at that pool's own level, kept wherever it's near the water.
         static Mesh PondMesh()
         {
-            const float cell = 2f;
+            float cell = Mathf.Max(2f, Ground.Size / 512f);
             var vertices = new List<Vector3>();
             var uvs = new List<Vector2>();
             var triangles = new List<int>();
@@ -219,7 +235,7 @@ namespace DroneSandbox
                     for (int i = 0; i < n; i++)
                     {
                         float x = pond.center.x - reach + i * cell, z = pond.center.y - reach + j * cell;
-                        if (Mathf.Abs(x) > limit || Mathf.Abs(z) > limit) continue;
+                        if (x < -limit || x + cell > limit || z < -limit || z + cell > limit) continue;
                         bool wet = false;
                         for (int c = 0; c < 4 && !wet; c++)
                         {
@@ -263,15 +279,15 @@ namespace DroneSandbox
         static Texture2D CalmMask(out Vector2 extent)
         {
             const int size = 256;
-            const float span = 240f;
-            extent = new Vector2(span, span);
-            Vector2 middle = LakeMiddle;
+            Rect bounds = LakeBounds();
+            extent = bounds.size;
+            Vector2 middle = bounds.center;
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
             var pixels = new Color[size * size];
             for (int y = 0; y < size; y++)
                 for (int x = 0; x < size; x++)
                 {
-                    float wx = middle.x - span / 2f + (x + 0.5f) * span / size, wz = middle.y - span / 2f + (y + 0.5f) * span / size;
+                    float wx = middle.x - extent.x / 2f + (x + 0.5f) * extent.x / size, wz = middle.y - extent.y / 2f + (y + 0.5f) * extent.y / size;
                     float gust = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(wx * 0.012f + 5f, wz * 0.012f + 9f) * 0.7f
                                                          + Mathf.PerlinNoise(wx * 0.045f + 1f, wz * 0.045f + 3f) * 0.3f - 0.3f) / 0.4f);
                     float lee = Mathf.SmoothStep(0f, 1f, -MapLayout.ReservoirDistance(wx, wz) / 25f);
@@ -280,11 +296,36 @@ namespace DroneSandbox
                     pixels[y * size + x] = new Color(waves, waves, ripples, 1f);
                 }
             texture.SetPixels(pixels);
-            texture.Apply();
+            texture.Apply(false, true);
+            made.Add(texture);
             return texture;
         }
 
-        static Vector2 LakeMiddle => MapLayout.DamPoint - MapLayout.DamDown * 60f + MapLayout.DamAcross * 40f;
+        // Bounds of the actual lobes, including their shore wobble and smooth unions. Keeping this in one place
+        // lets water, shore plants and woods follow either the old or the enlarged layout, even when rotated.
+        public static Rect LakeBounds(float margin = 0f)
+        {
+            Vector2 min = MapLayout.DamPoint, max = min;
+            foreach (var lobe in MapLayout.Plan.lakeLobes)
+            {
+                float angle = lobe.angle * Mathf.Deg2Rad;
+                Vector2 along = MapLayout.DamDown * Mathf.Cos(angle) + MapLayout.DamAcross * Mathf.Sin(angle);
+                Vector2 across = new Vector2(-along.y, along.x);
+                Vector2 c = MapLayout.DamPoint + MapLayout.DamDown * lobe.center.x + MapLayout.DamAcross * lobe.center.y;
+                Vector2 reach = new Vector2(
+                    Mathf.Sqrt(along.x * along.x * lobe.halfLength * lobe.halfLength + across.x * across.x * lobe.halfWidth * lobe.halfWidth),
+                    Mathf.Sqrt(along.y * along.y * lobe.halfLength * lobe.halfLength + across.y * across.y * lobe.halfWidth * lobe.halfWidth));
+                reach = reach * 1.2f + Vector2.one * Scale.D(14f);
+                min = Vector2.Min(min, c - reach);
+                max = Vector2.Max(max, c + reach);
+            }
+            float limit = Ground.Size / 2f - 1f;
+            return Rect.MinMaxRect(Mathf.Clamp(min.x - margin, -limit, limit), Mathf.Clamp(min.y - margin, -limit, limit),
+                Mathf.Clamp(max.x + margin, -limit, limit), Mathf.Clamp(max.y + margin, -limit, limit));
+        }
+
+        // The calm mask and mesh share their centre, whatever the dam's orientation or the shape of the lake.
+        static Vector2 LakeMiddle => LakeBounds().center;
 
         static Mesh RiverMesh()
         {
@@ -319,13 +360,14 @@ namespace DroneSandbox
             return Finish("River", vertices, uvs, triangles);
         }
 
-        // A grid over the lake, 2 m cells, kept wherever any corner is near the water. The shores rise above
-        // it, so the terrain draws the shoreline. UVs are world metres.
+        // A grid over the lake, 2-4 m cells, kept wherever a corner is near water. HDRP adds the wave detail;
+        // the terrain draws the shoreline. Grid density is bounded on the larger map. UVs are world metres.
         static Mesh LakeMesh()
         {
-            const float cell = 2f, reach = 110f;
-            Vector2 middle = LakeMiddle;
-            int n = Mathf.CeilToInt(reach * 2f / cell);
+            float cell = Mathf.Max(2f, Ground.Size / 512f);
+            Rect bounds = LakeBounds();
+            int nx = Mathf.Max(1, Mathf.CeilToInt(bounds.width / cell)), nz = Mathf.Max(1, Mathf.CeilToInt(bounds.height / cell));
+            float dx = bounds.width / nx, dz = bounds.height / nz;
             var vertices = new List<Vector3>();
             var uvs = new List<Vector2>();
             var triangles = new List<int>();
@@ -334,23 +376,23 @@ namespace DroneSandbox
 
             int Vertex(int i, int j)
             {
-                int key = j * (n + 1) + i;
+                int key = j * (nx + 1) + i;
                 if (index.TryGetValue(key, out int at)) return at;
-                float x = middle.x - reach + i * cell, z = middle.y - reach + j * cell;
+                float x = bounds.xMin + i * dx, z = bounds.yMin + j * dz;
                 index[key] = vertices.Count;
                 vertices.Add(new Vector3(x, y, z));
                 uvs.Add(new Vector2(x, z));
                 return vertices.Count - 1;
             }
 
-            for (int j = 0; j < n; j++)
+            for (int j = 0; j < nz; j++)
             {
-                for (int i = 0; i < n; i++)
+                for (int i = 0; i < nx; i++)
                 {
-                    float x = middle.x - reach + i * cell, z = middle.y - reach + j * cell;
+                    float x = bounds.xMin + i * dx, z = bounds.yMin + j * dz;
                     bool wet = false;
                     for (int c = 0; c < 4 && !wet; c++)
-                        wet = MapLayout.ReservoirDistance(x + (c & 1) * cell, z + (c >> 1) * cell) < 1.5f;
+                        wet = MapLayout.ReservoirDistance(x + (c & 1) * dx, z + (c >> 1) * dz) < 1.5f;
                     if (!wet) continue;
                     int a = Vertex(i, j), b = Vertex(i + 1, j), d = Vertex(i, j + 1), e = Vertex(i + 1, j + 1);
                     triangles.AddRange(new[] { a, d, b, b, d, e }); // clockwise from above, so it faces up
@@ -411,6 +453,7 @@ namespace DroneSandbox
             }
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
+            made.Add(mesh);
             return mesh;
         }
     }

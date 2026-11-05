@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 
@@ -128,17 +129,28 @@ namespace DroneSandbox
         static void ShoreRocks(Transform root, System.Random rng, System.Random variety)
         {
             Vector2 dam = MapLayout.DamPoint, down = MapLayout.DamDown, across = MapLayout.DamAcross;
-            for (int k = 0; k < 160; k++)
+            var lobes = MapLayout.Plan.lakeLobes;
+            for (int k = 0; k < 640 && lobes.Length > 0; k++)
             {
-                float angle = k * Mathf.PI * 2f / 160f;
-                // Walk out from the middle of the lake until reaching the shore.
-                Vector2 dirLocal = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                Vector2 center = dam - down * 32f;
-                Vector2 dir = down * dirLocal.x + across * dirLocal.y;
-                float r = 5f;
-                while (r < 90f && MapLayout.LakeDistance(center.x + dir.x * r, center.y + dir.y * r) < 0f) r += 0.5f;
-                Vector2 p = center + dir * (r + Range(rng, -0.5f, 1.5f));
-                if (MapLayout.DamLocal(p.x, p.y).x > -12f || rng.NextDouble() > 0.5) continue;
+                var lobe = lobes[k % lobes.Length];
+                float angle = k * 2.399963f; // a golden-angle walk samples every lobe without repeating spokes
+                Vector2 center = dam + down * lobe.center.x + across * lobe.center.y;
+                Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                float reach = Mathf.Max(lobe.halfLength, lobe.halfWidth) * 2.5f + Scale.D(14f);
+                float r = 0f;
+                // Step coarsely across the enlarged lake, then refine the last wet/dry interval to centimetres.
+                while (r < reach && MapLayout.ReservoirDistance(center.x + dir.x * r, center.y + dir.y * r) < 0f) r += 4f;
+                if (r == 0f || r >= reach) continue;
+                float low = r - 4f, high = r;
+                for (int j = 0; j < 7; j++)
+                {
+                    float mid = (low + high) * 0.5f;
+                    if (MapLayout.ReservoirDistance(center.x + dir.x * mid, center.y + dir.y * mid) < 0f) low = mid;
+                    else high = mid;
+                }
+                Vector2 p = center + dir * (high + Range(rng, -0.5f, 1.5f));
+                if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge
+                    || MapLayout.DamLocal(p.x, p.y).x > -12f || rng.NextDouble() > 0.5) continue;
                 float scale = Range(rng, 0.6f, 1.9f);
                 double roll = rng.NextDouble();
                 Scans.Rock(Scans.Rocks, roll, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.5f + 0.4f * scale, root,
@@ -152,6 +164,7 @@ namespace DroneSandbox
                 {
                     float angle = k * Mathf.PI * 2f / 10f + Range(rng, -0.2f, 0.2f);
                     Vector2 p = island + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius * Range(rng, 0.85f, 1.05f);
+                    if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) continue;
                     float scale = Range(rng, 0.8f, 1.7f);
                     // Big boulders and smaller rocks mixed, a third of them boulders as before.
                     Scans.Rock(k % 3 == 0 ? Scans.Boulders : Scans.Rocks, variety.NextDouble(), new Vector3(p.x, 0f, p.y),
@@ -167,30 +180,46 @@ namespace DroneSandbox
         {
             var woods = new GameObject("Lake Woods").transform;
             woods.SetParent(root, false);
-            Vector2 center = MapLayout.DamPoint - MapLayout.DamDown * 55f + MapLayout.DamAcross * 35f;
-            for (int k = 0; k < 4400; k++)
+            Rect bounds = Water.LakeBounds(Scale.D(75f));
+            var candidates = new List<Vector2>();
+            const float spacing = 5.6f;
+            for (float z = bounds.yMin; z <= bounds.yMax; z += spacing)
+                for (float x = bounds.xMin; x <= bounds.xMax; x += spacing)
+                {
+                    var p = new Vector2(x + Range(rng, -1.2f, 1.2f), z + Range(rng, -1.2f, 1.2f));
+                    float shore = MapLayout.ReservoirDistance(p.x, p.y);
+                    if (shore < 4f || shore > Scale.D(75f) || !MapLayout.IsWild(p, 0.5f)) continue;
+                    // Broad stands with open meadow between them, rather than scattering trees over all the land.
+                    if (Mathf.PerlinNoise(p.x / Scale.D(40f) + 5f, p.y / Scale.D(40f) + 9f) < 0.5f) continue;
+                    if (rng.NextDouble() > 0.85f - shore / Scale.D(150f)) continue;
+                    candidates.Add(p);
+                }
+            int startCount = World.TreeCount;
+            for (int i = candidates.Count - 1; i >= 0 && World.TreeCount - startCount < 2200; i--)
             {
-                var p = center + new Vector2(Range(rng, -130f, 130f), Range(rng, -130f, 130f));
-                float s = MapLayout.LakeDistance(p.x, p.y);
-                if (s < 4f || s > 75f || !MapLayout.IsWild(p, 0.5f)) continue;
-                if (rng.NextDouble() > 0.85 - s / 150f) continue;
-                if (Mathf.PerlinNoise(p.x * 0.025f + 5f, p.y * 0.025f + 9f) < 0.3f) continue; // clearings and meadows
+                int pick = rng.Next(i + 1);
+                Vector2 p = candidates[pick];
+                candidates[pick] = candidates[i];
                 double roll = rng.NextDouble();
                 string model = roll < 0.4 ? "Scenery_Spruce" : roll < 0.65 ? "Scenery_Pine" : roll < 0.8 ? "Scenery_Pine_B"
                     : roll < 0.92 ? "Scenery_Birch" : "Scenery_Tree";
                 World.Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.25f), 0.25f, woods);
-                Undergrowth.NoteTree(p);
             }
+            // Islands are already included in the signed shore distance above; plant their centres too, with
+            // the same real spacing and within the same 2,400-tree allowance for the whole reservoir.
             for (int i = 0; i < MapLayout.IslandCount; i++)
             {
                 Vector2 island = MapLayout.IslandCenter(i);
-                float radius = MapLayout.IslandRadius(i);
-                for (int k = 0; k < Mathf.RoundToInt(radius); k++)
-                {
-                    Vector2 p = island + new Vector2(Range(rng, -0.5f, 0.5f), Range(rng, -0.5f, 0.5f)) * radius;
-                    World.Place(k % 3 == 0 ? "Scenery_Spruce" : "Scenery_Pine", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f),
-                        Range(rng, 0.8f, 1.15f), 0.25f, woods);
-                }
+                float radius = MapLayout.IslandRadius(i) - 3f;
+                for (float z = -radius; z <= radius && World.TreeCount - startCount < 2400; z += spacing)
+                    for (float x = -radius; x <= radius && World.TreeCount - startCount < 2400; x += spacing)
+                    {
+                        Vector2 offset = new Vector2(x, z) + new Vector2(Range(rng, -1f, 1f), Range(rng, -1f, 1f));
+                        Vector2 p = island + offset;
+                        if (offset.sqrMagnitude > radius * radius || !MapLayout.IsWild(p, 0.5f)) continue;
+                        World.Place(rng.NextDouble() < 0.3 ? "Scenery_Spruce" : "Scenery_Pine", new Vector3(p.x, 0f, p.y),
+                            Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, woods);
+                    }
             }
         }
 
@@ -210,8 +239,8 @@ namespace DroneSandbox
             parameters.positiveFade = Vector3.one * fade;
             parameters.negativeFade = Vector3.one * fade;
             parameters.falloffMode = LocalVolumetricFogFalloffMode.Exponential;
-            parameters.distanceFadeStart = 400f;
-            parameters.distanceFadeEnd = 600f;
+            parameters.distanceFadeStart = 800f;
+            parameters.distanceFadeEnd = 1200f;
             fog.parameters = parameters;
         }
 
