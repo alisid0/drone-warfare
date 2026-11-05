@@ -7,7 +7,7 @@ namespace DroneSandbox
     // (ripe wheat in drill rows, rows of a young crop, ploughed furrows, sunflowers, mown hay) repeating every few
     // metres, and over it a detail map the size of the whole field with what shows from the air: tractor
     // tramlines and the headland track, growth patchy in drifts and thin at the edges, raked windrows on hay.
-    // Plus round bales on the hay fields, hedgerows along some field edges and poplar rows by the roads.
+    // Plus round bales, one boundary per shared parcel edge and poplar rows by the roads.
     public static class Farmland
     {
         const float Tile = 8f;      // metres covered by one repeat of a crop texture
@@ -35,17 +35,30 @@ namespace DroneSandbox
         public static void Build(Transform parent, System.Random rng)
         {
             Release();
+            // Field count and boundary detail must not advance the stream villages and woods share. Switching to
+            // this stream changes the old scenery sequence once; future farmland edits leave it alone.
+            rng = new System.Random(MapLayout.Plan.worldSeed ^ 0x31a7);
             var root = new GameObject("Farmland").transform;
             root.SetParent(parent, false);
             foreach (var plot in MapLayout.Fields) BuildField(plot, root, rng);
             int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count);
             int rows = Mathf.Min(480, remaining / 8);
-            int perField = (remaining - rows) / Mathf.Max(1, MapLayout.Fields.Count);
+            remaining -= rows;
+            // Pay for every boundary's inexpensive silhouette first; fences and mature trees share what remains.
+            foreach (var edge in MapLayout.Boundaries) BuildBoundary(edge, root, ref remaining);
+            int decoration = remaining;
+            int perEdge = decoration / Mathf.Max(1, MapLayout.Boundaries.Count);
+            foreach (var edge in MapLayout.Boundaries)
+            {
+                int allowance = perEdge;
+                BoundaryProps(edge, root, rng, ref allowance);
+                remaining -= perEdge - allowance;
+            }
+            int perField = remaining / Mathf.Max(1, MapLayout.Fields.Count);
             foreach (var plot in MapLayout.Fields)
             {
                 int allowance = perField;
                 if (plot.crop == Crop.MownHay) PlaceBales(plot, root, rng, ref allowance);
-                Hedgerows(plot, root, rng, ref allowance);
             }
             PoplarRows(root, rng, ref rows);
         }
@@ -245,30 +258,123 @@ namespace DroneSandbox
             }
         }
 
-        // Bushes (and the odd tree) along some field edges, just outside the field.
-        static void Hedgerows(FieldPlot plot, Transform parent, System.Random rng, ref int allowance)
+        // An entrance is kept open for 4 m, and an existing track always has at least 4 m of clear width.
+        static bool BoundaryGap(FieldBoundary edge, float t, float length, float extra = 0f)
         {
-            int first = rng.Next(4);
-            for (int e = 0; e < 4 && allowance > 0; e++)
+            float gate = 0.25f + Mathf.Repeat(edge.a.x * 0.017f + edge.a.y * 0.031f, 0.5f);
+            if (Mathf.Abs(t - gate) * length < 2f + extra) return true;
+            Vector2 p = edge.Point(t);
+            return MapLayout.TrackField.Distance(p.x, p.y) < 2.2f + extra;
+        }
+
+        // One cheap, ground-following boundary mesh per shared edge. Hedges are lumpy five-sided volumes using the
+        // existing leaf material; ditches are a dark damp ribbon, banks are a low ridge under fence runs.
+        static void BuildBoundary(FieldBoundary edge, Transform parent, ref int allowance)
+        {
+            if (edge.kind == FieldBoundaryKind.Open) return;
+            bool hedge = edge.kind == FieldBoundaryKind.Hedge, ditch = edge.kind == FieldBoundaryKind.Ditch;
+            int cost = hedge ? 2 : 1;
+            if (allowance < cost) return;
+            float length = Vector2.Distance(edge.a, edge.b);
+            int steps = Mathf.Max(2, Mathf.CeilToInt(length)), sides = ditch ? 3 : 5;
+            var vertices = new Vector3[(steps + 1) * sides];
+            var uvs = new Vector2[vertices.Length];
+            var triangles = new List<int>(steps * (sides - 1) * 6);
+            float seed = Mathf.Repeat(edge.a.x * 1.7f + edge.b.y * 2.3f, 100f);
+            float width = ditch ? 0.65f + seed % 0.8f : hedge ? 0.95f + seed % 0.9f : 0.9f;
+            float height = hedge ? 1.45f + seed % 0.7f : 0.35f;
+            Vector2 dir = (edge.b - edge.a).normalized, normal = new Vector2(-dir.y, dir.x);
+            for (int i = 0; i <= steps; i++)
             {
-                int edge = (first + e) % 4;
-                if (rng.NextDouble() > (edge % 2 == 0 ? 0.45 : 0.3)) continue; // about two field edges in five
-                bool side = edge % 2 == 0; // a long side, or an end
-                float sign = edge < 2 ? 1f : -1f;
-                Vector2 outward = side ? plot.Across * sign : plot.along * sign;
-                float halfSpan = side ? plot.halfLength : plot.halfWidth;
-                // Keep the shrubs close together in a run; leave gaps between runs instead of stretching them.
-                float start = Range(rng, -halfSpan, halfSpan * 0.3f);
-                for (float s = start; s <= halfSpan && allowance > 0; s += Range(rng, 2.4f, 3.4f))
+                float t = i / (float)steps;
+                Vector2 p = edge.Point(t);
+                float lump = 0.96f + 0.07f * Mathf.Sin(i * 2.1f + seed) + 0.03f * Mathf.Sin(i * 0.73f + seed);
+                for (int j = 0; j < sides; j++)
                 {
-                    Vector2 rim = side ? plot.Point(s, sign * plot.halfWidth) : plot.Point(sign * plot.halfLength, s);
-                    Vector2 p = rim + outward * 1.8f + Random2(rng) * 0.5f;
-                    if (!HedgeSpot(p)) continue;
-                    if (rng.NextDouble() < 0.12)
-                        PlaceProp(rng.NextDouble() < 0.6 ? "Scenery_Tree" : "Scenery_Birch", p, Range(rng, 0f, 360f), Range(rng, 0.75f, 1.0f), 0.2f, parent, ref allowance);
-                    else
-                        PlaceProp("Scenery_Bush", p, Range(rng, 0f, 360f), Range(rng, 1.0f, 1.5f), 0.15f, parent, ref allowance);
+                    float angle = j * Mathf.PI / (sides - 1);
+                    Vector2 q = p + normal * (Mathf.Cos(angle) * width * 0.5f * (hedge ? lump : 1f));
+                    var at = new Vector3(q.x, 0f, q.y);
+                    // A ditch's centre sits lower than its raised damp rims, all just above the terrain surface.
+                    float rise = ditch ? 0.025f + 0.055f * Mathf.Abs(Mathf.Cos(angle)) : Mathf.Sin(angle) * height * lump;
+                    vertices[i * sides + j] = new Vector3(q.x, Ground.HeightAt(at) + 0.04f + rise, q.y);
+                    uvs[i * sides + j] = new Vector2(i * length / steps, j * width / (sides - 1));
                 }
+                if (i == 0 || BoundaryGap(edge, (i - 0.5f) / steps, length)) continue;
+                for (int j = 0; j < sides - 1; j++)
+                {
+                    int a = (i - 1) * sides + j, b = i * sides + j;
+                    triangles.Add(a); triangles.Add(b); triangles.Add(a + 1);
+                    triangles.Add(a + 1); triangles.Add(b); triangles.Add(b + 1);
+                }
+            }
+            if (triangles.Count == 0) return;
+            if (hedge)
+                for (int i = 0; i <= steps; i++)
+                {
+                    bool before = i > 0 && !BoundaryGap(edge, (i - 0.5f) / steps, length);
+                    bool after = i < steps && !BoundaryGap(edge, (i + 0.5f) / steps, length);
+                    if (before == after) continue;
+                    // Close the cut ends at gateways too, so a close view cannot look inside a hollow hedge.
+                    int a = i * sides;
+                    for (int j = 1; j < sides - 1; j++)
+                    {
+                        triangles.Add(a);
+                        triangles.Add(a + (after ? j : j + 1));
+                        triangles.Add(a + (after ? j + 1 : j));
+                    }
+                }
+            var mesh = new Mesh { name = "Parcel " + edge.kind, vertices = vertices, uv = uvs, triangles = triangles.ToArray() };
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            made.Add(mesh);
+            var material = hedge ? Resources.Load<Material>("Materials/PBR/BushLeaves") : null;
+            if (material == null) material = Art.Shared(hedge ? new Color(0.07f, 0.13f, 0.025f)
+                : ditch ? new Color(0.105f, 0.13f, 0.085f) : new Color(0.22f, 0.24f, 0.13f));
+            var go = new GameObject("Parcel " + edge.kind);
+            go.transform.SetParent(parent, false);
+            var near = BoundaryRenderer(mesh, material, go.transform, "Near", hedge);
+            if (hedge)
+            {
+                var far = BoundaryRenderer(mesh, material, go.transform, "Far (no shadows)", false);
+                var lod = go.AddComponent<LODGroup>();
+                // A fixed proxy size gives even a 200 m hedge a valid transition height at 150 m, as in Art.TuneLods.
+                lod.localReferencePoint = mesh.bounds.center;
+                lod.size = 10f;
+                float projected = 10f / (2f * Mathf.Tan(Scale.CameraFov * 0.5f * Mathf.Deg2Rad));
+                lod.SetLODs(new[] { new LOD(projected / 150f, new Renderer[] { near }), new LOD(projected / 3000f, new Renderer[] { far }) });
+            }
+            allowance -= cost;
+        }
+
+        // Both hedge LODs share one mesh and material; only the nearby one casts shadows.
+        static MeshRenderer BoundaryRenderer(Mesh mesh, Material material, Transform parent, string name, bool shadows)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = shadows ? UnityEngine.Rendering.ShadowCastingMode.On : UnityEngine.Rendering.ShadowCastingMode.Off;
+            return renderer;
+        }
+
+        // Mature trees punctuate some hedges at real 35-80 m intervals. Fence runs use the existing 3 m model,
+        // leaving the low bank readable along the whole edge even when the model allowance is exhausted.
+        static void BoundaryProps(FieldBoundary edge, Transform parent, System.Random rng, ref int allowance)
+        {
+            bool tree = edge.kind == FieldBoundaryKind.Hedge && rng.NextDouble() < 0.4;
+            if (!tree && edge.kind != FieldBoundaryKind.Fence) return;
+            float length = Vector2.Distance(edge.a, edge.b);
+            float step = tree ? Range(rng, 35f, 80f) : 3.1f;
+            float start = tree ? Range(rng, 12f, 30f) : 1.6f;
+            for (float s = start; s < length - 1.6f && allowance > 0; s += step)
+            {
+                if (BoundaryGap(edge, s / length, length, tree ? 3f : 1.6f)) continue;
+                Vector2 p = edge.Point(s / length);
+                if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 2f) continue;
+                Vector2 dir = edge.Point(Mathf.Min(1f, (s + 1f) / length)) - p;
+                float yaw = tree ? Range(rng, 0f, 360f) : -Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+                PlaceProp(tree ? "Scenery_Tree" : "Scenery_Fence", p, yaw, tree ? Range(rng, 0.85f, 1.1f) : 1f, tree ? 0.2f : 0.02f, parent, ref allowance);
             }
         }
 
@@ -438,7 +544,6 @@ namespace DroneSandbox
             return gravel;
         }
 
-        static Vector2 Random2(System.Random rng) => new Vector2((float)rng.NextDouble() * 2f - 1f, (float)rng.NextDouble() * 2f - 1f);
 
         static float Range(System.Random rng, float min, float max) => min + (float)rng.NextDouble() * (max - min);
     }
