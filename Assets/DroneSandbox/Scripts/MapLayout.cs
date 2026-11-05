@@ -84,7 +84,7 @@ namespace DroneSandbox
         public const float BaseRadius = 18f, HqRadius = 17f, DefenceRadius = 6f;
         public const float RoadHalfWidth = 2f, RailHalfWidth = 2f;
         public const float VillageRadius = 22f;
-        const float Edge = 225f; // keep fields and scenery inside the terrain
+        public static readonly float Edge = Ground.Size / 2f - 15f; // keep fields and scenery inside the terrain
         const float Far = 100000f;
 
         static SectorPlan plan;
