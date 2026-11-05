@@ -6,8 +6,8 @@ using System.Text.Json;
 using DroneSandbox;
 using UnityEngine;
 
-// Independent crossing measurements and comparisons execute the real adapter and the unchanged consumers.
-static class Harness
+// Independent crossing measurements and comparisons execute the real adapter and the production consumers.
+static partial class Harness
 {
     static readonly JsonSerializerOptions Json = new JsonSerializerOptions { WriteIndented = true };
     static int checks;
@@ -20,6 +20,7 @@ static class Harness
         {
             string output = args[0];
             Directory.CreateDirectory(output);
+            if (args.Length > 1 && args[1] == "--legacy") { LegacyConsumers(output); return 0; }
             var clock = Stopwatch.StartNew(); WorldPlan.Generate(1200);
             Console.WriteLine("World generated in " + clock.Elapsed.TotalSeconds.ToString("F2") + " s");
             var spots = Spots();
@@ -36,6 +37,7 @@ static class Harness
                 Inspect(plan);
                 MapLayout.Use(plan); clock.Restart(); MapLayout.Prepare();
                 Console.WriteLine("  Prepare: " + clock.Elapsed.TotalMilliseconds.ToString("F0") + " ms");
+                var consumer = Consumers(plan);
                 var worldRoads = new List<IList<Vector2>>(); foreach (var road in WorldPlan.Roads) worldRoads.Add(Local(road.points, spot.center));
                 var worldRivers = new List<IList<Vector2>>(); foreach (var river in WorldPlan.Rivers) worldRivers.Add(Local(river.points, spot.center));
                 var sectorRivers = new List<IList<Vector2>>(); foreach (var river in plan.world.rivers) sectorRivers.Add(river.points);
@@ -63,23 +65,20 @@ static class Harness
                     }
                     missions++;
                 }
-#if WORLD_WATER_PROBE
                 Require(unitsOverWater == 0, "No stationary units over exact world water after query integration: " + unitsOverWater);
-#endif
                 var summary = new { spot.name, center = V(spot.center), kind = plan.kind.ToString(), milliseconds = ms,
                     roads = roadSeam, preparedRoads = preparedSeam, rivers = riverSeam, legacyRiver = legacySeam,
                     missions, straightFallbacks, unitsOverWater, forest = plan.forest, fields = plan.fields,
                     minHeight = plan.world.minimumHeight, maxHeight = plan.world.maximumHeight };
                 summaries.Add(summary);
                 File.WriteAllText(Path.Combine(output, spot.name + ".json"), JsonSerializer.Serialize(new {
-                    summary, world = WorldView(spot.center), sector = Plan(plan),
+                    summary, consumer, world = WorldView(spot.center), sector = Plan(plan),
                     preparedRoads = Lines(preparedRoads), preparedRiver = Line(MapLayout.RiverLine)
                 }, Json));
             }
+            FlowChecks(spots[0].center, spots[1].center);
             Hotspots();
-#if !WORLD_WATER_PROBE
             AllKinds();
-#endif
             var dam = WorldPlan.Dams[0]; var reservoir = WorldPlan.Lakes.Find(l => l.reservoir);
             var varrow = SectorPlan.Varrow(); var vr = MapLayout.Smooth(varrow.river, 2f);
             Vector2 down = (vr[4] - vr[0]).normalized, across = new Vector2(-down.y, down.x);
@@ -88,12 +87,10 @@ static class Harness
             float rotation = (Mathf.Atan2(worldArm.y, worldArm.x) - Mathf.Atan2(localArm.y, localArm.x)) * Mathf.Rad2Deg;
             Console.WriteLine("Varrow arm rotation (degrees CCW in X/Z): " + rotation.ToString("F2"));
             var orientation = new { damCenter = V((dam.a + dam.b) / 2f), varrowDown = V(down), varrowArm = V(localArm), worldArm = V(worldArm), rotationDegrees = rotation };
-#if !WORLD_WATER_PROBE
             var snapshot = WorldSectors.PlanAt(spots[0].center, spots[0].kind, 7100);
             string beforeRegeneration = JsonSerializer.Serialize(Plan(snapshot), Json);
             WorldPlan.Generate(1201);
             Require(beforeRegeneration == JsonSerializer.Serialize(Plan(snapshot), Json), "Owned snapshot survives world regeneration");
-#endif
             File.WriteAllText(Path.Combine(output, "metrics.json"), JsonSerializer.Serialize(new { seed = 1200, checks, spots = summaries, kinds = kindChecks, orientation }, Json));
             Console.WriteLine("PASS " + checks + " checks"); return 0;
         }

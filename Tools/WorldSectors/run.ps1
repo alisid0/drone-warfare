@@ -18,61 +18,37 @@ function Write-Generated($path, $text) {
     [IO.File]::WriteAllText($path, $text.Replace("`r`n", "`n").Replace("`n", "`r`n"), $encoding)
 }
 Write-Generated (Join-Path $temp 'NuGet.Config') '<configuration><packageSources><clear /></packageSources></configuration>'
-$enums = ''
-foreach ($pair in @(@('EnemyUnit','EnemyType'), @('Drone','DroneType'))) {
-    $source = [IO.File]::ReadAllText((Join-Path $scripts ($pair[0] + '.cs')))
-    $enums += [regex]::Match($source, ('public enum ' + $pair[1] + '\s*\{[^}]+\}')).Value
-}
-$math = [IO.File]::ReadAllText((Join-Path $repo 'Tools/Tests/Parcels/UnityMath.cs'))
-$math = [regex]::Replace($math, 'public enum EnemyType\s*\{[^}]+\}', $enums)
-$math = $math.Replace('public static Vector3 up =>', @'
-public static Vector3 zero => new Vector3();
-        public static Vector3 operator /(Vector3 a, float b) => new Vector3(a.x/b,a.y/b,a.z/b);
-        public static Vector3 operator *(Vector3 a, float b) => new Vector3(a.x*b,a.y*b,a.z*b);
-        public static float Distance(Vector3 a, Vector3 b) => (float)Math.Sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z));
-        public static Vector3 up =>
-'@)
-Write-Generated (Join-Path $temp 'UnityMath.cs') $math
+& $Python -I (Join-Path $PSScriptRoot 'prepare_consumers.py') $temp
+if ($LASTEXITCODE -ne 0) { throw 'Consumer harness preparation failed' }
 $theatre = [IO.File]::ReadAllText((Join-Path $scripts 'Theatre.cs'))
 $hotspot = $theatre.Substring($theatre.IndexOf('    public class Hotspot'), $theatre.IndexOf('    // The theatre of war') - $theatre.IndexOf('    public class Hotspot'))
 Write-Generated (Join-Path $temp 'Hotspot.cs') ("using UnityEngine; namespace DroneSandbox {`r`n" + $hotspot + '}')
-$files = @('Scale.cs','Sector.cs','SectorGenerator.cs','PathField.cs','MapLayout.cs','FieldParcels.cs','Situations.cs','Missions.cs') | ForEach-Object { Join-Path $scripts $_ }
+$files = @('Scale.cs','Sector.cs','SectorGenerator.cs','SectorIdentity.cs','PathField.cs','MapLayout.cs','FieldParcels.cs','Situations.cs','Missions.cs','Ground.cs','Water.cs','World.cs') | ForEach-Object { Join-Path $scripts $_ }
 $files += Get-ChildItem -LiteralPath $scripts -Filter 'WorldPlan*.cs' | ForEach-Object FullName
 $files += Get-ChildItem -LiteralPath $scripts -Filter 'WorldSector*.cs' | ForEach-Object FullName
-$files += (Join-Path $temp 'Hotspot.cs'), (Join-Path $PSScriptRoot 'GameStubs.cs')
+$files += (Join-Path $temp 'Hotspot.cs'), (Join-Path $PSScriptRoot 'ConsumerServices.cs'), (Join-Path $PSScriptRoot 'HdrpStubs.cs'), (Join-Path $temp 'Enums.cs'), (Join-Path $temp 'SandboxFlowProbe.cs')
 
-# Compile production, the real Unity API check, and a separate review-only water-query integration probe.
-foreach ($mode in 'harness','api','probe') {
+# Execute complete consumer sources with managed storage, and separately check real Unity engine APIs.
+foreach ($mode in 'api','harness') {
     $sources = @($files)
     $extra = ''
-    if ($mode -ne 'api') { $sources += (Join-Path $temp 'UnityMath.cs'), (Join-Path $PSScriptRoot 'Harness.cs'); $outputType = 'Exe' }
-    else {
-        $ground = $math.Substring($math.IndexOf('    public static partial class Ground'))
-        Write-Generated (Join-Path $temp 'ApiTypes.cs') ("using UnityEngine; namespace DroneSandbox { $enums $ground")
-        $sources += Join-Path $temp 'ApiTypes.cs'
-        $assembly = Join-Path (Split-Path (Split-Path $Dotnet -Parent) -Parent) 'Managed/UnityEngine/UnityEngine.CoreModule.dll'
-        $extra = '<Reference Include="UnityEngine.CoreModule"><HintPath>' + $assembly + '</HintPath></Reference>'
-        $outputType = 'Library'
+    if ($mode -eq 'harness') {
+        $sources += (Join-Path $temp 'ConsumerMath.cs'), (Join-Path $PSScriptRoot 'EngineStubs.cs'),
+            (Join-Path $PSScriptRoot 'Harness.cs'), (Join-Path $PSScriptRoot 'ConsumerChecks.cs')
+        $outputType = 'Exe'
     }
-    $defines = ''
-    if ($mode -eq 'probe') {
-        # Review-only consumer proof: compile a generated copy; never edit the forbidden production MapLayout.
-        $map = [IO.File]::ReadAllText((Join-Path $scripts 'MapLayout.cs'))
-        $old = 'Mathf.Min(ReservoirDistance(x, z), PondDistance(x, z, out _));'
-        if (-not $map.Contains($old)) { throw 'LakeDistance integration probe anchor changed' }
-        $map = $map.Replace($old, 'Plan.world != null ? Plan.world.LakeDistance(new Vector2(x, z), out _) : ' + $old)
-        $old = 'p.river != null ? new[] { RiverLine } : new List<Vector2>[0]'
-        if (-not $map.Contains($old)) { throw 'RiverField integration probe anchor changed' }
-        $map = $map.Replace($old, 'p.world != null ? p.world.RiverLines() : (' + $old + ')')
-        Write-Generated (Join-Path $temp 'MapLayout.probe.cs') $map
-        $sources = @($sources | Where-Object { $_ -ne (Join-Path $scripts 'MapLayout.cs') })
-        $sources += Join-Path $temp 'MapLayout.probe.cs'
-        $defines = '<DefineConstants>WORLD_WATER_PROBE</DefineConstants>'
+    else {
+        $assemblies = Join-Path (Split-Path (Split-Path $Dotnet -Parent) -Parent) 'Managed/UnityEngine'
+        foreach ($name in 'CoreModule','TerrainModule','TerrainPhysicsModule','PhysicsModule','AnimationModule') {
+            $assembly = Join-Path $assemblies ("UnityEngine.$name.dll")
+            $extra += '<Reference Include="UnityEngine.' + $name + '"><HintPath>' + $assembly + '</HintPath></Reference>'
+        }
+        $outputType = 'Library'
     }
     $includes = ($sources | ForEach-Object { '<Compile Include="' + $_ + '" />' }) -join "`r`n"
     $project = @"
 <Project Sdk="Microsoft.NET.Sdk">
-<PropertyGroup><OutputType>$outputType</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>9</LangVersion><EnableDefaultCompileItems>false</EnableDefaultCompileItems><Optimize>true</Optimize><TreatWarningsAsErrors>true</TreatWarningsAsErrors><UseSharedCompilation>false</UseSharedCompilation>$defines</PropertyGroup>
+<PropertyGroup><OutputType>$outputType</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>9</LangVersion><EnableDefaultCompileItems>false</EnableDefaultCompileItems><Optimize>true</Optimize><TreatWarningsAsErrors>true</TreatWarningsAsErrors><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup>
 <ItemGroup>$includes$extra</ItemGroup>
 </Project>
 "@
@@ -82,9 +58,32 @@ foreach ($mode in 'harness','api','probe') {
 }
 & $Dotnet (Join-Path $temp 'bin/Release/net8.0/harness.dll') $Output
 if ($LASTEXITCODE -ne 0) { throw 'World-sector validation failed' }
-& $Dotnet (Join-Path $temp 'bin/Release/net8.0/probe.dll') (Join-Path $Output 'water-hook-probe')
-if ($LASTEXITCODE -ne 0) { throw 'Consumer water-hook probe failed' }
+& $Dotnet (Join-Path $temp 'bin/Release/net8.0/harness.dll') $Output --legacy
+if ($LASTEXITCODE -ne 0) { throw 'Legacy consumer validation failed' }
+
+# Compare the unchanged operation/Varrow path against the requested starting commit, without another checkout.
+$baseline = Join-Path $temp 'baseline'
+New-Item -ItemType Directory -Force $baseline | Out-Null
+$project = [IO.File]::ReadAllText((Join-Path $temp 'harness.csproj'))
+foreach ($name in 'Ground.cs','Water.cs','World.cs','MapLayout.cs','FieldParcels.cs') {
+    $source = (& git -c "safe.directory=$($repo.Replace('\','/'))" show "1016ddc:Assets/DroneSandbox/Scripts/$name") -join "`r`n"
+    if ($LASTEXITCODE -ne 0) { throw "Cannot read baseline $name" }
+    $target = Join-Path $baseline $name
+    Write-Generated $target $source
+    $project = $project.Replace((Join-Path $scripts $name), $target)
+}
+Write-Generated (Join-Path $temp 'baseline.csproj') $project
+& $Dotnet build (Join-Path $temp 'baseline.csproj') -c Release --nologo --configfile (Join-Path $temp 'NuGet.Config')
+if ($LASTEXITCODE -ne 0) { throw 'Baseline compilation failed' }
+& $Dotnet (Join-Path $temp 'bin/Release/net8.0/baseline.dll') $baseline --legacy
+if ($LASTEXITCODE -ne 0) { throw 'Baseline consumers failed' }
+$before = Get-Content (Join-Path $baseline 'legacy.json') -Raw | ConvertFrom-Json
+$after = Get-Content (Join-Path $Output 'legacy.json') -Raw | ConvertFrom-Json
+for ($i = 0; $i -lt $before.Count; $i++) {
+    if ($before[$i].hash -ne $after[$i].hash) { throw "Legacy output changed for $($before[$i].kind)" }
+}
+Write-Host 'PASS: legacy terrain, water, woods and parcels match 1016ddc exactly for all four recipes.'
 if (-not $CheckOnly) {
-    & $Python -I (Join-Path $PSScriptRoot 'render.py') $Output
+    & $Python -I (Join-Path $PSScriptRoot 'render_consumers.py') $Output
     if ($LASTEXITCODE -ne 0) { throw 'World-sector rendering failed' }
 }

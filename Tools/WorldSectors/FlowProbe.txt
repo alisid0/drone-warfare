@@ -1,0 +1,56 @@
+using System;
+using System.Collections;
+using UnityEngine;
+using DroneSandbox;
+
+// The two production method bodies are inserted verbatim. Services record order and inject a dry-footprint failure.
+public class SandboxFlowProbe
+{
+    public Transform world = new GameObject("Loaded world").transform;
+    public Transform transform = new GameObject("Game").transform;
+    public bool Loading;
+    public int begun;
+    static bool loggedWorldCropFallback;
+    public static int builds, warnings, plans, spots;
+    public static Vector2 origin, center;
+    public static SectorPlan next;
+    public static bool fail;
+    void ClearUnits() { }
+    static void DestroyImmediate(UnityEngine.Object o) { }
+    static void Destroy(UnityEngine.Object o) { }
+    void Begin(Mission m,int index,Hotspot h) { begun++; }
+    public void Play(Hotspot hotspot) { var steps=PlayHotspotSoon(hotspot);while(steps.MoveNext()) { } }
+    public static void Reset() { builds=warnings=plans=spots=0;fail=false;loggedWorldCropFallback=false;WorldPlan.Ready=false; }
+    static class Debug { public static void LogWarning(string message) {warnings++;} }
+    static class WorldPlan { public static bool Ready; public static void Generate(int seed) {Ready=true;} }
+    static class World
+    {
+        public const int WorldSeed=1200;
+        public static Transform Build(Transform parent,bool preview) {builds++;return new GameObject("Built world").transform;}
+    }
+    static class Farmland { public static void Release() { } }
+    static class Canopy { public static void Build(Transform t) { } }
+    static class MapSnapshot { public static void Capture(Transform t) { } }
+    static class Situations { public static Mission Generate(SectorPlan p,Situation s,int seed,Daylight daylight)=>null; }
+    static class FarTerrain
+    {
+        public static void SetOrigin(Vector2 p) {origin=p;}
+        public static Vector2 SpotFor(Vector2 p)=>new Vector2(-8000,5000);
+        public static Vector2 VarrowSpot()=>new Vector2(4000,9000);
+    }
+    static class WorldSectors
+    {
+        public static Vector2 SpotFor(Hotspot h)
+        {
+            if(!WorldPlan.Ready) throw new Exception("World must exist before allocating a crop");
+            spots++;return center;
+        }
+        public static SectorPlan PlanAt(Vector2 p,SectorKind kind,int seed)
+        {
+            if(!origin.Equals(p)) throw new Exception("Origin must be set before PlanAt");
+            plans++; if(fail) throw new InvalidOperationException("No dry footprint (injected)");return next;
+        }
+    }
+    /* LOAD */
+    /* PLAY */
+}
