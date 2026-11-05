@@ -111,8 +111,15 @@ namespace DroneSandbox
 
         // How much of the channel holds water here: a river narrows and widens along its course (0.7 to 1 of the
         // full width), leaving gravel and mud on the inside where it narrows.
-        public static float RiverWidthAt(float x, float z) =>
-            RiverHalfWidth * (0.7f + 0.3f * Mathf.PerlinNoise(x * 0.035f + 41f, z * 0.035f + 17f));
+        public static float RiverWidthAt(float x, float z)
+        {
+            if (Plan.world != null)
+            {
+                Plan.world.RiverDistance(new Vector2(x, z), out float width, out _);
+                return width;
+            }
+            return RiverHalfWidth * (0.7f + 0.3f * Mathf.PerlinNoise(x * 0.035f + 41f, z * 0.035f + 17f));
+        }
         public static Vector3 BasePosition => Plan.basePosition;
         public static Vector3 EnemyHqPosition => Plan.enemyHqPosition;
         public static Rect EnemyArea => Plan.enemyArea;
@@ -123,7 +130,8 @@ namespace DroneSandbox
         public static Vector2 DamPoint => Plan.damPoint;
         public static float LakeLevel => Plan.lakeLevel;
         public static float DamHalfSpan => Plan.damHalfSpan;
-        public static IReadOnlyList<Vector2> Bridges => Plan.bridges;
+        // World bridges are built from their exact endpoints by Water, not World's legacy bridge builder.
+        public static IReadOnlyList<Vector2> Bridges => Plan.world != null ? System.Array.Empty<Vector2>() : Plan.bridges;
         // The main bridge, or a point far off the map when no road crosses a river.
         public static Vector2 BridgePoint => Plan.bridges.Count > 0 ? Plan.bridges[0] : new Vector2(Far, Far);
 
@@ -136,6 +144,19 @@ namespace DroneSandbox
         public static List<List<Vector2>> RailLines { get; private set; }
         public static PathField RiverField { get; private set; }
         public static PathField RoadField { get; private set; }
+        static float[] roadWidths;
+
+        // Widths follow the prepared road's segment indices, making highway grading and painting cheap.
+        public static float RoadWidth(int segment) => roadWidths != null && segment >= 0 && segment < roadWidths.Length
+            ? roadWidths[segment] : RoadHalfWidth;
+
+        // Placement exclusions use the same width as the road's terrain and surface.
+        public static float RoadWidthAt(float x, float z)
+        {
+            if (Plan.world == null) return RoadHalfWidth;
+            RoadField.Query(x, z, out _, out int segment);
+            return RoadWidth(segment);
+        }
         public static PathField RailField { get; private set; }
         public static List<List<Vector2>> TrackLines { get; private set; }
         public static PathField TrackField { get; private set; }
@@ -185,7 +206,8 @@ namespace DroneSandbox
             RiverLine = p.river != null ? Smooth(p.river, 2f) : new List<Vector2>();
             DamDown = p.hasDam && RiverLine.Count > 1 ? (RiverLine[Mathf.Min(4, RiverLine.Count - 1)] - RiverLine[0]).normalized : Vector2.right;
             // The river field reaches far out so the hills can open into a valley around the river.
-            RiverField = new PathField(p.river != null ? new[] { RiverLine } : new List<Vector2>[0], 80f * Scale.Distance, Ground.Size);
+            RiverField = new PathField(p.world != null ? p.world.RiverLines()
+                : (p.river != null ? new[] { RiverLine } : new List<Vector2>[0]), 80f * Scale.Distance, Ground.Size);
             Lap("river");
             RoadLines = new List<List<Vector2>>();
             foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
@@ -199,6 +221,18 @@ namespace DroneSandbox
             PlanVillages();
             Lap("villages");
             RoadField = new PathField(RoadLines, 12f, Ground.Size);
+            roadWidths = null;
+            if (p.world != null)
+            {
+                roadWidths = new float[RoadField.points.Count];
+                int offset = 0;
+                for (int i = 0; i < RoadLines.Count; i++)
+                {
+                    RoadClass kind = i < p.world.roads.Count ? p.world.roads[i].kind : RoadClass.Track;
+                    float width = kind == RoadClass.Highway ? 3.5f : kind == RoadClass.Track ? 1.5f : RoadHalfWidth;
+                    for (int j = 0; j < RoadLines[i].Count; j++) roadWidths[offset++] = width;
+                }
+            }
             TrackLines = PlanTracks();
             TrackField = new PathField(TrackLines, 6f, Ground.Size);
             Lap("road fields");
@@ -526,7 +560,9 @@ namespace DroneSandbox
 
         // Signed distance to the nearest shore of any standing water (the reservoir, lakes and pools) in metres:
         // negative on the water, positive on land.
-        public static float LakeDistance(float x, float z) => Mathf.Min(ReservoirDistance(x, z), PondDistance(x, z, out _));
+        public static float LakeDistance(float x, float z) => Plan.world != null
+            ? Plan.world.LakeDistance(new Vector2(x, z), out _)
+            : Mathf.Min(ReservoirDistance(x, z), PondDistance(x, z, out _));
 
         // The same for the reservoir alone. The lobes' wobbly shores give coves and headlands; the dam cuts the
         // lake off.
@@ -589,6 +625,8 @@ namespace DroneSandbox
         // The surface of the standing water at (x, z), or -infinity on dry land.
         public static float WaterLevelAt(float x, float z)
         {
+            if (Plan.world != null)
+                return Plan.world.LakeDistance(new Vector2(x, z), out float level) <= 0f ? level : float.NegativeInfinity;
             if (ReservoirDistance(x, z) < 0f) return Plan.lakeLevel;
             if (PondDistance(x, z, out int i) < 0f) return Plan.ponds[i].level;
             return float.NegativeInfinity;
@@ -614,6 +652,12 @@ namespace DroneSandbox
         // The dam and its abutments, with a margin.
         public static bool NearDam(Vector2 p, float margin)
         {
+            if (Plan.world != null)
+            {
+                foreach (var dam in Plan.world.dams)
+                    if (Vector2.Distance(p, Vector2.Lerp(dam.a, dam.b, WorldSectors.Projection(p, dam.a, dam.b))) < 14f + margin) return true;
+                return false;
+            }
             Vector2 local = DamLocal(p.x, p.y);
             return local.x > -12f - margin && local.x < 14f + margin && Mathf.Abs(local.y) < 52f + margin;
         }
@@ -646,7 +690,7 @@ namespace DroneSandbox
         {
             if (Mathf.Abs(p.x) > Edge || Mathf.Abs(p.y) > Edge) return false;
             if (LakeDistance(p.x, p.y) < 1.5f + margin || NearDam(p, margin) || InGorge(p, margin)) return false;
-            if (RoadField.Distance(p.x, p.y) < RoadHalfWidth + 1.5f + margin) return false;
+            if (RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 1.5f + margin) return false;
             if (TrackField.Distance(p.x, p.y) < 1.5f + margin) return false;
             if (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 2.5f + margin) return false;
             if (OnWorks(p, margin)) return false;
@@ -697,7 +741,7 @@ namespace DroneSandbox
                 {
                     var p = new Vector2(-Edge + (i + 0.5f) * BlockCell, -Edge + (j + 0.5f) * BlockCell);
                     blocked[j * blockCount + i] = Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack
-                        || RoadField.Distance(p.x, p.y) < RoadHalfWidth + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
+                        || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
                         || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p);
