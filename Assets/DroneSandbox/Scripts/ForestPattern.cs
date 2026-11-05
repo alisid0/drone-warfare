@@ -44,6 +44,8 @@ namespace DroneSandbox
             const float step = 192f;
             int i = Mathf.FloorToInt(x / step), j = Mathf.FloorToInt(z / step);
             float distance = float.MaxValue;
+            float warpX = (Noise(x, z, 29f, 67) - 0.5f) * 24f;
+            float warpZ = (Noise(x, z, 31f, 68) - 0.5f) * 24f;
             for (int dz = -1; dz <= 1; dz++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
@@ -53,8 +55,8 @@ namespace DroneSandbox
                     float cz = (b + Unit(a, b, 62)) * step;
                     float rx = 18f + 32f * Unit(a, b, 63), rz = 14f + 38f * Unit(a, b, 64);
                     float angle = Unit(a, b, 66) * Mathf.PI, ca = Mathf.Cos(angle), sa = Mathf.Sin(angle);
-                    float wx = x - cx + (Noise(x, z, 29f, 67) - 0.5f) * 24f;
-                    float wz = z - cz + (Noise(x, z, 31f, 68) - 0.5f) * 24f;
+                    float wx = x - cx + warpX;
+                    float wz = z - cz + warpZ;
                     float u = (wx * ca - wz * sa) / rx, v = (wx * sa + wz * ca) / rz;
                     distance = Mathf.Min(distance, (Mathf.Sqrt(u * u + v * v) - 1f) * 30f);
                 }
@@ -62,7 +64,7 @@ namespace DroneSandbox
             return Mathf.SmoothStep(0f, 1f, distance / 22f);
         }
 
-        // Interpolate cover before adding metre-scale shoreline noise; never grow scrub into water or roads.
+        // Interpolate cover before adding metre-scale shoreline noise; keep scrub out of water and built land.
         public static float Edge(float x, float z)
         {
             if (!WorldPlan.Inside(x, z)) return 0f;
@@ -128,7 +130,8 @@ namespace DroneSandbox
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     if (dx == 0 && dz == 0) continue;
-                    if (Hash(i + dx, j + dz, 46) >= priority) continue;
+                    int other = Hash(i + dx, j + dz, 46);
+                    if (other > priority || (other == priority && (dz > 0 || (dz == 0 && dx > 0)))) continue;
                     if ((Candidate(i + dx, j + dz) - world).sqrMagnitude < spacing * spacing) return false;
                 }
             stand = At(world.x, world.y);
