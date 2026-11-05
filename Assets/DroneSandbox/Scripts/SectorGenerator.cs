@@ -16,12 +16,15 @@ namespace DroneSandbox
         const float OldVillageRadius = 22f;
         const float Inside = 150f;  // villages and features stay within this of the centre
 
+        // Builds the seeded landscape, then reserves its landmark in final world metres before parcel planning.
         public static SectorPlan Generate(SectorKind kind, int seed)
         {
             if (kind == SectorKind.VarrowValley) return SectorPlan.Varrow();
             var type = SectorTypes.Get(kind);
             var g = new Builder(type, seed);
-            return g.Build();
+            var plan = g.Build();
+            SectorIdentity.Plan(plan);
+            return plan;
         }
 
         class Builder
@@ -134,6 +137,7 @@ namespace DroneSandbox
             // Natural lakes and marsh pools, clear of the bases, the river and each other.
             void Water()
             {
+                if (type.kind == SectorKind.Marshland) return; // the connected corridor is laid out at real scale
                 if (type.kind == SectorKind.Lakeshore)
                 {
                     // One great lake reaching off the map on the far flank.
@@ -178,7 +182,7 @@ namespace DroneSandbox
             void Features()
             {
                 if (p.Has(SectorFeature.Rail)) Railways();
-                if (p.Has(SectorFeature.Airstrip))
+                if (p.Has(SectorFeature.Airstrip) && type.kind != SectorKind.Airfield)
                 {
                     p.airstripAlong = fwd;
                     p.airstripLength = 230f;
@@ -192,7 +196,7 @@ namespace DroneSandbox
                     p.quarryRadius = 36f;
                     destinations.Add(p.quarry - side * townSign * (p.quarryRadius + 6f));
                 }
-                if (p.Has(SectorFeature.Industry)) Industry();
+                if (p.Has(SectorFeature.Industry) && type.kind != SectorKind.IndustrialZone) Industry();
                 if (p.Has(SectorFeature.PowerLine)) PowerLine();
                 if (p.Has(SectorFeature.Logging)) Logging();
                 if (p.Has(SectorFeature.Fortifications)) Fortifications();
@@ -206,6 +210,7 @@ namespace DroneSandbox
                 var line = new List<Vector2>();
                 for (float t = -Reach; t <= Reach + 0.1f; t += 40f) line.Add(At(F(t), t));
                 p.railways.Add(line.ToArray());
+                if (type.kind == SectorKind.RailJunction) return; // the real-metre yard replaces the old scaled sidings
                 if (!p.Has(SectorFeature.RailYard))
                 {
                     // A small station somewhere along it.
@@ -369,24 +374,10 @@ namespace DroneSandbox
                 return true;
             }
 
-            // A town: a grid of streets on its half of the map; its blocks become villages.
-            readonly List<Vector2> townBlocks = new List<Vector2>();
-
+            // Keeps the through route; SectorIdentity adds compact town streets after scaling the old coordinates.
             void TownGrid()
             {
-                Vector2 centre = At(R(-10f, 15f), townSign * R(55f, 65f));
-                Vector2 a = MapLayout.Rotate(fwd, R(-0.2f, 0.2f)), b = new Vector2(-a.y, a.x);
-                for (int i = -1; i <= 1; i++)
-                {
-                    Road(new[] { centre + b * (i * 40f) - a * 80f, centre + b * (i * 40f), centre + b * (i * 40f) + a * 80f });
-                    Road(new[] { centre + a * (i * 45f) - b * 70f, centre + a * (i * 45f), centre + a * (i * 45f) + b * 70f });
-                }
-                // The main street runs on out of town both ways.
-                Road(Winding(centre - a * 80f, centre - a * Reach, 4, 8f));
-                Road(Winding(centre + a * 80f, centre + a * Reach, 4, 8f));
-                for (int i = -1; i <= 1; i++)
-                    for (int j = -1; j <= 1; j++)
-                        townBlocks.Add(centre + a * (i * 45f + 22f) + b * (j * 40f + 20f));
+                Road(Winding(At(0f, -Reach), At(0f, Reach), 8, 8f));
             }
 
             void Road(Vector2[] points)
@@ -456,8 +447,6 @@ namespace DroneSandbox
                     }
                     return PlaceNames.Place(rng) + " " + used.Count;
                 }
-                foreach (var c in townBlocks)
-                    if (VillageSpot(c, 30f)) AddVillage(c, Name(), false);
                 var candidates = new List<Vector2>();
                 foreach (var road in p.roads)
                     foreach (var q in MapLayout.Smooth(road, 15f))

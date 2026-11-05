@@ -136,6 +136,29 @@ namespace DroneSandbox
         public float yaw, scale, flat; // flat: radius of ground levelled for it (0 for none)
     }
 
+    // A real-metre footprint reserved for a sector's landmark before villages, parcels and ordinary woods.
+    public struct FeatureArea
+    {
+        public Vector2 center, along;
+        public float halfLength, halfWidth;
+        public Vector2 Across => new Vector2(-along.y, along.x);
+
+        // Local coordinates keep the footprint and its visible surface on the same axes.
+        public Vector2 Point(float u, float v) => center + along * u + Across * v;
+
+        // A padded rectangle also protects the apron, yard and spaces between individual buildings.
+        public bool Contains(Vector2 p, float margin = 0f) =>
+            Mathf.Abs(Vector2.Dot(p - center, along)) < halfLength + margin
+            && Mathf.Abs(Vector2.Dot(p - center, Across)) < halfWidth + margin;
+    }
+
+    // A terrain-following yard or paved strip, batched by material by Features.
+    public struct FeatureSurface
+    {
+        public FeatureArea area;
+        public bool concrete;
+    }
+
     // One sector, ready to build: everything MapLayout answers questions about. Made by SectorGenerator from a
     // type and a seed, or by Varrow() for the hand-made valley.
     public class SectorPlan
@@ -184,6 +207,16 @@ namespace DroneSandbox
         public readonly List<Site> sites = new List<Site>();
         public readonly List<FieldPlot> orchards = new List<FieldPlot>();
         public readonly List<Vector2> clearings = new List<Vector2>();
+
+        // Added after ScaleLayout: these dimensions and sites are already in final world metres.
+        public readonly List<FeatureArea> reservedFeatures = new List<FeatureArea>();
+        public readonly List<FeatureSurface> featureSurfaces = new List<FeatureSurface>();
+        public readonly List<Vector2[]> featureFences = new List<Vector2[]>();
+        public readonly List<Vector2[]> featureStreets = new List<Vector2[]>();
+        public readonly List<FeatureArea> featureFlats = new List<FeatureArea>();
+        public Vector2[] wetland;
+        public readonly List<(Vector2 center, float radius)> woodlandGlades = new List<(Vector2, float)>();
+        public float airstripWidth = 30f;
 
         public bool Has(SectorFeature f) => (features & f) != 0;
         public SectorType Type => SectorTypes.Get(kind);

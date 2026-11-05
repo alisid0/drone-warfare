@@ -13,7 +13,7 @@ namespace DroneSandbox
     // - an airstrip of asphalt with its markings;
     // - orchards in rows, logging clearings full of stumps, dragon's teeth along the fortified line, boulders in
     //   the quarry.
-    public static class Features
+    public static partial class Features
     {
         public static void Build(Transform parent)
         {
@@ -22,6 +22,7 @@ namespace DroneSandbox
             root.SetParent(parent, false);
             var rng = new System.Random(plan.worldSeed + 101); // its own numbers, so the rest of the map stays put
             foreach (var site in plan.sites) PlaceSite(root, site);
+            BuildIdentity(root);
             foreach (var line in MapLayout.RailLines) Railway(root, line);
             if (plan.powerLine != null) PowerLine(root, plan.powerLine);
             if (plan.Has(SectorFeature.Airstrip)) Airstrip(root, plan);
@@ -177,27 +178,29 @@ namespace DroneSandbox
 
         // ---- Airstrip ----
 
+        // Uses the planned real-metre length and width; terrain sampling keeps paint on the levelled runway.
         static void Airstrip(Transform root, SectorPlan plan)
         {
             var mesh = new MeshBuilder(2); // asphalt, paint
             Vector2 c = plan.airstripCenter, along = plan.airstripAlong, across = new Vector2(-along.y, along.x);
             float half = plan.airstripLength / 2f;
-            Vector3 P(float u, float v, float lift) => new Vector3(c.x + along.x * u + across.x * v, lift, c.y + along.y * u + across.y * v);
+            float width = plan.airstripWidth / 2f;
+            Vector3 P(float u, float v, float lift) => Ground.OnGround(new Vector3(c.x + along.x * u + across.x * v, 0f, c.y + along.y * u + across.y * v)) + Vector3.up * lift;
             for (float u = -half; u < half - 0.1f; u += 10f)
-                mesh.Quad(0, P(u, -15f, 0.05f), P(u, 15f, 0.05f), P(u + 10f, 15f, 0.05f), P(u + 10f, -15f, 0.05f),
-                    new Vector2(-15f, u), new Vector2(15f, u + 10f));
+                mesh.Quad(0, P(u, -width, 0.08f), P(u, width, 0.08f), P(Mathf.Min(u + 10f, half), width, 0.08f), P(Mathf.Min(u + 10f, half), -width, 0.08f),
+                    new Vector2(-width, u), new Vector2(width, u + 10f));
             // Centre line dashes, edge lines and the threshold stripes at both ends.
             for (float u = -half + 30f; u < half - 30f; u += 24f)
-                mesh.Quad(1, P(u, -0.3f, 0.07f), P(u, 0.3f, 0.07f), P(u + 12f, 0.3f, 0.07f), P(u + 12f, -0.3f, 0.07f), Vector2.zero, Vector2.one);
-            foreach (float v in new[] { -14f, 13.6f })
-                mesh.Quad(1, P(-half + 2f, v, 0.07f), P(-half + 2f, v + 0.4f, 0.07f), P(half - 2f, v + 0.4f, 0.07f), P(half - 2f, v, 0.07f),
+                mesh.Quad(1, P(u, -0.3f, 0.10f), P(u, 0.3f, 0.10f), P(u + 12f, 0.3f, 0.10f), P(u + 12f, -0.3f, 0.10f), Vector2.zero, Vector2.one);
+            foreach (float v in new[] { -width + 1f, width - 1.4f })
+                mesh.Quad(1, P(-half + 2f, v, 0.10f), P(-half + 2f, v + 0.4f, 0.10f), P(half - 2f, v + 0.4f, 0.10f), P(half - 2f, v, 0.10f),
                     Vector2.zero, Vector2.one);
             foreach (float end in new[] { -1f, 1f })
-                for (float v = -12f; v <= 11f; v += 3f)
+                for (float v = -width + 3f; v <= width - 4f; v += 3f)
                 {
                     float u0 = end * (half - 6f), u1 = end * (half - 24f);
-                    mesh.Quad(1, P(Mathf.Min(u0, u1), v, 0.07f), P(Mathf.Min(u0, u1), v + 1.6f, 0.07f), P(Mathf.Max(u0, u1), v + 1.6f, 0.07f),
-                        P(Mathf.Max(u0, u1), v, 0.07f), Vector2.zero, Vector2.one);
+                    mesh.Quad(1, P(Mathf.Min(u0, u1), v, 0.10f), P(Mathf.Min(u0, u1), v + 1.6f, 0.10f), P(Mathf.Max(u0, u1), v + 1.6f, 0.10f),
+                        P(Mathf.Max(u0, u1), v, 0.10f), Vector2.zero, Vector2.one);
                 }
             mesh.Finish("Airstrip", root, new[] { Pbr("Asphalt", new Color(0.15f, 0.15f, 0.15f)), Art.Shared(new Color(0.85f, 0.85f, 0.82f)) });
         }
