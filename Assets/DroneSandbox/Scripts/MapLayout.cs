@@ -569,9 +569,9 @@ namespace DroneSandbox
             // for); smaller leftovers stay meadow.
             double gapSkip = Mathf.Clamp01(0.1f + (0.7f - share) * 1.5f);
             float gaps = Scale.D(148f);
-            for (float gz = -gaps; gz <= gaps; gz += 10f * F) // every 20 m (a gap is 44-120 m across)
+            for (float gz = -gaps; gz <= gaps; gz += 20f * F) // every 40 m (a gap is 44-120 m across)
             {
-                for (float gx = -gaps; gx <= gaps; gx += 10f * F)
+                for (float gx = -gaps; gx <= gaps; gx += 20f * F)
                 {
                     var c = new Vector2(gx, gz);
                     if (Blocked(c) || NearAnyField(c, 4f) || rng.NextDouble() < gapSkip) continue;
@@ -813,7 +813,7 @@ namespace DroneSandbox
             // A point of a square is up to 1.4 m from its middle, but every limit here already keeps a metre or two in
             // hand (a road's verge, the shore), so half a metre's slack is enough.
             const float slack = 0.5f;
-            for (int j = 0; j < blockCount; j++)
+            System.Threading.Tasks.Parallel.For(0, blockCount, j => // rows in parallel: these only read the lines and plan
             {
                 for (int i = 0; i < blockCount; i++)
                 {
@@ -824,7 +824,7 @@ namespace DroneSandbox
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
                         || NearFlatSite(p, 4f + slack) || NearVillage(p, slack);
                 }
-            }
+            });
         }
 
         static bool Blocked(Vector2 p)

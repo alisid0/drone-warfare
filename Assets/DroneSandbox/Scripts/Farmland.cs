@@ -14,7 +14,7 @@ namespace DroneSandbox
         const int TexSize = 512;
         const int RendererLimit = 5400; // includes field surfaces and every hidden LOD of their props
         const float Lift = 0.14f;   // fields float this far above the terrain so it never shows through
-        const float DetailCell = 0.25f; // metres per texel of a field's detail map
+        const float DetailCell = 0.5f; // metres per texel of a field's detail map (the fields are twice the old size)
         const float TramSpacing = 24f;  // sprayer width: one pair of wheel tracks every this many metres
         const float Headland = 9f;      // the strip at each end where the tractor turns
 
@@ -122,7 +122,7 @@ namespace DroneSandbox
         // A field's detail map, one byte per 25 cm: HDRP darkens or lightens the crop by how far it is from a half
         // (FieldLit ignores the detail map's normal and smoothness, so the red channel is all it needs).
         // Low-frequency growth is sampled on a 2 m grid (about 64 times fewer noise calls); wheel tracks still
-        // use 25 cm texels. Its pattern is picked by where the field lies, not from the map's random numbers, so the rest of the map
+        // use 50 cm texels. Its pattern is picked by where the field lies, not from the map's random numbers, so the rest of the map
         // (built from the same sequence) comes out as before.
         static Texture2D FieldDetail(FieldPlot plot)
         {

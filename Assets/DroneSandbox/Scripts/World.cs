@@ -12,9 +12,16 @@ namespace DroneSandbox
         public static int TreeCount { get; private set; }
 
         // Builds one sector and resets the shared scenery budget before any builder plants trees.
+        // How long each part of the last Build took, for the test log (a 2 km sector has to load quickly).
+        public static string Timings { get; private set; } = "";
+
         public static Transform Build(Transform parent, bool preview)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var times = new System.Text.StringBuilder();
+            void Lap(string what) { times.Append($"{what} {clock.ElapsedMilliseconds}, "); clock.Restart(); }
             MapLayout.Prepare();
+            Lap("layout");
             TreeCount = 0;
             Undergrowth.Reset(); // every tree builder shares its spacing grid
             var root = new GameObject("World").transform;
@@ -22,22 +29,31 @@ namespace DroneSandbox
             var rng = new System.Random(MapLayout.Plan.worldSeed); // same map every time for a sector
 
             Ground.Build(root);
+            Lap("ground");
             Backdrop.Build(root);
             Water.Build(root);
             Reservoir.Build(root);
+            Lap("water");
             Farmland.Build(root, rng);
+            Lap("fields");
             var scenery = new GameObject("Scenery").transform;
             scenery.SetParent(root, false);
             foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
+            Lap("villages");
             Grass.Plant(Ground.Current); // after the villages, so it keeps off their worn paths and yards
+            Lap("grass");
             Features.Build(scenery); // reserve orchard trees before filling the wild woods
             BuildWoods(scenery, rng);
+            Lap("woods");
             BuildRocks(scenery, rng);
             Undergrowth.Build(scenery);
+            Lap("undergrowth");
             Bases.BuildPlayerBase(root);
             Bases.BuildEnemyHq(root);
             if (preview) Bases.PreviewUnits(root);
+            Lap("bases");
+            Timings = $"{times}{TreeCount} trees; layout: {MapLayout.Timings}{MapLayout.FieldTimings}";
             return root;
         }
 

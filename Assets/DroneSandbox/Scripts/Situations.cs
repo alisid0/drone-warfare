@@ -584,7 +584,7 @@ namespace DroneSandbox
                     for (int attempt = 0; attempt < 30; attempt++)
                     {
                         float a = R(0f, Mathf.PI * 2f);
-                        Vector2 p = v + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * R(26f, 40f);
+                        Vector2 p = v + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * R(MapLayout.VillageRadius + 4f, MapLayout.VillageRadius + 18f);
                         if (OpenGround(p, 6f)) return p;
                     }
                     return v;

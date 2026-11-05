@@ -88,6 +88,7 @@ namespace DroneSandbox
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
+            log.WriteLine($"Varrow build ms: {World.Timings}");
             log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count} ({MapLayout.FieldCoverage():P0} of the land), " +
                           $"screen {Screen.width}x{Screen.height}");
 
@@ -108,7 +109,7 @@ namespace DroneSandbox
 
             // The river crossing, a village and the farmland.
             var bridge = MapLayout.BridgePoint;
-            rts.LookAt(new Vector3(bridge.x, 0f * Scale.Lens, bridge.y), 40f, 135f);
+            rts.LookAt(new Vector3(bridge.x, 0f, bridge.y), 40f * Scale.Camera, 135f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02c_bridge");
             rts.LookAt(Old(-100f, 0f), 26f * Scale.Lens, 150f);
@@ -118,7 +119,7 @@ namespace DroneSandbox
             yield return new WaitForSeconds(1f);
             yield return Shot("02f_river_later");
             var village = MapLayout.Villages[0];
-            rts.LookAt(new Vector3(village.x, 0f * Scale.Lens, village.y), 45f, 200f);
+            rts.LookAt(new Vector3(village.x, 0f, village.y), 45f * Scale.Camera, 200f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02d_village");
             rts.LookAt(Old(-20f, -30f), 100f * Scale.Camera, 40f);
@@ -240,7 +241,7 @@ namespace DroneSandbox
             // Dusk, night and thermal view over the base and the valley.
             var dayNight = DayNight.Instance;
             dayNight.SetTime(20.2f, 0f);
-            rts.LookAt(game.basePosition + new Vector3(25f, 0f * Scale.Lens, 25f) * Scale.Distance, 75f, 45f);
+            rts.LookAt(game.basePosition + new Vector3(25f, 0f, 25f) * Scale.Distance, 75f * Scale.Camera, 45f);
             yield return new WaitForSeconds(1f);
             yield return Shot("08a_dusk");
             dayNight.SetTime(23.5f, 0f);
@@ -1016,6 +1017,7 @@ namespace DroneSandbox
                 while (game.Loading) yield return null;
                 float took = Time.realtimeSinceStartup - started;
                 var plan = MapLayout.Plan;
+                log.WriteLine($"  build ms: {World.Timings}");
                 log.WriteLine($"Sector {n}: {plan.name} ({SectorTypes.Get(kind).name}, seed {seed}) built in {took:F1}s: " +
                               $"{plan.roads.Count} roads, {plan.villages.Count} villages, {plan.bridges.Count} bridges, {plan.ponds.Count} pools, " +
                               $"{plan.railways.Count} railways, {plan.sites.Count} sites, {MapLayout.Fields.Count} fields; " +

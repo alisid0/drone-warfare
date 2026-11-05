@@ -122,7 +122,7 @@ MonoBehaviour:
   interCascadeBorders: 1
   maxShadowDistance:
     m_OverrideState: 1
-    m_Value: 350
+    m_Value: 1000
   directionalTransmissionMultiplier:
     m_OverrideState: 1
     m_Value: 1
@@ -131,13 +131,13 @@ MonoBehaviour:
     m_Value: 4
   cascadeShadowSplit0:
     m_OverrideState: 1
-    m_Value: 0.05
+    m_Value: 0.18
   cascadeShadowSplit1:
     m_OverrideState: 1
-    m_Value: 0.15
+    m_Value: 0.42
   cascadeShadowSplit2:
     m_OverrideState: 1
-    m_Value: 0.3
+    m_Value: 0.7
   cascadeShadowBorder0:
     m_OverrideState: 1
     m_Value: 0
@@ -506,10 +506,10 @@ MonoBehaviour:
     m_Value: 0
   maximumHeight:
     m_OverrideState: 1
-    m_Value: 140
+    m_Value: 450
   meanFreePath:
     m_OverrideState: 1
-    m_Value: 1100
+    m_Value: 2400
   enableVolumetricFog:
     m_OverrideState: 1
     m_Value: 1
@@ -521,7 +521,7 @@ MonoBehaviour:
     m_Value: 1
   depthExtent:
     m_OverrideState: 1
-    m_Value: 180
+    m_Value: 1000
   denoisingMode:
     m_OverrideState: 1
     m_Value: 2

@@ -11,6 +11,9 @@ namespace DroneSandbox
     public static class SectorGenerator
     {
         const float Reach = 262f;   // roads, rivers and railways run on past the terrain's edge (240 m out)
+        // A village's footprint as the old 480 m map planned round it (the plan is laid out in its metres; villages
+        // themselves are built at their real size, MapLayout.VillageRadius).
+        const float OldVillageRadius = 22f;
         const float Inside = 150f;  // villages and features stay within this of the centre
 
         public static SectorPlan Generate(SectorKind kind, int seed)
@@ -474,8 +477,8 @@ namespace DroneSandbox
             bool VillageSpot(Vector2 c, float spacing)
             {
                 if (Vector2.Distance(c, basePos) < 48f || Vector2.Distance(c, hqPos) < 48f) return false;
-                if (Wet(c, MapLayout.VillageRadius + 6f) || OnRail(c, MapLayout.VillageRadius + 4f)) return false;
-                foreach (var s in p.sites) if (s.flat > 0f && Vector2.Distance(c, s.position) < s.flat + MapLayout.VillageRadius) return false;
+                if (Wet(c, OldVillageRadius + 6f) || OnRail(c, OldVillageRadius + 4f)) return false;
+                foreach (var s in p.sites) if (s.flat > 0f && Vector2.Distance(c, s.position) < s.flat + OldVillageRadius) return false;
                 if (p.Has(SectorFeature.Airstrip) && Mathf.Abs(Vector2.Dot(c - p.airstripCenter, side)) < 40f) return false;
                 if (p.Has(SectorFeature.Quarry) && Vector2.Distance(c, p.quarry) < p.quarryRadius + 30f) return false;
                 foreach (var v in p.villages) if (Vector2.Distance(c, v) < spacing) return false;
@@ -521,7 +524,7 @@ namespace DroneSandbox
                         foreach (var road in p.roads)
                             if (DistanceTo(q, road) < 7f) return false;
                         foreach (var vil in p.villages)
-                            if (Vector2.Distance(q, vil) < MapLayout.VillageRadius + 4f) return false;
+                            if (Vector2.Distance(q, vil) < OldVillageRadius + 4f) return false;
                     }
                 return true;
             }

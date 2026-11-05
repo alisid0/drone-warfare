@@ -69,6 +69,7 @@ namespace DroneSandbox
             IndexSites();
             worn.Clear();
 
+            FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
             data.size = new Vector3(Size, HeightRange, Size);
             data.SetHeights(0, 0, BuildHeights());
@@ -101,14 +102,14 @@ namespace DroneSandbox
             var world = new float[HeightRes, HeightRes]; // metres above y = 0
 
             // Hills, opened into a valley along the river and levelled under the flat sites.
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
                     world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
                 }
-            }
+            });
             if (MapLayout.HasDam) Reservoir(world, step); // before the roads, so a road past the lake follows its banks
             Ponds(world, step);
             Quarry(world, step);
@@ -116,7 +117,7 @@ namespace DroneSandbox
             // Roads follow a smoothed copy of the ground, sunk in a little.
             for (int i = 0; i < roads.points.Count; i++) roads.values[i] = Sample(world, roads.points[i]);
             SmoothValues(roads, 6);
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -128,7 +129,7 @@ namespace DroneSandbox
                     weight *= FlatMask(x, z, out _); // flat sites stay flat
                     world[zi, xi] = Mathf.Lerp(world[zi, xi], level - dip, weight);
                 }
-            }
+            });
 
             // Railway beds: smoother still (trains can't climb much).
             var rails = MapLayout.RailField;
@@ -136,7 +137,7 @@ namespace DroneSandbox
             {
                 for (int i = 0; i < rails.points.Count; i++) rails.values[i] = Sample(world, rails.points[i]);
                 SmoothValues(rails, 20);
-                for (int zi = 0; zi < HeightRes; zi++)
+                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
                 {
                     for (int xi = 0; xi < HeightRes; xi++)
                     {
@@ -146,7 +147,7 @@ namespace DroneSandbox
                         float weight = (1f - Mathf.SmoothStep(0f, 1f, (d - MapLayout.RailHalfWidth - 0.5f) / 7.5f)) * FlatMask(x, z, out _);
                         world[zi, xi] = Mathf.Lerp(world[zi, xi], level, weight);
                     }
-                }
+                });
             }
             Trench(world, step);
 
@@ -170,7 +171,7 @@ namespace DroneSandbox
             SmoothValues(river, 8);
             MakeFalling(river.values);
 
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -197,15 +198,32 @@ namespace DroneSandbox
                     }
                     world[zi, xi] = h;
                 }
-            }
-
-            if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
-
-            var heights = new float[HeightRes, HeightRes];
-            for (int zi = 0; zi < HeightRes; zi++)
+            });
                 for (int xi = 0; xi < HeightRes; xi++)
                     heights[zi, xi] = Mathf.Clamp01((world[zi, xi] + Sink) / HeightRange);
             return heights;
+        }
+
+        // The land's height above y = 0 and its slope in degrees at each heightmap point, kept from the build so the
+        // painter and the grass can ask from any thread (the terrain's own GetSteepness is main-thread only).
+        static float[,] worldHeights, steepness;
+
+        public static float SteepnessAt(float x, float z) => steepness != null ? Sample(steepness, new Vector2(x, z)) : 0f;
+
+        static float[,] Slopes(float[,] world, float step)
+        {
+            var slopes = new float[HeightRes, HeightRes];
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                int z0 = Mathf.Max(zi - 1, 0), z1 = Mathf.Min(zi + 1, HeightRes - 1);
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    int x0 = Mathf.Max(xi - 1, 0), x1 = Mathf.Min(xi + 1, HeightRes - 1);
+                    float dx = (world[zi, x1] - world[zi, x0]) / ((x1 - x0) * step), dz = (world[z1, xi] - world[z0, xi]) / ((z1 - z0) * step);
+                    slopes[zi, xi] = Mathf.Atan(Mathf.Sqrt(dx * dx + dz * dz)) * Mathf.Rad2Deg;
+                }
+            });
+            return slopes;
         }
 
         // The lake: a basin under the water with a shallow shelf at the edge, then banks rising gently out of it
@@ -214,7 +232,7 @@ namespace DroneSandbox
         static void Reservoir(float[,] world, float step)
         {
             float level = MapLayout.LakeLevel, crest = level + 2.1f;
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -247,7 +265,7 @@ namespace DroneSandbox
                     }
                     world[zi, xi] = h;
                 }
-            }
+            });
         }
 
         // Lakes and pools: each sits a little below the lowest ground round its shore, with a basin under the
@@ -268,7 +286,7 @@ namespace DroneSandbox
                 pond.level = level - 0.35f;
                 ponds[i] = pond;
             }
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -292,7 +310,7 @@ namespace DroneSandbox
                     }
                     world[zi, xi] = h;
                 }
-            }
+            });
         }
 
         // A stone quarry: a pit cut down in benches, its floor about 50 m below the ground round it.
@@ -301,7 +319,7 @@ namespace DroneSandbox
             var plan = MapLayout.Plan;
             if (!plan.Has(SectorFeature.Quarry)) return;
             float r = plan.quarryRadius, rim = Sample(world, plan.quarry);
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -314,7 +332,7 @@ namespace DroneSandbox
                     float outside = Mathf.SmoothStep(0f, 1f, (d - r) / (12f * Scale.Distance));
                     world[zi, xi] = Mathf.Lerp(Mathf.Min(world[zi, xi], pit), world[zi, xi], outside);
                 }
-            }
+            });
         }
 
         // A trench dug along the line behind the dragon's teeth, broken where roads cross it.
@@ -322,7 +340,7 @@ namespace DroneSandbox
         {
             var line = MapLayout.Plan.trenchLine;
             if (line == null) return;
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -332,7 +350,7 @@ namespace DroneSandbox
                     float k = d / 1.6f;
                     world[zi, xi] -= 1.7f * (1f - k * k * k * k);
                 }
-            }
+            });
         }
 
         static float DistanceToLine(Vector2 p, Vector2[] line)
@@ -352,7 +370,7 @@ namespace DroneSandbox
         static void BelowDam(float[,] world, float step, float water)
         {
             float crest = MapLayout.LakeLevel + 2.1f;
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
@@ -372,7 +390,7 @@ namespace DroneSandbox
                     if (pool < 1.2f) h = Mathf.Min(h, water - 0.3f - 1.6f * Mathf.Clamp01(1.2f - pool));
                     world[zi, xi] = h;
                 }
-            }
+            });
         }
 
         // Height above y = 0 before flattening, in metres. The sector's type sets how high the hills and the
@@ -595,13 +613,13 @@ namespace DroneSandbox
             var splat = new float[SplatRes, SplatRes, 5];
             var junctions = MapLayout.Junctions;
             var tracks = MapLayout.TrackField;
-            for (int zi = 0; zi < SplatRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, SplatRes, zi =>
             {
                 for (int xi = 0; xi < SplatRes; xi++)
                 {
                     float u = (xi + 0.5f) / SplatRes, v = (zi + 0.5f) / SplatRes;
                     float x = -Size / 2f + u * Size, z = -Size / 2f + v * Size;
-                    float steep = data.GetSteepness(u, v);
+                    float steep = Sample(steepness, new Vector2(x, z));
                     FlatMask(x, z, out bool bare);
 
                     float rock = Mathf.SmoothStep(0f, 1f, (steep - 22f) / 12f);
@@ -708,21 +726,22 @@ namespace DroneSandbox
                     if (verge > 0f) variation = Mathf.Max(variation, 0.8f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
                     // Regions with a reason, as aerial photos show them: grass thin and pale on the higher, drier
                     // ground and in broad drifts of old pasture, never in the damp by water.
-                    float high = Mathf.SmoothStep(0f, 1f, (data.GetInterpolatedHeight(u, v) - Sink - 1.5f * Scale.Distance) / (8f * Scale.Distance));
+                    float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, new Vector2(x, z)) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
                     float region = Mathf.PerlinNoise(x * 0.011f + 120f, z * 0.011f + 60f) * 0.7f + Mathf.PerlinNoise(x * 0.09f + 3f, z * 0.09f + 77f) * 0.3f;
                     float dry = Mathf.SmoothStep(0f, 1f, (region + 0.3f * high - 0.56f) * 5f) * (1f - damp);
 
                     // Each layer covers the ones before it.
-                    float[] w = new float[5];
-                    w[3] = rock;
-                    w[2] = dirt * (1f - rock);
-                    w[1] = variation * (1f - rock) * (1f - dirt);
-                    w[4] = dry * (1f - rock) * (1f - dirt) * (1f - variation);
-                    w[0] = (1f - rock) * (1f - dirt) * (1f - variation) * (1f - dry);
-                    float sum = w[0] + w[1] + w[2] + w[3] + w[4];
-                    for (int k = 0; k < 5; k++) splat[zi, xi, k] = w[k] / sum;
+                    float w3 = rock, w2 = dirt * (1f - rock), w1 = variation * (1f - rock) * (1f - dirt);
+                    float w4 = dry * (1f - rock) * (1f - dirt) * (1f - variation);
+                    float w0 = (1f - rock) * (1f - dirt) * (1f - variation) * (1f - dry);
+                    float sum = w0 + w1 + w2 + w3 + w4;
+                    splat[zi, xi, 0] = w0 / sum;
+                    splat[zi, xi, 1] = w1 / sum;
+                    splat[zi, xi, 2] = w2 / sum;
+                    splat[zi, xi, 3] = w3 / sum;
+                    splat[zi, xi, 4] = w4 / sum;
                 }
-            }
+            });
             return splat;
         }
 

@@ -37,7 +37,8 @@ namespace DroneSandbox
             float size = Ground.Size, cell = size / resolution;
             var roads = MapLayout.RoadField;
             var river = MapLayout.RiverField;
-            for (int zi = 0; zi < resolution; zi++)
+            // Rows in parallel: every question here only reads the finished layout and land.
+            System.Threading.Tasks.Parallel.For(0, resolution, zi =>
             {
                 for (int xi = 0; xi < resolution; xi++)
                 {
@@ -49,7 +50,7 @@ namespace DroneSandbox
                     bool pond = lake < 1f && MapLayout.ReservoirDistance(x, z) > lake + 0.01f; // ponds are mostly ringed with reeds
                     if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > (pond ? 0.55f : 0.56f) && !MapLayout.NearDam(p, 2f)) // a third of the shore, in clumps
                         reeds[zi, xi] = Mathf.PerlinNoise(x * 0.4f, z * 0.4f) > 0.45f ? 2 : 1;
-                    if (data.GetSteepness((xi + 0.5f) / resolution, (zi + 0.5f) / resolution) > 30f) continue;
+                    if (Ground.SteepnessAt(x, z) > 30f) continue;
                     if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f || MapLayout.TrackField.Distance(x, z) < 1.3f) continue;
                     if (river.Distance(x, z) < MapLayout.RiverHalfWidth + 1f) continue;
                     if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;
@@ -62,7 +63,7 @@ namespace DroneSandbox
                     float bloom = Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 11f);
                     if (bloom > 0.62f && Mathf.PerlinNoise(x * 0.9f, z * 0.9f) > 0.55f) flowers[zi, xi] = 1;
                 }
-            }
+            });
             data.SetDetailLayer(0, 0, 0, grass);
             data.SetDetailLayer(0, 0, 1, flowers);
             data.SetDetailLayer(0, 0, 2, reeds);
