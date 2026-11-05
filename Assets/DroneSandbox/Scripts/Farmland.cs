@@ -13,7 +13,10 @@ namespace DroneSandbox
         const float Tile = 8f;      // metres covered by one repeat of a crop texture
         const int TexSize = 512;
         const int RendererLimit = 5400; // includes field surfaces and every hidden LOD of their props
-        const float Lift = 0.14f;   // fields float this far above the terrain so it never shows through
+        // Fields float this far above the terrain so it never shows through. The terrain simplifies its mesh with
+        // distance (up to 2 px of error), which at 0.14 m pushed it up through the crops as green blotches from the
+        // play camera; Ground also paints bare soil under every field, so what still shows through is earth.
+        const float Lift = 0.35f;
         const float DetailCell = 0.5f; // metres per texel of a field's detail map (the fields are twice the old size)
         const float TramSpacing = 24f;  // sprayer width: one pair of wheel tracks every this many metres
         const float Headland = 9f;      // the strip at each end where the tractor turns

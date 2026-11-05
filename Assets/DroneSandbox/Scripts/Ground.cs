@@ -827,6 +827,8 @@ namespace DroneSandbox
                     }
                     // A few worn patches.
                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
+                    // Bare soil under the fields, in case the terrain shows through a crop from far off (Farmland.Lift).
+                    if (MapLayout.InField(new Vector2(x, z), -0.5f)) dirt = Mathf.Max(dirt, 0.9f);
                     // Ground cover with a reason, as aerial photos show it. How wet the ground lies decides it: damp
                     // grass along the river and the lake and in hollows, pale rough grass on higher, drier ground,
                     // pasture between. Broad drifts (80 m and 25 m across) and a fine one (12 m) move it a little either

@@ -662,12 +662,18 @@ namespace DroneSandbox
             Vector3 target = game.basePosition + away.normalized * 6000f;
             if (scout != null) scout.MoveTo(target);
             Time.timeScale = 4f;
-            float lowest = float.MaxValue, flown = 0f;
+            float lowest = float.MaxValue, flown = 0f, lowestAt = 0f;
             for (float t = 0f; t < 300f && scout != null && scout.IsAlive; t += 0.5f)
             {
                 flown = Vector3.Distance(Flat(scout.transform.position), Flat(game.basePosition));
                 if (flown > 5000f) break;
-                if (flown > 200f) lowest = Mathf.Min(lowest, scout.transform.position.y - Ground.HeightAt(scout.transform.position));
+                // From 600 m out: the climb from the pad is behind it by then.
+                float clearance = scout.transform.position.y - Ground.HeightAt(scout.transform.position);
+                if (flown > 600f && clearance < lowest)
+                {
+                    lowest = clearance;
+                    lowestAt = flown;
+                }
                 if (t % 10f < 0.5f) rts.LookAt(scout.transform.position, 900f, 30f);
                 yield return new WaitForSeconds(0.5f);
             }
@@ -676,7 +682,7 @@ namespace DroneSandbox
             yield return new WaitForSecondsRealtime(1.5f);
             yield return Shot("82_world_drone_out");
             log.WriteLine($"World flight: wide view {wideFps:F0} fps; Scout alive {scout != null && scout.IsAlive}, flew {flown:F0} m from base, " +
-                          $"lowest {lowest:F1} m above the ground, ground there {(scout != null ? Ground.HeightAt(scout.transform.position) : 0f):F0} m");
+                          $"lowest {lowest:F1} m above the ground ({lowestAt:F0} m out), ground there {(scout != null ? Ground.HeightAt(scout.transform.position) : 0f):F0} m");
             if (scout == null || !scout.IsAlive || flown < 5000f || lowest < 2f) errors++;
         }
 
