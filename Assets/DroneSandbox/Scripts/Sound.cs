@@ -43,6 +43,7 @@ namespace DroneSandbox
             sound.Build();
         }
 
+        // Creates the sound pool with falloff distances matched to the enlarged battlefield.
         void Build()
         {
             Instance = this;
@@ -82,7 +83,7 @@ namespace DroneSandbox
             {
                 var go = new GameObject("Sound " + i);
                 go.transform.SetParent(transform, false);
-                pool[i] = World3D(go.AddComponent<AudioSource>(), 22f, 320f);
+                pool[i] = World3D(go.AddComponent<AudioSource>(), Scale.D(22f), Scale.D(320f));
             }
             ui = ears.gameObject.AddComponent<AudioSource>();
             ui.spatialBlend = 0f;
@@ -137,11 +138,12 @@ namespace DroneSandbox
             return source;
         }
 
+        // Moves the listener toward the focus and updates ambience and motor ducking.
         void LateUpdate()
         {
             if (cam == null) return;
-            // The ears: most of the way from the camera to what it looks at.
-            float reach = PhotoMode.Active ? 0f : rts.Distance * 0.7f;
+            // Leave the ears the old scaled distance above the focus, even with the narrower camera lens.
+            float reach = PhotoMode.Active ? 0f : rts.Distance * (1f - 0.3f * Scale.Distance / Scale.Camera);
             ears.SetPositionAndRotation(cam.transform.position + cam.transform.forward * reach, cam.transform.rotation);
 
             var dayNight = DayNight.Instance;
@@ -195,7 +197,7 @@ namespace DroneSandbox
         public static AudioSource Motor(Drone drone)
         {
             if (Instance == null) return null;
-            var source = World3D(drone.gameObject.AddComponent<AudioSource>(), 8f, 160f);
+            var source = World3D(drone.gameObject.AddComponent<AudioSource>(), Scale.D(8f), Scale.D(160f));
             source.spatialBlend = 1f;
             source.clip = Instance.Pick("motor " + drone.type);
             source.loop = true;
