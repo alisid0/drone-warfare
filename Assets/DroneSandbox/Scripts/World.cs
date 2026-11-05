@@ -104,59 +104,169 @@ namespace DroneSandbox
 
         // ---- Villages ----
 
+        // Records the main buildings before gardens are planted, so later rows cannot land on earlier props.
+        sealed class VillageBuilding
+        {
+            public Transform root;
+            public Vector2 at, center, facing, pathEnd;
+            public string model;
+        }
+
+        static readonly List<(Vector2 at, float radius)> villagePlots = new List<(Vector2, float)>();
+
+        // Five street plots on each side, then four staggered plots behind each row, all inside a 45 m footprint.
         static void BuildVillages(Transform parent, System.Random rng)
         {
             var plan = MapLayout.Plan;
+            villagePlots.Clear();
+            var buildings = new List<VillageBuilding>();
+            bool needsChurch = true;
             for (int v = 0; v < plan.villages.Count; v++)
             {
                 var root = new GameObject("Village " + (v + 1)).transform;
                 root.SetParent(parent, false);
                 Vector2 center = plan.villages[v];
-                bool farmstead = plan.farmsteads[v];
                 MapLayout.RoadField.Query(center.x, center.y, out _, out int segment);
                 Vector2 along = MapLayout.RoadField.Direction(segment);
                 Vector2 across = new Vector2(-along.y, along.x);
-                float[] slots = farmstead ? new[] { -6f, 7f } : new[] { -19f, -6.5f, 6.5f, 19f };
-                foreach (float side in new[] { -1f, 1f })
+                if (plan.farmsteads[v])
                 {
-                    foreach (float s in slots)
-                    {
-                        if (farmstead && side > 0f && s > 0f) continue;
-                        bool church = v == 0 && !farmstead && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f;
-                        // Plots aren't a ruled row: each house sits a little along its plot and 4 to 9 m back from
-                        // the road, and now and then a plot is a paddock with no house on it.
-                        float shift = church ? 0f : Range(rng, -2.5f, 2.5f), setback = church ? 8f : Range(rng, 6.5f, 11f);
-                        if (!church && !farmstead && rng.NextDouble() < 0.12) continue;
-                        Vector2 p = center + along * (s + shift) + across * side * (MapLayout.RoadHalfWidth + setback);
-                        if (!Buildable(p)) continue;
-                        string model;
-                        if (church) model = "Scenery_Church";
-                        else if (farmstead) model = s < 0f ? "Scenery_Barn" : "Scenery_House_A";
-                        else
+                    BuildFarmstead(root, center, along, across, v, buildings);
+                    continue;
+                }
+                int first = buildings.Count;
+                // Reserve the church first and try both verges if water or a junction blocks its first plot.
+                if (needsChurch)
+                    foreach (float side in new[] { -1f, 1f })
+                        foreach (float s in new[] { 0f, -15f, 15f })
+                            if (needsChurch && VillageBuildingAt("Scenery_Church", center + along * s + across * side * 16f,
+                                -across * side, 1f, center + along * s, center, root, v, buildings)) needsChurch = false;
+                for (int row = 0; row < 2; row++)
+                    foreach (float side in new[] { -1f, 1f })
+                        foreach (float s in row == 0 ? new[] { -30f, -15f, 0f, 15f, 30f } : new[] { -22.5f, -7.5f, 7.5f, 22.5f })
                         {
-                            double roll = rng.NextDouble();
-                            model = roll < 0.5 ? "Scenery_House_A" : roll < 0.82 ? "Scenery_House_B" : "Scenery_Barn";
+                            if (buildings.Count - first >= 18) break;
+                            float shift = s + Range(rng, -0.25f, 0.25f);
+                            Vector2 p = center + along * shift + across * side * (row == 0 ? 12.5f : 28.5f);
+                            string model = rng.NextDouble() < 0.65 ? "Scenery_House_A" : "Scenery_House_B";
+                            VillageBuildingAt(model, p, -across * side, Range(rng, 0.9f, 1.05f),
+                                center + along * shift, center, root, v, buildings);
                         }
-                        // Doors (the model's +Z) face the road. Houses differ a little in size (and so in height).
-                        Vector2 facing = -across * side;
-                        float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -6f, 6f);
-                        var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, church ? 1f : Range(rng, 0.88f, 1.12f), 0.35f, root);
-                        if (model != "Scenery_Church") Repaint(house, v, p);
-                        // A path worn from the door to the road at most houses; a farmyard of bare earth round a
-                        // farmstead's buildings.
-                        Vector2 toRoad = p + facing * (setback + 0.4f);
-                        if (farmstead) Ground.Wear(p, toRoad, Range(rng, 7f, 10f), 0.6f);
-                        else if (church || rng.NextDouble() < 0.7) Ground.Wear(p + facing * 3f, toRoad, church ? 3f : Range(rng, 1.4f, 2.4f), 0.75f);
-                        Garden(root, p, along, across * side, rng);
-                        if (farmstead && s < 0f && rng.NextDouble() < 0.6)
-                        {
-                            // A grain silo beside the barn.
-                            Vector2 silo = p + along * Range(rng, -9f, -7f) + across * side * Range(rng, 2f, 5f);
-                            if (Buildable(silo)) Place("Scenery_Silo", new Vector3(silo.x, 0f, silo.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1f), 0.1f, root);
-                        }
-                    }
+            }
+            // Check paths after every settlement's buildings are reserved, then spend at most 48 resident
+            // renderers on each settlement's gardens (including all three LOD renderers of each fruit tree).
+            foreach (var b in buildings)
+                VillagePath(b.at, b.pathEnd, b.model == "Scenery_Church" ? 3f : 1.6f, b.at);
+            var budgets = new Dictionary<Transform, int>();
+            foreach (var b in buildings)
+            {
+                if (b.model != "Scenery_House_A" && b.model != "Scenery_House_B") continue;
+                if (!budgets.TryGetValue(b.root, out int budget)) budget = 48;
+                Garden(b.root, b.at, new Vector2(-b.facing.y, b.facing.x), -b.facing, b.center, rng, ref budget);
+                budgets[b.root] = budget;
+            }
+        }
+
+        // Conservative pivot-centred radii include roofs, porches and the barn's lean-to, not only wall centres.
+        static float VillageRadius(string model)
+        {
+            switch (model)
+            {
+                case "Scenery_Church": return 11f;
+                case "Scenery_Barn": return 9f;
+                case "Scenery_Hut": return 3.5f;
+                case "Scenery_Silo": return 7.3f;
+                default: return 6.5f;
+            }
+        }
+
+        // Places one main building only when its full footprint fits, then reserves it for every later plot.
+        static bool VillageBuildingAt(string model, Vector2 p, Vector2 facing, float scale, Vector2 pathEnd,
+            Vector2 center, Transform root, int village, List<VillageBuilding> buildings)
+        {
+            float radius = VillageRadius(model) * scale;
+            if (!VillageRoom(p, radius, center, false)) return false;
+            float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg;
+            var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, scale, 0.35f, root);
+            if (model != "Scenery_Church") Repaint(house, village, p);
+            villagePlots.Add((p, radius));
+            buildings.Add(new VillageBuilding { root = root, at = p, center = center, facing = facing,
+                pathEnd = pathEnd, model = model });
+            return true;
+        }
+
+        // A barn, farmhouse, shed and silo face a shared yard on the less obstructed side of the road.
+        static void BuildFarmstead(Transform root, Vector2 center, Vector2 along, Vector2 across, int village,
+            List<VillageBuilding> buildings)
+        {
+            string[] models = { "Scenery_Barn", "Scenery_House_A", "Scenery_Hut", "Scenery_Silo" };
+            Vector2[] offsets = { new Vector2(-12f, 0f), new Vector2(12f, 0f), new Vector2(0f, -10f), new Vector2(0f, 12.5f) };
+            float side = -1f;
+            int best = -1;
+            foreach (float sign in new[] { -1f, 1f })
+            {
+                Vector2 candidate = center + across * sign * 23.5f;
+                int fits = 0;
+                for (int i = 0; i < models.Length; i++)
+                    if (VillageRoom(candidate + along * offsets[i].x + across * sign * offsets[i].y,
+                        VillageRadius(models[i]), center, false)) fits++;
+                if (fits > best) { best = fits; side = sign; }
+            }
+            Vector2 yard = center + across * side * 23.5f;
+            for (int i = 0; i < models.Length; i++)
+            {
+                Vector2 p = yard + along * offsets[i].x + across * side * offsets[i].y;
+                VillageBuildingAt(models[i], p, (yard - p).normalized, 1f, yard, center, root, village, buildings);
+            }
+            VillagePath(yard - across * 2f, yard + across * 2f, 5f, yard);
+            // The drive goes through the gap beside the front shed.
+            Vector2 turn = yard - across * side * 4f, gate = yard + along * 6f - across * side * 8f;
+            VillagePath(yard, turn, 2.5f, yard);
+            VillagePath(turn, gate, 2.5f, yard);
+            VillagePath(gate, center + along * 6f, 2.5f, yard);
+        }
+
+        // Checks concentric samples no more than 2 m apart: PathField distances are capped, so a large radius
+        // cannot safely be added to one centre query. The 1.5 m point clearance covers gaps between samples.
+        static bool VillageRoom(Vector2 p, float radius, Vector2 center, bool keepPaths)
+        {
+            if (Vector2.Distance(p, center) + radius > MapLayout.VillageRadius) return false;
+            foreach (var plot in villagePlots)
+                if (Vector2.Distance(p, plot.at) < radius + plot.radius + 0.6f) return false;
+            if (!Buildable(p) || (keepPaths && Ground.Worn(p))) return false;
+            int rings = Mathf.CeilToInt(radius / 2f);
+            for (int ring = 1; ring <= rings; ring++)
+            {
+                float r = radius * ring / rings;
+                int samples = Mathf.Max(8, Mathf.CeilToInt(2f * Mathf.PI * r / 2f));
+                for (int k = 0; k < samples; k++)
+                {
+                    float a = k * 2f * Mathf.PI / samples;
+                    Vector2 q = p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                    if (!Buildable(q) || (keepPaths && Ground.Worn(q))) return false;
                 }
             }
+            return true;
+        }
+
+        // Wears only dry, unfarmed access routes, stopping paths from crossing another building's footprint.
+        static void VillagePath(Vector2 from, Vector2 to, float width, Vector2 owner)
+        {
+            Vector2 line = to - from;
+            foreach (var plot in villagePlots)
+            {
+                if ((plot.at - owner).sqrMagnitude < 0.01f) continue;
+                float t = line.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(plot.at - from, line) / line.sqrMagnitude) : 0f;
+                if (Vector2.Distance(plot.at, from + line * t) < plot.radius + width * 0.5f) return;
+            }
+            int steps = Mathf.Max(1, Mathf.CeilToInt(line.magnitude));
+            Vector2 side = new Vector2(-line.y, line.x).normalized * width * 0.5f;
+            for (int i = 0; i <= steps; i++)
+            {
+                Vector2 p = Vector2.Lerp(from, to, i / (float)steps);
+                if (!VillageGround(p) || !VillageGround(p + side) || !VillageGround(p - side)) return;
+            }
+            Ground.Wear(from, to, width, 0.75f);
         }
 
         static readonly string[] Roofs = { "RoofTile", "RoofTileDark", "RoofTileWarm", "RoofSlate" };
@@ -176,50 +286,73 @@ namespace DroneSandbox
 
         // A fence behind the house, a fruit tree or two, in about a third of gardens a shed (with a log pile by
         // it in some), and in a third a vegetable patch of dug earth.
-        static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, System.Random rng)
+        static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, Vector2 center,
+            System.Random rng, ref int budget)
         {
             if (rng.NextDouble() < 0.35)
             {
-                Vector2 patch = house + outward * Range(rng, 5.5f, 7f) + along * Range(rng, -3f, 3f);
-                if (Buildable(patch)) Ground.Wear(patch - along * Range(rng, 2f, 3.5f), patch + along * Range(rng, 2f, 3.5f), Range(rng, 2.5f, 3.5f), 0.65f);
+                Vector2 patch = house + outward * Range(rng, 10.5f, 12f) + along * Range(rng, -4f, 4f);
+                if (VillageRoom(patch, 4f, center, true))
+                {
+                    Ground.Wear(patch - along * 2.5f, patch + along * 2.5f, 3f, 0.65f);
+                    villagePlots.Add((patch, 4f));
+                }
             }
             if (rng.NextDouble() < 0.35)
             {
-                Vector2 shed = house + outward * Range(rng, 5.5f, 6.8f) + along * ((rng.NextDouble() < 0.5 ? -1f : 1f) * Range(rng, 4f, 6f));
+                Vector2 shed = house + outward * Range(rng, 10f, 12f) + along * ((rng.NextDouble() < 0.5 ? -1f : 1f) * Range(rng, 4f, 6f));
                 float shedYaw = Mathf.Atan2(outward.x, outward.y) * Mathf.Rad2Deg + 180f + Range(rng, -10f, 10f);
-                if (Buildable(shed))
+                float shedScale = Range(rng, 0.7f, 0.95f);
+                if (VillageProp("Scenery_Hut", shed, shedYaw, shedScale, 3.5f * shedScale, center, root, ref budget))
                 {
-                    Place("Scenery_Hut", new Vector3(shed.x, 0f, shed.y), shedYaw, Range(rng, 0.7f, 0.95f), 0.1f, root);
-                    Vector2 logs = shed + along * 3f;
-                    if (rng.NextDouble() < 0.45 && Buildable(logs))
-                        Place("Scenery_LogPile", new Vector3(logs.x, 0f, logs.y), shedYaw + 90f, 0.8f, 0.05f, root);
+                    Vector2 logs = shed + along * 6.5f;
+                    if (rng.NextDouble() < 0.45)
+                        VillageProp("Scenery_LogPile", logs, shedYaw + 90f, 0.8f, 3f, center, root, ref budget);
                 }
             }
-            Vector2 back = house + outward * 8f;
-            float yaw = Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg + 90f;
-            for (int k = -2; k <= 2; k++)
-            {
-                Vector2 p = back + along * (k * 3f);
-                if (rng.NextDouble() < 0.15 || !Buildable(p)) continue;
-                Place("Scenery_Fence", new Vector3(p.x, 0f, p.y), yaw, 1f, 0.1f, root);
-            }
+            // Give fruit trees first choice of the remaining garden, before the short back fence fills it.
             int trees = rng.Next(0, 3);
             for (int k = 0; k < trees; k++)
             {
-                Vector2 p = house + outward * Range(rng, 4.5f, 6.5f) + along * Range(rng, -6f, 6f);
-                if (!Buildable(p)) continue;
-                Place(rng.NextDouble() < 0.7 ? "Scenery_Tree" : "Scenery_Birch", new Vector3(p.x, 0f, p.y),
-                    Range(rng, 0f, 360f), Range(rng, 0.5f, 0.7f), 0.1f, root);
+                Vector2 p = house + outward * Range(rng, 10.5f, 12f) + along * Range(rng, -3f, 3f);
+                VillageProp(rng.NextDouble() < 0.7 ? "Scenery_Tree" : "Scenery_Birch", p,
+                    Range(rng, 0f, 360f), Range(rng, 0.5f, 0.7f), 3.5f, center, root, ref budget);
+            }
+            Vector2 back = house + outward * 10.5f;
+            float yaw = Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg + 90f;
+            for (int k = -1; k <= 1; k++)
+            {
+                Vector2 p = back + along * (k * 4f);
+                if (rng.NextDouble() < 0.15) continue;
+                VillageProp("Scenery_Fence", p, yaw, 1f, 1.65f, center, root, ref budget);
             }
         }
 
-        // Keeps village props inside the terrain and off roads, water, fields and levelled sites.
-        static bool Buildable(Vector2 p)
+        // Counts all renderers, including hidden LODs, before adding a garden prop and reserving its footprint.
+        static bool VillageProp(string model, Vector2 p, float yaw, float scale, float radius, Vector2 center,
+            Transform root, ref int budget)
+        {
+            if (budget <= 0 || !VillageRoom(p, radius, center, true)) return false;
+            var pos = new Vector3(p.x, 0f, p.y);
+            int cost = Art.ModelRendererCount(model, pos);
+            if (cost > budget || Place(model, pos, yaw, scale, 0.1f, root) == null) return false;
+            budget -= cost;
+            villagePlots.Add((p, radius));
+            return true;
+        }
+
+        // Point clearance is used across each full footprint, keeping buildings and props off roads and tracks.
+        static bool Buildable(Vector2 p) => VillageGround(p)
+            && MapLayout.RoadField.Distance(p.x, p.y) >= MapLayout.RoadHalfWidth + 1.5f
+            && MapLayout.TrackField.Distance(p.x, p.y) >= 3f;
+
+        // Shared by building footprints and worn paths; unlike the old centre test this includes standing water.
+        static bool VillageGround(Vector2 p)
         {
             if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) return false;
-            if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 2.5f) return false;
-            if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 5f) return false;
-            return !MapLayout.NearFlatSite(p, 4f) && !MapLayout.InField(p, 1f);
+            if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 2.5f) return false;
+            if (MapLayout.LakeDistance(p.x, p.y) < 1.5f || MapLayout.NearDam(p, 1.5f) || MapLayout.InGorge(p, 1.5f)) return false;
+            return !MapLayout.OnWorks(p, 1.5f) && !MapLayout.NearFlatSite(p, 2f) && !MapLayout.InField(p, 1.5f);
         }
 
         // ---- Woods ----
