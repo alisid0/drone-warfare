@@ -8,9 +8,10 @@ namespace DroneSandbox
     // others, and kept off roads, fields, water, steep rock and the bare ground of the bases.
     public static class Grass
     {
-        const int Resolution = 512;      // detail cells across the terrain (just under a metre each)
-        public const float DrawDistance = 120f;
+        const int MaxResolution = 1024; // about 2 m cells at 2 km; at most four times the old detail-map work
+        public const float DrawDistance = 180f; // real blades are subpixel beyond this; terrain carries distant colour
 
+        // Keeps grass maps and near-camera overdraw bounded while the terrain grows. Clump sizes stay real.
         public static void Plant(Terrain terrain)
         {
             var grassMaterial = Resources.Load<Material>("Materials/Grass");
@@ -18,6 +19,7 @@ namespace DroneSandbox
             var reedMaterial = Resources.Load<Material>("Materials/Reeds");
             if (terrain == null || grassMaterial == null || flowerMaterial == null || reedMaterial == null) return;
 
+            int resolution = Mathf.Clamp(Mathf.NextPowerOfTwo(Mathf.CeilToInt(Ground.Size / 2f)), 512, MaxResolution);
             var tussock = ClumpMesh(40f);
             var data = terrain.terrainData;
             data.detailPrototypes = new[]
@@ -27,17 +29,17 @@ namespace DroneSandbox
                 Prototype(Holder("Reed Clump", ClumpMesh(10f), reedMaterial, terrain.transform), 2.2f, 3.4f),
             };
             data.SetDetailScatterMode(DetailScatterMode.InstanceCountMode);
-            data.SetDetailResolution(Resolution, 32);
+            data.SetDetailResolution(resolution, 32);
 
-            var grass = new int[Resolution, Resolution];
-            var flowers = new int[Resolution, Resolution];
-            var reeds = new int[Resolution, Resolution];
-            float size = Ground.Size, cell = size / Resolution;
+            var grass = new int[resolution, resolution];
+            var flowers = new int[resolution, resolution];
+            var reeds = new int[resolution, resolution];
+            float size = Ground.Size, cell = size / resolution;
             var roads = MapLayout.RoadField;
             var river = MapLayout.RiverField;
-            for (int zi = 0; zi < Resolution; zi++)
+            for (int zi = 0; zi < resolution; zi++)
             {
-                for (int xi = 0; xi < Resolution; xi++)
+                for (int xi = 0; xi < resolution; xi++)
                 {
                     float x = -size / 2f + (xi + 0.5f) * cell, z = -size / 2f + (zi + 0.5f) * cell;
                     var p = new Vector2(x, z);
@@ -47,7 +49,7 @@ namespace DroneSandbox
                     bool pond = lake < 1f && MapLayout.ReservoirDistance(x, z) > lake + 0.01f; // ponds are mostly ringed with reeds
                     if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > (pond ? 0.55f : 0.56f) && !MapLayout.NearDam(p, 2f)) // a third of the shore, in clumps
                         reeds[zi, xi] = Mathf.PerlinNoise(x * 0.4f, z * 0.4f) > 0.45f ? 2 : 1;
-                    if (data.GetSteepness((xi + 0.5f) / Resolution, (zi + 0.5f) / Resolution) > 30f) continue;
+                    if (data.GetSteepness((xi + 0.5f) / resolution, (zi + 0.5f) / resolution) > 30f) continue;
                     if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f || MapLayout.TrackField.Distance(x, z) < 1.3f) continue;
                     if (river.Distance(x, z) < MapLayout.RiverHalfWidth + 1f) continue;
                     if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;

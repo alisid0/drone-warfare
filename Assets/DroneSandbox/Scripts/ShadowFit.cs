@@ -4,18 +4,16 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox
 {
-    // Fits the sun's shadows to what the RTS camera can see. It looks down from 15-110 m away, so the farthest
-    // ground in view is a couple of hundred metres off at most: the shadows end just past the top of the screen
-    // instead of at the 350 m the photo views need. That skips drawing shadows nobody sees, and the last cascade,
-    // which covers most of the ground in view, gets its resolution spread over less of it, so they're sharper
-    // too. (Spreading the cascades over the visible ground instead of the default split cost more, as more of
-    // them then have trees in them, and looked no better.) In photo mode this steps aside.
+    // Fits the sun's shadows to the high RTS camera's view, with four cascades from Atmosphere. Distance is
+    // already scaled by the camera controller: the bounded fit reaches the far ground at 300-640 m zoom without
+    // a 1.5 km shadow pass. Photo mode uses the environment profile instead.
     public class ShadowFit : MonoBehaviour
     {
         RtsController rts;
         Volume volume;
         HDShadowSettings shadows;
 
+        // Creates a distance-only override; cascade count and splits come from the environment profile.
         public void Init(RtsController controller)
         {
             rts = controller;
@@ -27,12 +25,13 @@ namespace DroneSandbox
             volume.sharedProfile = profile;
         }
 
+        // Keeps the last cascade just beyond the visible ground as the camera zooms.
         void LateUpdate()
         {
             if (volume == null) return;
             volume.weight = PhotoMode.Active ? 0f : 1f;
             // To the screen's top corners, with a margin.
-            if (!PhotoMode.Active) shadows.maxShadowDistance.Override(Mathf.Clamp(rts.Distance * 1.8f + 70f, 120f, 350f));
+            if (!PhotoMode.Active) shadows.maxShadowDistance.Override(Mathf.Clamp(rts.Distance * 1.35f + 80f, 200f, 1000f));
         }
     }
 }

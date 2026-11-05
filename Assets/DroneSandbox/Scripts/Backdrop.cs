@@ -10,10 +10,13 @@ namespace DroneSandbox
     // Project from Patchwork() below; about 8 m a pixel), which the haze blends into the distance.
     public static class Backdrop
     {
-        const int Segments = 512;
+        const int Segments = 512; // fixed triangle budget; this is a horizon mesh, not more playable terrain
         const float Reach = 12000f;
         const float TextureSpan = 16384f; // metres the patchwork covers before it repeats
         static readonly float[] Steps = RingSteps();
+        static Mesh builtMesh;
+        static Material builtMaterial;
+        static Texture2D builtTexture;
 
         // How far out each ring of the mesh is: 8 m apart at the map's edge, then each 6% further than the last,
         // out to 12 km, so a far hill has about as many triangles across it on screen as a near one (with a
@@ -29,8 +32,12 @@ namespace DroneSandbox
             return steps.ToArray();
         }
 
+        // Rebuilds the fixed-budget horizon ring and frees the previous sector's generated mesh and material.
         public static void Build(Transform parent)
         {
+            Art.Discard(builtMesh);
+            Art.Discard(builtMaterial);
+            Art.Discard(builtTexture);
             float edge = Ground.Size / 2f - 0.5f;
             var vertices = new List<Vector3>();
             var uvs = new List<Vector2>();
@@ -74,21 +81,27 @@ namespace DroneSandbox
             }
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
+            builtMesh = mesh;
 
             var go = new GameObject("Backdrop");
             go.transform.SetParent(parent, false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var renderer = go.AddComponent<MeshRenderer>();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             var material = Art.NewMaterial(Color.white);
-            material.mainTexture = Resources.Load<Texture2D>("Textures/Patchwork") ?? Patchwork();
+            builtMaterial = material;
+            var texture = Resources.Load<Texture2D>("Textures/Patchwork");
+            if (texture == null) texture = builtTexture = Patchwork();
+            material.mainTexture = texture;
             material.mainTextureScale = Vector2.one / TextureSpan;
             material.mainTextureOffset = Vector2.one * 0.5f;
             material.SetFloat("_Smoothness", 0.05f);
             renderer.sharedMaterial = material;
         }
 
-        // Rolling farmland near the map, rising through lines of ridges: about 80-180 m of relief at 1.5-3 km,
-        // 150-350 m from 5 km out (they fade, cooler and paler, into the haze).
+        // Distance is measured OUTSIDE the terrain edge, not from the world origin: these ridges already start
+        // beyond a 2 km map. Keep the 400 m blend, 12 km reach and 170 m patchwork fields in real metres.
+        // About 80-180 m of relief over the first ridges, 150-350 m further out, fading into the haze.
         static float Hills(Vector2 p, float distance)
         {
             float h = 6f + 26f * Mathf.PerlinNoise(p.x * 0.0022f + 31f, p.y * 0.0022f + 7f)
@@ -177,7 +190,7 @@ namespace DroneSandbox
             }
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Repeat, anisoLevel = 8 };
             texture.SetPixels(pixels);
-            texture.Apply();
+            texture.Apply(); // ProjectSetup encodes this as a PNG, so it must remain readable
             return texture;
         }
     }
