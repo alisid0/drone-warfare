@@ -146,7 +146,9 @@ namespace DroneSandbox
         public void LoadSector(SectorPlan plan)
         {
             var current = MapLayout.Plan;
-            if (current.kind == plan.kind && current.seed == plan.seed && world != null) return;
+            bool sameWorld = current.world == null ? plan.world == null
+                : plan.world != null && current.world.center.Equals(plan.world.center) && current.world.seed == plan.world.seed;
+            if (current.kind == plan.kind && current.seed == plan.seed && sameWorld && world != null) return;
             ClearUnits();
             var oldTerrain = Ground.Current != null ? Ground.Current.terrainData : null;
             if (world != null) DestroyImmediate(world.gameObject);
@@ -162,13 +164,41 @@ namespace DroneSandbox
         // briefs its mission.
         public void PlayHotspot(Hotspot hotspot) => StartCoroutine(PlayHotspotSoon(hotspot));
 
+        // Report a failed world crop once per session while retaining the generated-sector fallback.
+        static bool loggedWorldCropFallback;
+
+        // Loads campaign geography at its allocated world centre before generating the situation.
         IEnumerator PlayHotspotSoon(Hotspot hotspot)
         {
             Loading = true;
             yield return null; // let the HUD show "loading" first
             yield return null;
-            var plan = hotspot.Plan();
-            FarTerrain.SetOrigin(FarTerrain.SpotFor(hotspot.mapPosition)); // its place in the big world
+            if (!WorldPlan.Ready) WorldPlan.Generate(World.WorldSeed);
+            SectorPlan plan;
+            if (hotspot.kind == SectorKind.VarrowValley)
+            {
+                FarTerrain.SetOrigin(FarTerrain.VarrowSpot());
+                plan = hotspot.Plan();
+            }
+            else
+            {
+                try
+                {
+                    var centre = WorldSectors.SpotFor(hotspot);
+                    FarTerrain.SetOrigin(centre);
+                    plan = WorldSectors.PlanAt(centre, hotspot.kind, hotspot.seed);
+                }
+                catch (System.InvalidOperationException ex)
+                {
+                    FarTerrain.SetOrigin(FarTerrain.SpotFor(hotspot.mapPosition));
+                    plan = hotspot.Plan();
+                    if (!loggedWorldCropFallback)
+                    {
+                        Debug.LogWarning($"World sector crop unavailable; using generated sector ({hotspot.kind}, seed {hotspot.seed}): {ex.Message}");
+                        loggedWorldCropFallback = true;
+                    }
+                }
+            }
             LoadSector(plan);
             var mission = Situations.Generate(MapLayout.Plan, hotspot.situation, hotspot.seed, hotspot.daylight);
             Loading = false;
