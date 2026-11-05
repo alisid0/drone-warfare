@@ -199,6 +199,13 @@ namespace DroneSandbox
                     world[zi, xi] = h;
                 }
             });
+
+            if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
+            worldHeights = world;
+            steepness = Slopes(world, step);
+
+            var heights = new float[HeightRes, HeightRes];
+            for (int zi = 0; zi < HeightRes; zi++)
                 for (int xi = 0; xi < HeightRes; xi++)
                     heights[zi, xi] = Mathf.Clamp01((world[zi, xi] + Sink) / HeightRange);
             return heights;

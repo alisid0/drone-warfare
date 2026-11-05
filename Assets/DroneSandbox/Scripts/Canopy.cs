@@ -10,11 +10,13 @@ namespace DroneSandbox
     {
         const float Cell = 4f;
         static float[,] top;
-        // Each tree's crown as an ellipsoid, for seeing past the trees (Blocks), found by the 8 m cell its middle is in.
+        // Each tree's crown as an ellipsoid (a broadleaf) or a cone (a spruce or pine: widest at its lowest branches,
+        // coming to a point), for seeing past the trees (Blocks), found by the 8 m cell its middle is in.
         struct Crown
         {
             public Vector3 centre;
             public float radius, halfHeight;
+            public bool cone;
         }
         const float CrownCell = 8f;
         static readonly Dictionary<Vector2Int, List<Crown>> crowns = new Dictionary<Vector2Int, List<Crown>>();
@@ -53,11 +55,13 @@ namespace DroneSandbox
                 // The crown: the top two thirds of the tree, two thirds as wide as its branches reach (they're not
                 // solid to the tips: the autotest's occlusion check calibrates this against the picture).
                 float bottom = bounds.min.y + bounds.size.y * 0.35f;
+                bool conifer = group.name.StartsWith("Scenery_Spruce") || group.name.StartsWith("Scenery_Pine");
                 var crown = new Crown
                 {
                     centre = new Vector3(bounds.center.x, (bottom + bounds.max.y) / 2f, bounds.center.z),
-                    radius = Mathf.Min((bounds.extents.x + bounds.extents.z) / 2f * 0.65f, CrownCell),
+                    radius = Mathf.Min((bounds.extents.x + bounds.extents.z) / 2f * (conifer ? 0.75f : 0.65f), CrownCell),
                     halfHeight = (bounds.max.y - bottom) / 2f,
+                    cone = conifer,
                 };
                 var key = CrownKey(crown.centre);
                 if (!crowns.TryGetValue(key, out var list)) crowns[key] = list = new List<Crown>();
@@ -112,8 +116,13 @@ namespace DroneSandbox
                     foreach (var c in list)
                     {
                         float across = ((p.x - c.centre.x) * (p.x - c.centre.x) + (p.z - c.centre.z) * (p.z - c.centre.z)) / (c.radius * c.radius);
-                        float up = (p.y - c.centre.y) / c.halfHeight;
-                        if (across + up * up < 1f) return c;
+                        float up = (p.y - c.centre.y) / c.halfHeight; // -1 at the crown's foot, 1 at its top
+                        if (c.cone)
+                        {
+                            float width = (1f - up) / 2f; // the cone's radius here, as a share of its foot's
+                            if (up > -1f && up < 1f && across < width * width) return c;
+                        }
+                        else if (across + up * up < 1f) return c;
                     }
                 }
             return null;
