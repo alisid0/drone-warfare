@@ -162,6 +162,19 @@ namespace DroneSandbox
             foreach (var d in p.defences) FlatSites.Add(new Ground.FlatSite(d.position, DefenceRadius, true));
             foreach (var s in p.sites)
                 if (s.flat > 0f) FlatSites.Add(new Ground.FlatSite(new Vector3(s.position.x, 0f, s.position.y), s.flat, false));
+            // Overlapping discs cover complete yards, not just their centres; Ground levels all of them to zero.
+            foreach (var a in p.featureFlats)
+            {
+                int nu = Mathf.CeilToInt(a.halfLength * 2f / 64f), nv = Mathf.CeilToInt(a.halfWidth * 2f / 64f);
+                float du = a.halfLength * 2f / nu, dv = a.halfWidth * 2f / nv;
+                float radius = Mathf.Sqrt(du * du + dv * dv) * 0.5f + 3f;
+                for (int u = 0; u < nu; u++)
+                    for (int v = 0; v < nv; v++)
+                    {
+                        Vector2 c = a.Point(-a.halfLength + (u + 0.5f) * du, -a.halfWidth + (v + 0.5f) * dv);
+                        FlatSites.Add(new Ground.FlatSite(new Vector3(c.x, 0f, c.y), radius, false));
+                    }
+            }
             if (p.Has(SectorFeature.Airstrip))
                 for (float t = -p.airstripLength / 2f; t <= p.airstripLength / 2f + 0.1f; t += 24f)
                 {
@@ -177,13 +190,15 @@ namespace DroneSandbox
             RoadLines = new List<List<Vector2>>();
             foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
             Wander(RoadLines);
+            foreach (var street in p.featureStreets) RoadLines.Add(Smooth(street, 2f));
             Lap("roads");
-            PlanVillages();
-            Lap("villages");
+            // Village clearance must query this sector's railways, never the previous sector's cached field.
             RailLines = new List<List<Vector2>>();
             foreach (var rail in p.railways) RailLines.Add(Smooth(rail, 2f));
-            RoadField = new PathField(RoadLines, 12f, Ground.Size);
             RailField = new PathField(RailLines, 12f, Ground.Size);
+            PlanVillages();
+            Lap("villages");
+            RoadField = new PathField(RoadLines, 12f, Ground.Size);
             TrackLines = PlanTracks();
             TrackField = new PathField(TrackLines, 6f, Ground.Size);
             Lap("road fields");
@@ -255,7 +270,7 @@ namespace DroneSandbox
             var places = new List<(Vector2 at, float radius)>();
             foreach (var d in Plan.defences) places.Add((Flat(d.position), DefenceRadius));
             foreach (var s in Plan.sites)
-                if (s.flat > 0f) places.Add((s.position, s.flat));
+                if (s.flat > 0f && !ReservedFeature(s.position, 0f)) places.Add((s.position, s.flat));
             var served = new List<Vector2>();
             foreach (var (at, radius) in places)
             {
@@ -607,6 +622,7 @@ namespace DroneSandbox
         public static bool OnWorks(Vector2 p, float margin)
         {
             var plan = Plan;
+            if (ReservedFeature(p, Mathf.Max(0f, margin))) return true;
             if (plan.Has(SectorFeature.Quarry) && Vector2.Distance(p, plan.quarry) < plan.quarryRadius + 6f + margin) return true;
             if (plan.Has(SectorFeature.Airstrip))
             {
@@ -616,6 +632,13 @@ namespace DroneSandbox
                     && Mathf.Abs(Vector2.Dot(d, across)) < 26f + margin) return true;
             }
             return RailLines != null && RailLines.Count > 0 && RailField.Distance(p.x, p.y) < RailHalfWidth + 2.5f + margin;
+        }
+
+        // The dominant land use owns its whole footprint before fields, village blocks, rocks or ordinary woods.
+        public static bool ReservedFeature(Vector2 p, float margin)
+        {
+            foreach (var area in Plan.reservedFeatures) if (area.Contains(p, margin)) return true;
+            return false;
         }
 
         // Open ground for trees and rocks: not on a road, in the river or lake, on a field, in a village or a base.
