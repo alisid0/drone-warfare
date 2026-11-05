@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "VarrowValley",
+    "hash": "BDD40E03B7CAA30712ED772032BEA5979598166A683833DB6400D300C9AF58AB",
+    "terrainMs": 2185.2261,
+    "totalMs": 2381.7202
+  },
+  {
+    "kind": "RollingFarmland",
+    "hash": "088F267D9EF75C0A6FB2CD1814C8DA6AD549E5E3F51383A0F97993E414C5C9DE",
+    "terrainMs": 898.7186,
+    "totalMs": 975.535
+  },
+  {
+    "kind": "Reservoir",
+    "hash": "734264CE41906F78057C4E6A27E472104EB0410E4F61D9FC3D7D6081BCFCF4B6",
+    "terrainMs": 918.6648,
+    "totalMs": 1096.6606
+  },
+  {
+    "kind": "DeepForest",
+    "hash": "3EA18CA119DD98F0411EB1184166D4439363B2A3154CFF02F5B2FBAEABDD9925",
+    "terrainMs": 598.287,
+    "totalMs": 731.9991
+  }
+]

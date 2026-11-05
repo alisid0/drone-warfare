@@ -36,7 +36,8 @@ namespace DroneSandbox
         public static void Plan(System.Random rng, System.Func<Vector2, bool> isBlocked)
         {
             random = rng;
-            blocked = isBlocked;
+            var source = MapLayout.Plan.world;
+            blocked = source == null ? isBlocked : p => isBlocked(p) || !FarmlandAt(p);
             lots.Clear();
             Districts.Clear();
             districtLand = parcelLand = 0f;
@@ -175,6 +176,7 @@ namespace DroneSandbox
         static float PlanningHeight(float x, float z)
         {
             var p = MapLayout.Plan;
+            if (p.world != null) return p.world.Height(x, z);
             const float s = Scale.Distance;
             float k = p.hills / 9f, nx = x / s + p.noiseOffset.x, nz = z / s + p.noiseOffset.y;
             float h = (Mathf.PerlinNoise(nx * 0.008f + 11.3f, nz * 0.008f + 3.7f) - 0.42f) * 9f * s * k;
@@ -182,6 +184,18 @@ namespace DroneSandbox
             float edge = Mathf.InverseLerp(95f * s, 230f * s, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
             float valley = Mathf.SmoothStep(0f, 1f, (MapLayout.RiverField.Distance(x, z) - 20f * s) / (55f * s));
             return h + edge * edge * p.ridges * s * (0.7f + 0.6f * Mathf.PerlinNoise(nx * 0.015f, nz * 0.015f)) * valley;
+        }
+
+        // Cover is a nearest-sample world grid. A small guard also covers the gaps between parcel samples.
+        static bool FarmlandAt(Vector2 p)
+        {
+            var source = MapLayout.Plan.world;
+            if (source.CoverAt(p.x, p.y) != Cover.Farmland) return false;
+            const float guard = 5f;
+            return source.CoverAt(p.x - guard, p.y - guard) == Cover.Farmland
+                && source.CoverAt(p.x + guard, p.y - guard) == Cover.Farmland
+                && source.CoverAt(p.x - guard, p.y + guard) == Cover.Farmland
+                && source.CoverAt(p.x + guard, p.y + guard) == Cover.Farmland;
         }
 
         // The mask is immutable during MapBlocked's parallel reads.

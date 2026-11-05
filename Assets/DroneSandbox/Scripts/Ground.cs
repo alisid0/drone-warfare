@@ -26,6 +26,7 @@ namespace DroneSandbox
         }
 
         static Terrain terrain;
+        static float terrainBottom = -Sink, terrainRange = HeightRange;
         static readonly List<FlatSite> sites = new List<FlatSite>();
 
         public static Terrain Current => terrain;
@@ -72,13 +73,21 @@ namespace DroneSandbox
             MapLayout.Prepare();
             sites.Clear();
             sites.AddRange(MapLayout.FlatSites);
+            if (MapLayout.Plan.world != null)
+                for (int i = 0; i < sites.Count; i++)
+                {
+                    var site = sites[i];
+                    site.center.y = MapLayout.Plan.world.Height(site.center.x, site.center.z);
+                    sites[i] = site;
+                }
             IndexSites();
             ClearWorn();
 
             FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
-            data.size = new Vector3(Size, HeightRange, Size);
-            data.SetHeights(0, 0, BuildHeights());
+            var heights = BuildHeights();
+            data.size = new Vector3(Size, terrainRange, Size);
+            data.SetHeights(0, 0, heights);
             data.terrainLayers = BuildLayers();
             lieHeights = BoxAverage(worldHeights, Mathf.RoundToInt(40f / (Size / (HeightRes - 1))));
             data.SetAlphamaps(0, 0, BuildSplat(data));
@@ -86,7 +95,7 @@ namespace DroneSandbox
             var go = Terrain.CreateTerrainGameObject(data);
             go.name = "Terrain";
             go.transform.SetParent(parent, false);
-            go.transform.position = new Vector3(-Size / 2f, -Sink, -Size / 2f);
+            go.transform.position = new Vector3(-Size / 2f, terrainBottom, -Size / 2f);
             terrain = go.GetComponent<Terrain>();
             terrain.heightmapPixelError = 2f;
             // The full shader at every distance: the base map Unity bakes for far terrain mixes only the first four
@@ -105,6 +114,7 @@ namespace DroneSandbox
 
         static float[,] BuildHeights()
         {
+            var source = MapLayout.Plan.world;
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
             float step = Size / (HeightRes - 1);
@@ -116,11 +126,22 @@ namespace DroneSandbox
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
+                    if (source == null) world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
+                    else
+                    {
+                        float wx = x + source.center.x, wz = z + source.center.y;
+                        float detail = (Mathf.PerlinNoise(wx * 0.024f + 17.3f, wz * 0.024f + 63.1f) - 0.5f) * 1.6f
+                                     + (Mathf.PerlinNoise(wx * 0.09f + 5.5f, wz * 0.09f + 91.2f) - 0.5f) * 0.6f;
+                        if (source.DryDistance(new Vector2(x, z)) <= 0f) detail = 0f;
+                        world[zi, xi] = FlattenToSiteElevation(x, z, source.Height(x, z) + detail);
+                    }
                 }
             });
-            if (MapLayout.HasDam) Reservoir(world, step); // before the roads, so a road past the lake follows its banks
-            Ponds(world, step);
+            if (source == null)
+            {
+                if (MapLayout.HasDam) Reservoir(world, step); // before the roads, so a road past the lake follows its banks
+                Ponds(world, step);
+            }
             Quarry(world, step);
 
             // Roads follow a smoothed copy of the ground, sunk in a little.
@@ -131,10 +152,11 @@ namespace DroneSandbox
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    float d = roads.Query(x, z, out float level, out _);
-                    if (d > MapLayout.RoadHalfWidth + 6f) continue;
-                    float weight = 1f - Mathf.SmoothStep(0f, 1f, (d - MapLayout.RoadHalfWidth - 0.5f) / 5.5f);
-                    float dip = 0.12f * Mathf.Clamp01(1f - d / MapLayout.RoadHalfWidth);
+                    float d = roads.Query(x, z, out float level, out int segment);
+                    float roadWidth = MapLayout.RoadWidth(segment);
+                    if (d > roadWidth + 6f) continue;
+                    float weight = 1f - Mathf.SmoothStep(0f, 1f, (d - roadWidth - 0.5f) / 5.5f);
+                    float dip = 0.12f * Mathf.Clamp01(1f - d / roadWidth);
                     weight *= FlatMask(x, z, out _); // flat sites stay flat
                     world[zi, xi] = Mathf.Lerp(world[zi, xi], level - dip, weight);
                 }
@@ -164,59 +186,88 @@ namespace DroneSandbox
             // then a channel carved under it.
             float hw = MapLayout.RiverHalfWidth;
             var line = river.points;
-            for (int i = 0; i < line.Count; i++)
+            if (source != null)
             {
-                Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(i - 1, 0)]).normalized;
-                Vector2 side = new Vector2(-dir.y, dir.x);
-                float lowest = Sample(world, line[i]);
-                foreach (float offset in new[] { hw + 3f, hw + 10f })
+                for (int i = 0; i < line.Count; i++)
                 {
-                    lowest = Mathf.Min(lowest, Sample(world, line[i] + side * offset));
-                    lowest = Mathf.Min(lowest, Sample(world, line[i] - side * offset));
+                    source.RiverDistance(line[i], out _, out float level);
+                    river.values[i] = level;
                 }
-                river.values[i] = lowest - 0.7f;
             }
-            MakeFalling(river.values);
-            SmoothValues(river, 8);
-            MakeFalling(river.values);
-
-            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            else
             {
-                for (int xi = 0; xi < HeightRes; xi++)
+                for (int i = 0; i < line.Count; i++)
                 {
-                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    float d = river.Query(x, z, out float water, out _);
-                    if (d > hw + 45f * Scale.Distance || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
-                    float h = world[zi, xi];
-                    float wet = MapLayout.RiverWidthAt(x, z); // the water's own width here, inside the full channel
-                    if (d <= wet)
+                    Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(i - 1, 0)]).normalized;
+                    Vector2 side = new Vector2(-dir.y, dir.x);
+                    float lowest = Sample(world, line[i]);
+                    foreach (float offset in new[] { hw + 3f, hw + 10f })
                     {
-                        float k = d / wet;
-                        h = Mathf.Min(h, water - 0.3f - 1.5f * (1f - k * k)); // river bed
+                        lowest = Mathf.Min(lowest, Sample(world, line[i] + side * offset));
+                        lowest = Mathf.Min(lowest, Sample(world, line[i] - side * offset));
                     }
-                    else
-                    {
-                        // Banks aren't a trench: in places a low shelf of gravel and mud up to 2.5 m wide just
-                        // above the water, then a slope gentle in some reaches and steeper in others (a flat
-                        // site beside the river keeps its level ground).
-                        float shelf = BankShelf(x, z);
-                        float slope = 0.32f + 0.28f * Mathf.PerlinNoise(x * 0.03f + 5f, z * 0.03f + 61f);
-                        float bank = water + 0.18f + Mathf.Min(d - wet, shelf) * 0.04f + Mathf.Max(0f, d - wet - shelf) * slope;
-                        if (d < wet + 2.5f) bank = Mathf.Max(bank, water + 0.12f); // never below the water right at the edge
-                        h = Mathf.Lerp(h, Mathf.Min(h, bank), FlatMask(x, z, out _));
-                    }
-                    world[zi, xi] = h;
+                    river.values[i] = lowest - 0.7f;
                 }
-            });
+                MakeFalling(river.values);
+                SmoothValues(river, 8);
+                MakeFalling(river.values);
 
-            if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
+                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+                {
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float d = river.Query(x, z, out float water, out _);
+                        if (d > hw + 45f * Scale.Distance || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
+                        float h = world[zi, xi];
+                        float wet = MapLayout.RiverWidthAt(x, z); // the water's own width here, inside the full channel
+                        if (d <= wet)
+                        {
+                            float k = d / wet;
+                            h = Mathf.Min(h, water - 0.3f - 1.5f * (1f - k * k)); // river bed
+                        }
+                        else
+                        {
+                            // Banks aren't a trench: in places a low shelf of gravel and mud up to 2.5 m wide just
+                            // above the water, then a slope gentle in some reaches and steeper in others (a flat
+                            // site beside the river keeps its level ground).
+                            float shelf = BankShelf(x, z);
+                            float slope = 0.32f + 0.28f * Mathf.PerlinNoise(x * 0.03f + 5f, z * 0.03f + 61f);
+                            float bank = water + 0.18f + Mathf.Min(d - wet, shelf) * 0.04f + Mathf.Max(0f, d - wet - shelf) * slope;
+                            if (d < wet + 2.5f) bank = Mathf.Max(bank, water + 0.12f); // never below the water right at the edge
+                            h = Mathf.Lerp(h, Mathf.Min(h, bank), FlatMask(x, z, out _));
+                        }
+                        world[zi, xi] = h;
+                    }
+                });
+
+                if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
+            }
+
+            terrainBottom = -Sink;
+            terrainRange = HeightRange;
+            if (source != null)
+            {
+                // Fade every earthwork, including pads and roads, back to the same absolute world boundary.
+                float min = float.MaxValue, max = float.MinValue;
+                for (int zi = 0; zi < HeightRes; zi++)
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float h = Mathf.Lerp(source.Height(x, z), world[zi, xi], source.DetailWeight(x, z));
+                        world[zi, xi] = h;
+                        min = Mathf.Min(min, h); max = Mathf.Max(max, h);
+                    }
+                terrainBottom = min - 8f;
+                terrainRange = Mathf.Max(32f, max - terrainBottom + 8f);
+            }
             worldHeights = world;
             steepness = Slopes(world, step);
 
             var heights = new float[HeightRes, HeightRes];
             for (int zi = 0; zi < HeightRes; zi++)
                 for (int xi = 0; xi < HeightRes; xi++)
-                    heights[zi, xi] = Mathf.Clamp01((world[zi, xi] + Sink) / HeightRange);
+                    heights[zi, xi] = Mathf.Clamp01((world[zi, xi] - terrainBottom) / terrainRange);
             return heights;
         }
 
@@ -512,6 +563,23 @@ namespace DroneSandbox
             return mask;
         }
 
+        // A pad keeps its regional elevation, with the same controlling site's radius and blend as FlatMask.
+        static float FlattenToSiteElevation(float x, float z, float height)
+        {
+            float mask = 1f, level = height;
+            int cx = Mathf.Clamp(Mathf.FloorToInt((x + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            int cz = Mathf.Clamp(Mathf.FloorToInt((z + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            var near = siteCells != null ? siteCells[cz * siteCellCount + cx] : sites;
+            if (near == null) return height;
+            foreach (var s in near)
+            {
+                float d = Vector2.Distance(new Vector2(x, z), new Vector2(s.center.x, s.center.z));
+                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / ((s.radius * 0.6f + 6f) * Scale.Distance));
+                if (m < mask) { mask = m; level = s.center.y; }
+            }
+            return Mathf.Lerp(level, height, mask);
+        }
+
         // Wears bare ground into the finished terrain, for things placed after it was painted (a garden path, a
         // farmyard, a vegetable patch): earth along the line from `from` to `to`, `width` wide with soft, uneven
         // edges, by `strength` (1 for bare earth). Grass is planted afterwards and keeps off it (Worn); writing
@@ -725,7 +793,7 @@ namespace DroneSandbox
         {
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
-            float hw = MapLayout.RiverHalfWidth, roadHw = MapLayout.RoadHalfWidth;
+            float hw = MapLayout.RiverHalfWidth;
             var splat = new float[SplatRes, SplatRes, 5];
             var junctions = MapLayout.Junctions;
             var tracks = MapLayout.TrackField;
@@ -743,7 +811,8 @@ namespace DroneSandbox
                     // Dirt roads: two wheel tracks with a strip of grass down the middle, wider and narrower along the
                     // way (3 to 4 m), with ragged edges where wheels have strayed onto the verge, and a wider patch of
                     // bare ground where roads meet.
-                    float dRoad = roads.Distance(x, z);
+                    float dRoad = roads.Query(x, z, out _, out int roadSegment);
+                    float roadHw = MapLayout.RoadWidth(roadSegment);
                     float laneHw = roadHw * (0.75f + 0.3f * Mathf.PerlinNoise(x * 0.025f + 5f, z * 0.025f + 90f))
                                  + 0.5f * (Mathf.PerlinNoise(x * 0.35f + 17f, z * 0.35f + 4f) - 0.5f);
                     if (dRoad < laneHw + 2.5f)
