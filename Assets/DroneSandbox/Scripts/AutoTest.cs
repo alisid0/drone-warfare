@@ -707,6 +707,47 @@ namespace DroneSandbox
             log.WriteLine($"World long flight: Swift alive {swift != null && swift.IsAlive}, flew {swiftFlown:F0} m in {Time.time - started:F0} s, " +
                           $"battery {(swift != null ? swift.Battery * 100f : 0f):F0}%, lowest {swiftLowest:F1} m above the ground");
             if (swift == null || !swift.IsAlive || swiftFlown < 15000f || swiftLowest < 2f) errors++;
+            yield return WorldMapCheck(game, rts, swift);
+        }
+
+        // Exercise the atlas's actual pointer path, with a far-away Swift and screenshots at both map scales.
+        IEnumerator WorldMapCheck(SandboxGame game, RtsController rts, Drone swift)
+        {
+            var hud = game.GetComponent<SandboxHud>();
+            if (hud == null || swift == null || !swift.IsAlive) { errors++; yield break; }
+            var selection = rts.selected.ToArray();
+            bool paused = game.Paused;
+            float timeScale = Time.timeScale;
+            try
+            {
+                rts.selected.Clear();
+                rts.selected.Add(swift);
+                hud.OpenWorldMap();
+                bool pausePreserved = Time.timeScale == timeScale && game.Paused == paused;
+                if (!hud.WorldMapOpen || !hud.IsPointerOverHud(Vector2.zero) || !pausePreserved) errors++;
+                yield return new WaitForSecondsRealtime(0.5f);
+                yield return Shot("84_world_map");
+                Vector2 world = new Vector2(swift.transform.position.x, swift.transform.position.z) + FarTerrain.Origin;
+                for (int i = 0; i < 12; i++) hud.WorldMapPointer(hud.WorldMapPoint(world), false, false, false, false, 1f);
+                if (!game.Paused) game.TogglePause();
+                Vector2 target = world + new Vector2(500f, 500f);
+                target.x = Mathf.Clamp(target.x, -WorldPlan.Half + 50f, WorldPlan.Half - 50f);
+                target.y = Mathf.Clamp(target.y, -WorldPlan.Half + 50f, WorldPlan.Half - 50f);
+                hud.WorldMapPointer(hud.WorldMapPoint(target), false, false, false, true, 0f);
+                Vector3 expected = new Vector3(target.x - FarTerrain.Origin.x, 0f, target.y - FarTerrain.Origin.y);
+                bool ordered = swift.MoveTarget.HasValue && Vector3.Distance(Flat(swift.MoveTarget.Value), expected) < 1f;
+                if (!ordered) errors++;
+                yield return Shot("85_world_map_zoomed");
+                log.WriteLine($"World map: open {hud.WorldMapOpen}, pause preserved on open {pausePreserved}, Swift map order {ordered}; world ({target.x:F0}, {target.y:F0})");
+            }
+            finally
+            {
+                hud.CloseWorldMap();
+                if (game.Paused != paused) game.TogglePause();
+                rts.selected.Clear();
+                foreach (var drone in selection) if (drone != null && drone.IsAlive) rts.selected.Add(drone);
+            }
+            if (hud.WorldMapOpen || Time.timeScale != timeScale) errors++;
         }
 
         static Vector3 Flat(Vector3 p) => new Vector3(p.x, 0f, p.z);
