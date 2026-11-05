@@ -369,7 +369,8 @@ namespace DroneSandbox
                 }
             }
             RoadLines.AddRange(lanes); // after the sector's own roads, whose numbers the missions use
-            VillageField = new PathField(VillageStreets, VillageReach + 45f, Ground.Size);
+            // Reaches far enough for the widest question asked of it (FieldParcels: smaller fields within 110 m).
+            VillageField = new PathField(VillageStreets, VillageReach + 120f, Ground.Size);
         }
 
         // The last point a street reaches walking from `from` along the road (step +1 or -1), up to `length` metres.
