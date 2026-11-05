@@ -69,7 +69,7 @@ namespace DroneSandbox
             Outline(map, new Color(1f, 1f, 1f, 0.15f), 1f);
             float half = MapSnapshot.Half;
             Vector2 ToMap(Vector2 w) => new Vector2(map.x + (w.x + half) / (2f * half) * map.width, map.yMax - (w.y + half) / (2f * half) * map.height);
-            Color[] typeColours = { Teal, new Color(0.45f, 0.75f, 1f), DravinOrange, new Color(0.85f, 0.85f, 0.95f) };
+            Color[] typeColours = { Teal, new Color(0.45f, 0.75f, 1f), DravinOrange, new Color(0.85f, 0.85f, 0.95f), new Color(0.62f, 0.95f, 0.55f) };
             var last = new Dictionary<int, Vector2>();
             foreach (var (drone, type, at) in game.Tracks)
             {
@@ -104,7 +104,7 @@ namespace DroneSandbox
             var key = Tinted(small, small.normal.textColor);
             key.fontSize = Mathf.RoundToInt(12f * s);
             GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 6f * s, panel.width, 18f * s),
-                "<color=#49DFCF>Scout</color>  <color=#73BFFF>Strike</color>  <color=#FF7848>Kamikaze</color>  <color=#D9D9F2>Nightjar</color>", key);
+                "<color=#49DFCF>Scout</color>  <color=#73BFFF>Strike</color>  <color=#FF7848>Kamikaze</color>  <color=#D9D9F2>Nightjar</color>  <color=#9EF28C>Swift</color>", key);
             GUI.Label(new Rect(panel.x + 12f * s, map.yMax + 25f * s, panel.width, 18f * s), "x destroyed   ● drone lost   ◊ AA   ○ enemy left", key);
         }
 

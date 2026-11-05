@@ -197,6 +197,7 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Launch2)) game.SpawnDrone(DroneType.Strike);
             if (GameInput.Pressed(GameKey.Launch3)) game.SpawnDrone(DroneType.Kamikaze);
             if (GameInput.Pressed(GameKey.Launch4) && game.BomberAvailable) game.SpawnDrone(DroneType.Bomber);
+            if (GameInput.Pressed(GameKey.Launch5) && game.ReconAvailable) game.SpawnDrone(DroneType.Recon);
             if (GameInput.Pressed(GameKey.Thermal)) game.ToggleThermal();
             if (GameInput.Pressed(GameKey.SkipTime) && game.Mode == GameMode.Sandbox && DayNight.Instance != null)
                 DayNight.Instance.SetTime(DayNight.Instance.hour + 2f, DayNight.Instance.hoursPerMinute);

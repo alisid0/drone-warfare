@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    public enum DroneType { Scout, Strike, Kamikaze, Bomber }
+    public enum DroneType { Scout, Strike, Kamikaze, Bomber, Recon }
 
     // A player drone. It flies at its own cruise altitude, follows move and attack orders (moves can be queued
     // as a chain of waypoints, and flown as an attack-move that engages whatever comes in range on the way), and
@@ -55,6 +55,14 @@ namespace DroneSandbox
 
         public bool IsKamikaze => type == DroneType.Kamikaze;
         public bool IsBomber => type == DroneType.Bomber;
+        // The Swift: a long-range fixed-wing recon drone that can cross the whole world. No weapons; a wide-area
+        // camera that sees 1.6 times as far and, flying high, is spotted only as near; it circles when it has nothing
+        // to do, as a fixed wing must.
+        public bool IsRecon => type == DroneType.Recon;
+        public float SightFactor => IsRecon ? 1.6f : 1f;
+        public const int TypeCount = 5;
+        Vector3? loiterCentre;
+        float loiterAngle;
         public int BombsLeft { get; private set; }
         public int MissilesLeft { get; private set; }
         bool OutOfAmmo => (IsBomber && BombsLeft == 0) || (type == DroneType.Strike && MissilesLeft == 0);
@@ -96,12 +104,12 @@ namespace DroneSandbox
                 if (Holding) return $"SYNC  T-{Mathf.CeilToInt(StrikeAt - Time.time)}";
                 if (attackTarget != null) return IsKamikaze ? "DIVING" : IsBomber ? "BOMBING" : "ATTACKING";
                 if (moveTarget.HasValue) return attackMove ? "ATTACK-MOVE" : "MOVING";
-                return "HOLDING";
+                return IsRecon ? "CIRCLING" : "HOLDING";
             }
         }
 
         // The Nightjar always carries a thermal camera; Scouts do once the Wren-T camera is bought.
-        public bool HasThermal => IsBomber || (type == DroneType.Scout && Tech.Active(TechId.ThermalCamera));
+        public bool HasThermal => IsBomber || IsRecon || (type == DroneType.Scout && Tech.Active(TechId.ThermalCamera));
 
         public string Status
         {
@@ -114,7 +122,7 @@ namespace DroneSandbox
                 string queued = waypoints.Count > 0 ? $" (+{waypoints.Count} queued)" : "";
                 if (attackTarget != null) return fire + (IsKamikaze ? "Diving on " : IsBomber ? "Bombing " : "Attacking ") + attackTarget.unitName + queued;
                 if (moveTarget.HasValue) return fire + (attackMove ? "Attack-moving" : "Moving") + queued;
-                return fire + "Hovering";
+                return fire + (IsRecon ? "Circling" : "Hovering");
             }
         }
 
@@ -162,6 +170,13 @@ namespace DroneSandbox
                     modelScale = 2.2f;
                     break;
 
+                case DroneType.Recon:
+                    unitName = "Swift";
+                    maxHp = 35f; speed = 20f; altitude = 36f; radius = 1.4f;
+                    weaponRange = 0f; weaponDamage = 0f; fireInterval = 0f;
+                    modelScale = 1.8f;
+                    break;
+
                 case DroneType.Bomber:
                     // Drops a bomb when it's over the target (weaponRange is across the ground), one at a time
                     // so the first can land before the next falls.
@@ -175,7 +190,8 @@ namespace DroneSandbox
             speed *= Scale.Speed;
             altitude *= Scale.Distance;
             weaponRange *= Scale.Distance;
-            Endurance = 60f * (droneType == DroneType.Scout ? 18f : droneType == DroneType.Strike ? 22f : droneType == DroneType.Kamikaze ? 14f : 50f);
+            Endurance = 60f * (droneType == DroneType.Scout ? 18f : droneType == DroneType.Strike ? 22f : droneType == DroneType.Kamikaze ? 14f
+                : droneType == DroneType.Recon ? 75f : 50f);
 
             // Upgrades from the tech shop.
             if (Tech.Active(TechId.Armour)) maxHp *= Tech.ArmourBonus;
@@ -308,6 +324,11 @@ namespace DroneSandbox
         public void Attack(Unit target)
         {
             if (BusyRearming) return;
+            if (IsRecon)
+            {
+                MoveTo(target.transform.position); // unarmed: it goes to watch
+                return;
+            }
             HoldUntil = -1f;
             SyncGroup = 0;
             attackTarget = target;
@@ -388,6 +409,20 @@ namespace DroneSandbox
 
             float bob = Mathf.Sin((Time.time + bobOffset) * 2f) * 0.25f;
             var goal = new Vector3(transform.position.x, CruiseHeight(transform.position) + bob, transform.position.z); // default: hold position
+            if (IsRecon && attackTarget == null && !moveTarget.HasValue)
+            {
+                // Circle 150 m round where it was left, aiming a little ahead on the circle so it keeps flying.
+                const float LoiterRadius = 150f;
+                if (!loiterCentre.HasValue)
+                {
+                    loiterCentre = transform.position;
+                    loiterAngle = Random.value * Mathf.PI * 2f;
+                }
+                loiterAngle += speed * 0.6f / LoiterRadius * dt;
+                Vector3 c = loiterCentre.Value + new Vector3(Mathf.Cos(loiterAngle + 0.5f), 0f, Mathf.Sin(loiterAngle + 0.5f)) * LoiterRadius;
+                goal = new Vector3(c.x, CruiseHeight(c) + bob, c.z);
+            }
+            else loiterCentre = null;
             bool diving = false;
 
             if (attackTarget != null && Holding)
@@ -464,8 +499,17 @@ namespace DroneSandbox
             Vector3 toGoal = goal - transform.position;
             // A Kamikaze picks up speed through the last 170 m of its dive.
             float dive = diving ? Mathf.Lerp(1.6f, 1f, Mathf.Clamp01(toGoal.magnitude / Scale.D(40f))) : 1f;
-            Vector3 desired = diving ? toGoal.normalized * speed * dive : Vector3.ClampMagnitude(toGoal * 2f, speed);
-            if (!diving) desired += Separation() * 4f;
+            Vector3 desired;
+            if (diving) desired = toGoal.normalized * speed * dive;
+            else
+            {
+                // Height is steered on its own. As one vector clamped to the drone's speed, a goal kilometres away
+                // left a sliver of it for climbing (0.7 m/s at 6 km), and on a long flight over rising ground the drone
+                // sank to its floor and skimmed the fields.
+                desired = Vector3.ClampMagnitude(new Vector3(toGoal.x, 0f, toGoal.z) * 2f, speed);
+                desired.y = Mathf.Clamp(toGoal.y * 2f, -speed * 0.6f, speed * 0.6f);
+                desired += Separation() * 4f;
+            }
             velocity = Vector3.MoveTowards(velocity, desired, speed * 2.5f * dt);
             transform.position += velocity * dt;
 
@@ -498,7 +542,7 @@ namespace DroneSandbox
             bank = Mathf.Lerp(bank, Mathf.Clamp(-turnRate * 0.12f, -maxBank, maxBank), 1f - Mathf.Exp(-dt / 0.25f));
             float pitchDown = diving ? 25f : 0f;
             body.localRotation = Quaternion.Euler(local.z / speed * 20f + pitchDown, 0f, -local.x / speed * 20f + bank);
-            foreach (var rotor in rotors) rotor.Rotate(body.up, 1800f * dt, Space.World);
+            foreach (var rotor in rotors) rotor.Rotate(IsRecon ? body.forward : body.up, 1800f * dt, Space.World); // the Swift's pusher turns about its length
             if (motor != null) motor.pitch = motorPitch * (0.92f + 0.22f * Mathf.Clamp01(velocity.magnitude / speed)) * (diving ? 1.12f : 1f);
             float beat = Mathf.Repeat(Time.time + bobOffset, 1.3f); // the strobe double-flashes every 1.3 s
             bool flash = beat < 0.05f || (beat > 0.16f && beat < 0.21f);

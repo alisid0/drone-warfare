@@ -81,7 +81,7 @@ namespace DroneSandbox
         // Menus, the briefing and the results panel take the mouse and keyboard.
         public bool UiBlocking => Mode == GameMode.Menu || BriefingOpen || Result != MissionResult.None;
 
-        readonly int[] stock = new int[4];
+        readonly int[] stock = new int[Drone.TypeCount];
         RtsController rts;
         Transform world;
 
@@ -92,6 +92,7 @@ namespace DroneSandbox
             Camera cam = SetupCamera();
             Light sun = FindOrCreateSun();
             Atmosphere.Setup(cam, sun);
+            FarTerrain.SetOrigin(FarTerrain.VarrowSpot()); // the first sector is the Varrow Valley
             world = World.Build(transform, preview: false);
             Canopy.Build(world);
             gameObject.AddComponent<DayNight>().Init(sun);
@@ -176,10 +177,10 @@ namespace DroneSandbox
 
         public void StartMission(int index)
         {
-            // The Asset Hunt missions are set in the Varrow Valley, at the middle of the big world.
+            // The Asset Hunt missions are set in the Varrow Valley, at the world's dam.
             if (MapLayout.Plan.kind != SectorKind.VarrowValley)
             {
-                FarTerrain.SetOrigin(Vector2.zero);
+                FarTerrain.SetOrigin(FarTerrain.VarrowSpot());
                 LoadSector(SectorPlan.Varrow());
             }
             Begin(Missions.All[index], index, null);
@@ -433,7 +434,7 @@ namespace DroneSandbox
         // (not the Nightjar).
         public int SupportSpent { get; private set; }
         public int Coordinated { get; private set; } // coordinated strikes ordered this mission (Coach)
-        readonly int[] supportFor = new int[4];
+        readonly int[] supportFor = new int[Drone.TypeCount];
         public int SupportFor(DroneType type) => supportFor[(int)type];
 
         public bool SpendSupport(DroneType type)
@@ -467,11 +468,15 @@ namespace DroneSandbox
         {
             if ((mission.shadowSeconds > 0f || mission.huntRobots > 0) && type != DroneType.Scout) return 0; // Shadow and hunt missions are Scouts only
             if (type == DroneType.Bomber) return Tech.Owns(TechId.Nightjar) || mission.nightjar ? 1 : 0;
+            if (type == DroneType.Recon) return Instance != null && Instance.Hotspot != null ? 1 : 0; // one Swift for each campaign operation
             return mission.Stock(type) + (Tech.Owns(TechId.Supply) ? 1 : 0) + Difficulty.SpareStock(mission, type);
         }
 
         // The Nightjar's launch button shows in free play, and in missions once it's bought.
         public bool BomberAvailable => Mode == GameMode.Sandbox || (Mode == GameMode.Mission && (Tech.Owns(TechId.Nightjar) || (Mission != null && Mission.nightjar)));
+
+        // The Swift long-range recon drone: in free play, and one for each campaign operation in the big world.
+        public bool ReconAvailable => Mode == GameMode.Sandbox || (Mode == GameMode.Mission && Hotspot != null);
 
         // How close a drone must fly to spot a hidden enemy; long-range optics push it out.
         public float SpotDistance => Tech.Active(TechId.Optics) ? Tech.OpticsSpotRange : SpotRange;

@@ -52,8 +52,18 @@ namespace DroneSandbox
             return new Vector2(Mathf.Clamp(x, -WorldPlan.Half + 3000f, WorldPlan.Half - 3000f), z);
         }
 
+        // Where the hand-made Varrow Valley sits in the world: its dam on the world's dam (Codex's world plan has the
+        // reservoir it belongs to), so the lake and the valley carry on beyond the sector.
+        public static Vector2 VarrowSpot()
+        {
+            if (!WorldPlan.Ready) WorldPlan.Generate(World.WorldSeed);
+            if (WorldPlan.Dams.Count == 0) return Vector2.zero;
+            var dam = WorldPlan.Dams[0];
+            return (dam.a + dam.b) / 2f - SectorPlan.Varrow().damPoint;
+        }
+
         // Builds (or rebuilds round a new sector) every chunk, after the detailed terrain exists. The world picture
-        // is made only when the world changes.
+        // is made only when the world changes. The trees and houses on it (FarScatter) follow the camera.
         public static void Build()
         {
             if (!WorldPlan.Ready) return;
@@ -61,7 +71,9 @@ namespace DroneSandbox
             {
                 root = new GameObject("Far Terrain").transform;
                 Object.DontDestroyOnLoad(root.gameObject);
+                root.gameObject.AddComponent<FarScatter>();
             }
+            root.GetComponent<FarScatter>()?.Clear();
             foreach (Transform child in root) Object.Destroy(child.gameObject);
             foreach (var m in meshes) Art.Discard(m);
             meshes.Clear();
@@ -129,6 +141,8 @@ namespace DroneSandbox
             canopy = smoothed;
         }
 
+        public static float CanopyAt(float x, float z) => Canopy(x, z);
+
         static float Canopy(float x, float z)
         {
             if (canopy == null) return 0f;
@@ -142,9 +156,14 @@ namespace DroneSandbox
 
         // The ground's height at a local point outside the detailed terrain: the near ring's blend from the sector's
         // edge out to the world's own heights, then the world's.
-        public static float SurfaceAt(Vector2 local)
+        public static float SurfaceAt(Vector2 local) => Blend(local, Elevation(local.x + Origin.x, local.y + Origin.y));
+
+        // The same without the woods' canopy: the ground itself, where FarScatter stands its trees and houses.
+        public static float GroundAt(Vector2 local) => Blend(local, WorldPlan.Height(local.x + Origin.x, local.y + Origin.y));
+
+        // A world height near the sector, joined to the sector's own edge over the near ring's first 400 m.
+        static float Blend(Vector2 local, float world)
         {
-            float world = Elevation(local.x + Origin.x, local.y + Origin.y);
             float edge = Ground.Size / 2f - 0.5f;
             float out_ = Mathf.Max(Mathf.Abs(local.x), Mathf.Abs(local.y)) - edge;
             if (out_ >= NearBlend || edgeHeights == null || local.sqrMagnitude < 1f) return world;

@@ -76,7 +76,7 @@ namespace DroneSandbox
             // rides the dive; the Nightjar looks straight down its bomb bay. The gimbal eases over about 0.18 s.
             Transform t = Source.transform;
             Vector3 eye = t.position + Vector3.down * 0.4f + t.forward * 0.6f;
-            float down = Source.type == DroneType.Scout ? 58f : Source.type == DroneType.Bomber ? 75f : 35f;
+            float down = Source.type == DroneType.Scout ? 58f : Source.type == DroneType.Bomber || Source.type == DroneType.Recon ? 75f : 35f;
             Vector3 look = (Quaternion.AngleAxis(down, t.right) * t.forward).normalized;
             if (Source.AttackTarget != null && Source.AttackTarget.IsAlive)
             {

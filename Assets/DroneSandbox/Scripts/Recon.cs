@@ -59,7 +59,7 @@ namespace DroneSandbox
                     if (d == null) continue;
                     Vector3 offset = d.transform.position - p;
                     offset.y = 0f;
-                    float distance = offset.magnitude;
+                    float distance = offset.magnitude / d.SightFactor; // the Swift's wide camera sees further
                     if (distance < nearest)
                     {
                         nearest = distance;

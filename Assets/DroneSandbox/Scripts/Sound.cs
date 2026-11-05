@@ -75,6 +75,7 @@ namespace DroneSandbox
             Add("motor Strike", Synth.Motor("Strike motor", 138f));
             Add("motor Kamikaze", Synth.Motor("Kamikaze motor", 215f));
             Add("motor Bomber", Synth.Motor("Nightjar motor", 92f));
+            Add("motor Recon", Synth.Motor("Swift motor", 120f)); // a pusher engine, lower than the rotors
             int recorded = LoadRecorded();
             if (recorded > 0) Debug.Log($"Sound: {recorded} recorded clips in use");
 
@@ -238,7 +239,7 @@ namespace DroneSandbox
             {
                 "select", "move", "attack", "invalid", "click", "launch", "contact", "warning", "alarm", "objective",
                 "gunshot", "cannon", "missile", "whistle", "ricochet", "explosion", "big explosion", "drone down",
-                "motor Scout", "motor Strike", "motor Kamikaze", "motor Bomber", "success", "failure",
+                "motor Scout", "motor Strike", "motor Kamikaze", "motor Bomber", "motor Recon", "success", "failure",
             };
             var samples = new List<float>();
             void Append(AudioClip clip, float maxSeconds)

@@ -32,6 +32,7 @@ namespace DroneSandbox
             (GameKey.Launch2, "Launch Strike"),
             (GameKey.Launch3, "Launch Kamikaze"),
             (GameKey.Launch4, "Launch Nightjar"),
+            (GameKey.Launch5, "Launch Swift (recon)"),
             (GameKey.Thermal, "Toggle thermal view"),
             (GameKey.SkipTime, "Skip time (free play)"),
             (GameKey.Help, "Toggle help"),

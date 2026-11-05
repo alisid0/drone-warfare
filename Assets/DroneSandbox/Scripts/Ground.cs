@@ -89,7 +89,9 @@ namespace DroneSandbox
             go.transform.position = new Vector3(-Size / 2f, -Sink, -Size / 2f);
             terrain = go.GetComponent<Terrain>();
             terrain.heightmapPixelError = 2f;
-            terrain.basemapDistance = 1200f;
+            // The full shader at every distance: the base map Unity bakes for far terrain mixes only the first four
+            // layers, so from the wide view the sector came out pale against the far terrain round it.
+            terrain.basemapDistance = 20000f;
             var lit = Resources.Load<Material>("Materials/TerrainLit");
             if (lit != null) terrain.materialTemplate = lit;
             // Draw without GPU instancing. Instanced terrain takes its normals from a texture Unity generates, and

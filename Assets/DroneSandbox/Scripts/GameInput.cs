@@ -9,7 +9,8 @@ namespace DroneSandbox
     {
         Up, Down, Left, Right, RotateLeft, RotateRight, Shift,
         SelectAll, Deselect, Stop, Help, Launch1, Launch2, Launch3, Launch4, Thermal, SkipTime,
-        Photo, Rise, Sink, TimeBack, TimeForward, Screenshot, Ctrl, Pause, Focus, Recall, Feed, Telemetry, Sync, Combat, Inspect
+        Photo, Rise, Sink, TimeBack, TimeForward, Screenshot, Ctrl, Pause, Focus, Recall, Feed, Telemetry, Sync, Combat, Inspect,
+        Launch5 // added last: bindings are saved by name, but keep the old order anyway
     }
 
     // Reads mouse and keyboard through whichever input backend the project uses
@@ -320,6 +321,7 @@ namespace DroneSandbox
                 case GameKey.Launch2: return new[] { KeyCode.Alpha2, KeyCode.Keypad2 };
                 case GameKey.Launch3: return new[] { KeyCode.Alpha3, KeyCode.Keypad3 };
                 case GameKey.Launch4: return new[] { KeyCode.Alpha4, KeyCode.Keypad4 };
+                case GameKey.Launch5: return new[] { KeyCode.Alpha5, KeyCode.Keypad5 };
                 case GameKey.Thermal: return new[] { KeyCode.T };
                 case GameKey.SkipTime: return new[] { KeyCode.N };
                 case GameKey.Photo: return new[] { KeyCode.P };

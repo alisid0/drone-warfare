@@ -475,7 +475,7 @@ namespace DroneSandbox
         {
             if (droneIcons == null)
             {
-                droneIcons = new Texture2D[4];
+                droneIcons = new Texture2D[Drone.TypeCount];
                 // Shapes in a unit square with the nose at the top (y up).
                 droneIcons[(int)DroneType.Scout] = Icon(p =>
                 {
@@ -501,6 +501,12 @@ namespace DroneSandbox
                     new Vector2(0.5f, 0.9f), new Vector2(0.98f, 0.36f), new Vector2(0.98f, 0.22f), new Vector2(0.64f, 0.28f),
                     new Vector2(0.5f, 0.1f), new Vector2(0.36f, 0.28f), new Vector2(0.02f, 0.22f), new Vector2(0.02f, 0.36f),
                 }));
+                // The Swift: a slim fuselage, a long straight wing and a V-tail.
+                droneIcons[(int)DroneType.Recon] = Icon(p =>
+                    (Mathf.Abs(p.x - 0.5f) < 0.06f && p.y > 0.12f && p.y < 0.96f)
+                    || (Mathf.Abs(p.y - 0.62f) < 0.055f && Mathf.Abs(p.x - 0.5f) < 0.48f)
+                    || InPolygon(p, new[] { new Vector2(0.5f, 0.2f), new Vector2(0.78f, 0.06f), new Vector2(0.78f, 0.12f), new Vector2(0.5f, 0.3f) })
+                    || InPolygon(p, new[] { new Vector2(0.5f, 0.2f), new Vector2(0.22f, 0.06f), new Vector2(0.22f, 0.12f), new Vector2(0.5f, 0.3f) }));
             }
             return droneIcons[(int)type];
         }

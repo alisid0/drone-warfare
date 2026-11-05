@@ -453,7 +453,7 @@ namespace DroneSandbox
             }
             rts.enabled = true;
 
-            var types = new[] { DroneType.Scout, DroneType.Strike, DroneType.Kamikaze, DroneType.Bomber };
+            var types = new[] { DroneType.Scout, DroneType.Strike, DroneType.Kamikaze, DroneType.Bomber, DroneType.Recon };
             var flying = new List<Drone>();
             foreach (var type in types)
             {
@@ -652,6 +652,7 @@ namespace DroneSandbox
             yield return new WaitForSecondsRealtime(2f);
             float wideFps = (Time.frameCount - frames) / (Time.realtimeSinceStartup - start);
             yield return Shot("80_world_wide");
+            log.WriteLine($"World scatter from 9 km up: {FarScatter.TreesDrawn} trees and {FarScatter.HousesDrawn} houses drawn");
             rts.LookAt(new Vector3(1200f, 0f, 400f), 2500f, 60f);
             yield return new WaitForSecondsRealtime(1.5f);
             yield return Shot("81_world_horizon");
@@ -684,6 +685,28 @@ namespace DroneSandbox
             log.WriteLine($"World flight: wide view {wideFps:F0} fps; Scout alive {scout != null && scout.IsAlive}, flew {flown:F0} m from base, " +
                           $"lowest {lowest:F1} m above the ground ({lowestAt:F0} m out), ground there {(scout != null ? Ground.HeightAt(scout.transform.position) : 0f):F0} m");
             if (scout == null || !scout.IsAlive || flown < 5000f || lowest < 2f) errors++;
+
+            // The Swift's long flight: 15 km out over the world at 4x (ChatGPT's acceptance test is 20 km), which
+            // it must finish with battery to spare and without touching the ground.
+            var swift = game.SpawnDrone(DroneType.Recon);
+            if (swift != null) swift.MoveTo(game.basePosition + away.normalized * 16000f);
+            Time.timeScale = 4f;
+            float swiftLowest = float.MaxValue, swiftFlown = 0f, started = Time.time;
+            for (float t = 0f; t < 600f && swift != null && swift.IsAlive; t += 0.5f)
+            {
+                swiftFlown = Vector3.Distance(Flat(swift.transform.position), Flat(game.basePosition));
+                if (swiftFlown > 15000f) break;
+                if (swiftFlown > 600f) swiftLowest = Mathf.Min(swiftLowest, swift.transform.position.y - Ground.HeightAt(swift.transform.position));
+                if (t % 20f < 0.5f) rts.LookAt(swift.transform.position, 1200f, 30f);
+                yield return new WaitForSeconds(0.5f);
+            }
+            Time.timeScale = 1f;
+            if (swift != null) rts.LookAt(swift.transform.position, 900f, 30f);
+            yield return new WaitForSecondsRealtime(1.5f);
+            yield return Shot("83_world_swift_far");
+            log.WriteLine($"World long flight: Swift alive {swift != null && swift.IsAlive}, flew {swiftFlown:F0} m in {Time.time - started:F0} s, " +
+                          $"battery {(swift != null ? swift.Battery * 100f : 0f):F0}%, lowest {swiftLowest:F1} m above the ground");
+            if (swift == null || !swift.IsAlive || swiftFlown < 15000f || swiftLowest < 2f) errors++;
         }
 
         static Vector3 Flat(Vector3 p) => new Vector3(p.x, 0f, p.z);

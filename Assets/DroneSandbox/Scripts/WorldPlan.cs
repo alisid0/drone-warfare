@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = System.Random; // System and UnityEngine both have one; the plan uses the seeded kind
 
 namespace DroneSandbox
 {

@@ -18,8 +18,8 @@ namespace DroneSandbox
         static readonly Color PanelColor = new Color(0.04f, 0.07f, 0.09f, 0.8f);
         static readonly Color ModalColor = new Color(0.03f, 0.05f, 0.07f, 0.94f);
 
-        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze", "Nightjar" };
-        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack", "heavy bomber, rearms" };
+        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze", "Nightjar", "Swift" };
+        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack", "heavy bomber, rearms", "long-range recon, unarmed" };
         static readonly string[] HelpLines =
         {
             "<b>CONTROLS</b>   (H to hide)",
@@ -82,7 +82,20 @@ namespace DroneSandbox
             return new Rect(Screen.width - 392f * s, 12f * s, 380f * s, height);
         }
 
-        int LaunchCount => game.BomberAvailable ? 4 : 3;
+        // The drone types on the launch bar: the three always, the Nightjar and the Swift when they're on offer.
+        readonly System.Collections.Generic.List<DroneType> launchTypes = new System.Collections.Generic.List<DroneType>();
+        System.Collections.Generic.List<DroneType> LaunchTypes()
+        {
+            launchTypes.Clear();
+            launchTypes.Add(DroneType.Scout);
+            launchTypes.Add(DroneType.Strike);
+            launchTypes.Add(DroneType.Kamikaze);
+            if (game.BomberAvailable) launchTypes.Add(DroneType.Bomber);
+            if (game.ReconAvailable) launchTypes.Add(DroneType.Recon);
+            return launchTypes;
+        }
+
+        int LaunchCount => LaunchTypes().Count;
 
         Rect LaunchBar()
         {
@@ -443,14 +456,16 @@ namespace DroneSandbox
             Fill(new Rect(bar.x - pad, bar.y - pad, bar.width + 2f * pad, bar.height + 2f * pad), PanelColor);
 
             bool wasEnabled = GUI.enabled;
-            for (int i = 0; i < LaunchCount; i++)
+            var types = LaunchTypes();
+            for (int i = 0; i < types.Count; i++)
             {
-                int left = game.StockLeft((DroneType)i);
+                int t = (int)types[i];
+                int left = game.StockLeft(types[i]);
                 GUI.enabled = wasEnabled && game.drones.Count < SandboxGame.MaxDrones && left != 0;
                 var b = new Rect(bar.x + i * (LaunchButtonWidth + LaunchButtonGap) * s, bar.y, LaunchButtonWidth * s, bar.height);
                 string count = left >= 0 ? $"   x{left}" : "";
-                string text = $"<b>[{i + 1}] {LaunchNames[i]}{count}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[i]}</size>";
-                if (GUI.Button(b, text, button)) game.SpawnDrone((DroneType)i);
+                string text = $"<b>[{t + 1}] {LaunchNames[t]}{count}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[t]}</size>";
+                if (GUI.Button(b, text, button)) game.SpawnDrone(types[i]);
             }
             GUI.enabled = wasEnabled;
         }
