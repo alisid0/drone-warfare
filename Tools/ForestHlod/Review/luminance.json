@@ -1,0 +1,13 @@
+{
+  "cards_luminance": 0.11186501839235197,
+  "canopy_luminance": 0.10887613881317879,
+  "relative_difference": -0.026718625912973804,
+  "roi": [
+    600,
+    300,
+    1000,
+    600
+  ],
+  "camera_distance": 600,
+  "pitch_degrees": 60
+}
