@@ -137,9 +137,26 @@ namespace DroneSandbox
                 width = 1f, radius = Mathf.Lerp(2f, 2.8f + 1.8f * age, margin), cover = edge * glade };
         }
 
-        // Empty glades have no canopy slab; relief and crown noise both meet the real floor at the rim.
-        public static float Canopy(Stand stand, float x, float z) => Mathf.Max(0f,
-            stand.height * 0.70f + (Noise(x, z, 11f, 33) - 0.5f) * 4f * Rim(stand.cover));
+        // Inside the wood mask a glade floor keeps this low apron, so coarse terrain cannot show through the canopy.
+        public const float Understorey = 2.5f;
+
+        // Broad relief suits every level; only 4 m recipe surfaces sample crown bumps finely enough not to alias.
+        // Relief eases onto the apron with zero slope; fields, tracks and water (wood zero) still meet the real floor.
+        public static float Canopy(Stand stand, float x, float z, bool crowns = false)
+        {
+            float relief = stand.height * 0.70f;
+            if (crowns)
+            {
+                float u = x * 0.8f - z * 0.6f, v = x * 0.6f + z * 0.8f;
+                relief += ((Noise(u, v, 9.3f, 123) - 0.5f) * 0.62f + (Noise(z, -x, 14.9f, 124) - 0.5f) * 0.38f)
+                    * (3.4f + 2.4f * stand.age) * Rim(stand.cover);
+            }
+            relief = Mathf.Max(0f, relief);
+            float apron = Understorey * stand.wood * stand.wood;
+            if (relief >= apron * 2f) return relief;
+            float t = 1f - relief / (apron * 2f);
+            return relief + apron * t * t;
+        }
 
         // The same species districts drive a soft canopy mixture and individual trees along the ecotone.
         static int Species(int patch, float conifer)
