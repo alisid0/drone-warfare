@@ -51,9 +51,9 @@ namespace DroneSandbox
         // Field coordinates survive into the control map so crops are sampled along their own district's rows.
         public struct FieldSample
         {
-            public int layer, use;
-            public float worldX, worldZ, gateDistance, angle, projection, across, along, width, length, side, end, districtEdge;
-            public bool hedge;
+            public int layer, use, sideUse, endUse; // FieldEdge of the nearest side and end
+            public float worldX, worldZ, gateDistance, angle, projection, across, along, width, length, side, end, districtEdge, sideMargin, endMargin;
+            public bool hedge, hedgeEnd; // the nearest side or end is a woody boundary
         }
 
         // Analytic vector coverage and selective crop quadrature retain narrow features without repeating grass/cover work.
@@ -78,7 +78,7 @@ namespace DroneSandbox
             if (land.Weight(Cover.Farmland) > 0f)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
-                if (Math.Min(f.side, f.end) < FieldAppearance.Margin(x, z) || f.use > 2 || FieldAppearance.Patch(x, z) > .4f) layer = 4;
+                if (f.side < f.sideMargin || f.end < f.endMargin || f.use > 2 || FieldAppearance.Patch(x, z) > .4f) layer = 4;
             }
             // A garden painted over farmland must also suppress that field's procedural crop rows.
             if (villages.At(new Vector2(x, z), out var garden))
@@ -203,19 +203,25 @@ namespace DroneSandbox
         Vector3 FieldColour(FieldSample f, float pixel)
         {
             if (f.layer < 5) return FarDetailPalette.Means[4];
-            Vector3 c = FieldAppearance.Colour(f.layer, f.worldX, f.worldZ, Math.Min(f.side, f.end), pixel);
+            Vector3 c = FieldAppearance.Colour(f.layer, f.worldX, f.worldZ, Math.Min(f.side - f.sideMargin, f.end - f.endMargin), pixel, 0f);
             if (f.use == 3 || f.use == 4)
             {
                 float pitch = f.use == 3 ? 10f : 5f, width = f.use == 3 ? 2.8f : 1.5f;
                 float row = PeriodicBand(f.across + width, pitch, 2f * width, pixel * f.projection);
                 c = Blend(FarDetailPalette.Means[4], f.use == 3 ? FarDetailPalette.Means[1] * .8f : FarDetailPalette.Means[6], row);
             }
-            float projection = f.projection;
-            float crop = Coverage(f.side, pixel * projection) * Coverage(f.end, pixel * projection);
-            float side = Math.Max(BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection), BandCoverage(-f.end - 1.5f, 1.5f, pixel * projection));
-            Vector3 hedge = HedgeColour;
-            Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f * Coverage(f.gateDistance - 2f, pixel) : 0f);
-            return Blend(margin, c, crop);
+            float projection = f.projection, footprint = pixel * projection;
+            // Field tracks: two worn wheel lines inside the uncultivated edge, grass between them.
+            float ruts = 0f;
+            if (f.sideUse == (int)FieldEdge.Track) ruts = Math.Max(ruts, BandCoverage(f.side - .55f, .28f, footprint) + BandCoverage(f.side - 2.3f, .28f, footprint));
+            if (f.endUse == (int)FieldEdge.Track) ruts = Math.Max(ruts, BandCoverage(f.end - .55f, .28f, footprint) + BandCoverage(f.end - 2.3f, .28f, footprint));
+            c = Blend(c, FarDetailPalette.Means[2], Math.Min(1f, ruts) * .8f);
+            float crop = Coverage(f.side, footprint) * Coverage(f.end, footprint);
+            Vector3 margin = Blend(FarDetailPalette.Means[4], c, crop);
+            // A hedge stands on the parcel's own edge, as Farmland builds it, with an opening at the gate.
+            float side = Math.Max(f.hedge ? BandCoverage(.85f - Math.Abs(f.side), .85f, footprint) : 0f,
+                f.hedgeEnd ? BandCoverage(.85f - Math.Abs(f.end), .85f, footprint) : 0f);
+            return Blend(margin, HedgeColour, side * .85f * Coverage(f.gateDistance - 2f, pixel));
         }
 
         // The exact scenery parcel supplies front lawn, rear yard, vegetable beds and its boundary lines.

@@ -97,6 +97,7 @@ namespace DroneSandbox
                     continue;
                 p.owner = owner;
                 MapLayout.VillagePlots.Add(p);
+                if (p.landUse >= 6) continue; // paddocks, orchards and rough grass have no street frontage of their own
                 var line = new List<Vector2>
                 {
                     p.front - p.outward * p.StreetOffset - p.along * (p.frontage * .5f),

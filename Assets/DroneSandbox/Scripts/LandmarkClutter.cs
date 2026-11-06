@@ -10,13 +10,16 @@ namespace DroneSandbox
         readonly List<Mesh> owned = new List<Mesh>();
 
         // Existing pipes, cranes and wagon models keep their import settings but share the yard's short fade range.
+        // Aged roofs get the same photo material as the instanced and distant copies of that building.
         public static void Tune(GameObject placed, Site site)
         {
             var world = MapLayout.Plan.world;
             if (world == null || placed == null) return;
             foreach (var feature in world.features) foreach (var building in feature.buildings)
             {
-                if (!building.detail || building.model != site.model || Vector2.Distance(building.position - world.center, site.position) > .01f) continue;
+                if (building.model != site.model || Vector2.Distance(building.position - world.center, site.position) > .01f) continue;
+                if (building.roof > 0) Art.Swap(placed, "RoofMetal", LandmarkMesh.RoofMaterial(building.roof));
+                if (!building.detail) return;
                 var groups = placed.GetComponentsInChildren<LODGroup>(true);
                 if (groups.Length == 0)
                 {

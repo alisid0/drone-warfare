@@ -86,12 +86,14 @@ namespace DroneSandbox
             var result = new List<RoadGate>();
             foreach (var parcel in d.parcels)
             {
-                if (!parcel.valid || !(parcel.hedge || parcel.use == 1 || parcel.use == 2)) continue;
+                if (!parcel.valid || !parcel.hedge) continue;
                 Vector2 along = parcel.cross ? new Vector2(-d.along.y, d.along.x) : d.along, across = new Vector2(-along.y, along.x);
                 var corners = new[] { d.site + along * parcel.u0 + across * parcel.a0, d.site + along * parcel.u1 + across * parcel.b0,
                     d.site + along * parcel.u1 + across * parcel.b1, d.site + along * parcel.u0 + across * parcel.a1 };
                 for (int i = 0; i < 4; i++)
                 {
+                    // Only hedged edges have a physical opening, matching the sector's hedge gateways.
+                    if (FieldAppearance.EdgeUse(parcel.edges, i) != (int)FieldEdge.Hedge) continue;
                     Vector2 point = FieldAppearance.Gate(corners[i], corners[(i + 1) % 4]);
                     if (RoadGate.Try(point, roads, out var gate)) result.Add(gate);
                 }

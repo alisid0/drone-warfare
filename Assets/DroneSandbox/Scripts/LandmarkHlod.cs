@@ -37,6 +37,7 @@ namespace DroneSandbox
         public void Update(Camera camera, Plane[] planes)
         {
             DrawCalls = TrianglesDrawn = 0;
+            bool meshed = false; // one new compound per frame keeps a sector change from meshing every yard in one stage
             foreach (var f in WorldPlan.Features)
             {
                 Vector2 p = f.center - FarTerrain.Origin;
@@ -45,6 +46,8 @@ namespace DroneSandbox
                 if (bounds.SqrDistance(camera.transform.position) > 22000f * 22000f || !GeometryUtility.TestPlanesAABB(planes, bounds)) continue;
                 if (!batches.TryGetValue(f.id, out Batch batch))
                 {
+                    if (meshed) continue;
+                    meshed = true;
                     batch = Upload(LandmarkMesh.Build(f, FarTerrain.Origin, false)); batches.Add(f.id, batch);
                 }
                 if (batch.mesh == null) continue;
@@ -63,14 +66,14 @@ namespace DroneSandbox
                     {
                         materials[index] = Art.NewMaterial(LandmarkMesh.Color(index));
                         materials[index].SetFloat("_Smoothness", 0.12f);
-                        if (index >= 5 && index <= 8)
+                        if (LandmarkMesh.IsBuilding(index))
                         {
                             var adapted = LandmarkInstances.Adapt(materials[index]);
                             if (adapted != null) { Art.Discard(materials[index]); materials[index] = adapted; }
                         }
                     }
                     var rp = new RenderParams(materials[index]) { camera = camera, worldBounds = batch.bounds,
-                        matProps = index >= 5 && index <= 8 ? properties : null,
+                        matProps = LandmarkMesh.IsBuilding(index) ? properties : null,
                         shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
                     Graphics.RenderMesh(rp, batch.mesh, sub, Matrix4x4.identity); DrawCalls++;
                 }

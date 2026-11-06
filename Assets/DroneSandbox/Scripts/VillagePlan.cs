@@ -11,11 +11,12 @@ namespace DroneSandbox
         public Vector2 front, along, outward;
         public float frontage, depth, setback;
         public int owner, style;
-        public int landUse; // 1 allotments, 2 playing field, 3 cemetery, 4 depot, 5 edge farm
+        public int landUse; // 1 allotments, 2 playing field, 3 cemetery, 4 depot, 5 edge farm, 6 paddock, 7 orchard, 8 rough grass
         public bool town, farm, church, square;
         public string model;
         public bool old, core, cultivated, shed, logs, untended, roofChanged;
         public int shape, palette, boundary, identity, settlement;
+        public int open; // boundary runs left out: 1 front, 2 right side, 4 rear, 8 left side
         public float scale, pathWidth, driveWidth, roadWidth;
         public Vector2 House => front + outward * setback;
 
@@ -50,6 +51,7 @@ namespace DroneSandbox
         public VillagePlan(int seed, FarDetailData.Segment[] roads, IReadOnlyList<WorldSettlement> settlements)
         {
             this.seed = seed;
+            var anchors = new Vector2[settlements.Count];
             for (int owner = 0; owner < settlements.Count; owner++)
             {
                 var s = settlements[owner];
@@ -68,6 +70,7 @@ namespace DroneSandbox
                     along = d.normalized;
                 }
 
+                anchors[owner] = anchor;
                 if (!s.town) { Grow(owner, s, roads, anchor); continue; }
                 float reach = s.radius * .85f;
                 var street = new List<FarDetailData.Segment>();
@@ -185,6 +188,9 @@ namespace DroneSandbox
                 }
                 VillageUse.Assign(plots, owner, seed, anchor);
             }
+            // Spare ground is taken only after every settlement's houses, so it can never displace a property.
+            for (int owner = 0; owner < settlements.Count; owner++)
+                Fringe(owner, roads, anchors[owner], settlements[owner].radius, settlements[owner].town);
         }
 
         // Private access lanes are captured with the same vector widths used by tile and world painting.
@@ -304,6 +310,7 @@ namespace DroneSandbox
         }
 
         // Scenery and field exclusions follow actual gardens, with a bounded bin search for positive margins.
+        // Paddocks, orchards and rough grass are open ground, not gardens: woods, scrub and units may come near them.
         public bool Near(Vector2 p, float margin)
         {
             float pad = Math.Max(0f, margin);
@@ -313,7 +320,7 @@ namespace DroneSandbox
                 for (int x = x0; x <= x1; x++)
                     if (cells.TryGetValue(((long)x << 32) ^ (uint)z, out var list))
                         foreach (int i in list)
-                            if (plots[i].Contains(p, margin))
+                            if (plots[i].landUse < 6 && plots[i].Contains(p, margin))
                                 return true;
             return false;
         }

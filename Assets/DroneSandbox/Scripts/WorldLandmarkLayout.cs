@@ -4,8 +4,8 @@ using Random = System.Random;
 
 namespace DroneSandbox
 {
-    // Surface slots preserve the original HLOD building material indices (5-8).
-    public enum LandmarkSurfaceKind : byte { Gravel, Concrete, Asphalt, Paint, Rail, Soil = 9, Wear, Overgrown }
+    // Surface slots preserve the original HLOD building material indices (5-8); roof tints follow the surfaces (17-19).
+    public enum LandmarkSurfaceKind : byte { Gravel, Concrete, Asphalt, Paint, Rail, Soil = 9, Wear, Overgrown, Patch, Stain, TrackBed, Aggregate, Rut }
 
     // A real model's root and approximate outer volume, in world metres with its original yaw and scale.
     public struct LandmarkBuilding
@@ -17,6 +17,7 @@ namespace DroneSandbox
         public float scale;
         public bool detail;
         public int shape; // 0 pitched roof, 1 tank, 2 chimney, 3 flat roof, 4 cooling tower
+        public int roof;  // 0 original sheeting, 1 weathered, 2 rusted, 3 recently replaced
     }
 
     // Small, non-interactive civilian dressings are grouped by work area for bounded near-only batches.
@@ -146,8 +147,7 @@ namespace DroneSandbox
             Vehicles(f, rng, 53f, 114f, 4); Vehicles(f, rng, -119f, -106f, 5);
             Prop(f, "Scenery_AggregatePile", -169f, 2f, 7, rng, new Vector3(1.3f, 1.2f, 1f));
             Prop(f, "Scenery_AggregatePile", -148f, 21f, 7, rng, new Vector3(.7f, .6f, .8f));
-            Weather(f, rng, -83f, -101f, 220f, 18f, 23); Weather(f, rng, 119f, 90f, 95f, 50f, 9);
-            Corners(f, rng); Perimeter(f, 212f, -154f, 158f, f.rails.Count > 0);
+            Corners(f, rng); WorksUse(f, rng); Perimeter(f, 212f, -154f, 158f, f.rails.Count > 0);
         }
 
         // Four 530-590 m sidings at 5.5 m spacing join the actual railway; the yard faces its road gate.
@@ -160,16 +160,45 @@ namespace DroneSandbox
             Region(f, rng, 301f, 60f, 130f, 53f, LandmarkSurfaceKind.Soil);
             var a = f.Area;
             Vector2 throat = WorldPlan.FeatureRailPoint(a.Point(-390f, -62f), out _);
+            // A rust-brown formation and lighter shoulders go down first; the dark ballast strips are laid over them.
+            var lines = new Vector2[4][];
             for (int track = 0; track < 4; track++)
             {
                 float v = -30f + track * 5.5f, begin = -290f + track * 20f;
-                var line = new[] { throat, a.Point(-350f + track * 12f, -62f), a.Point(begin, v), a.Point(300f, v) };
+                lines[track] = new[] { throat, a.Point(-350f + track * 12f, -62f), a.Point(begin, v), a.Point(300f, v) };
+                for (int i = 1; i < lines[track].Length; i++) Formation(f, lines[track][i - 1], lines[track][i]);
+            }
+            foreach (float v in new[] { -34.6f, -8.9f }) Strip(f, -235f, v, 302f, v, 2.4f, LandmarkSurfaceKind.Aggregate, DecalLift);
+            // One siding stands idle and one holds a short rake, so the yard is never a full diagram of wagons.
+            int idle = (f.variantSeed >> 4) & 3, shortRake = (idle + 1 + ((f.variantSeed >> 7) & 1)) & 3;
+            var rakeEnd = new float[4];
+            for (int track = 0; track < 4; track++)
+            {
+                float v = -30f + track * 5.5f;
+                var line = lines[track];
                 f.rails.Add(DenseRail(line));
                 for (int i = 1; i < line.Length; i++) RailSurface(f, line[i - 1], line[i]);
                 int count = 5 + inventory.Next(5);
+                if (track == idle) count = 0;
+                else if (track == shortRake) count = Math.Max(2, count / 2);
+                float start = -125f + track * 43f;
                 for (int i = 0; i < count; i++) Building(f, track % 2 == 0 ? "Scenery_RailContainerWagon" : "Scenery_RailHopper",
-                    -125f + track * 43f + i * 16.6f, v, true, new Vector3(3.14f, track % 2 == 0 ? 4.45f : 5.535f, 15f), 0f, 3, 1f, true);
+                    start + i * 16.6f, v, true, new Vector3(3.14f, track % 2 == 0 ? 4.45f : 5.535f, 15f), 0f, 3, 1f, true);
+                rakeEnd[track] = count > 0 ? start + count * 16.6f : -290f + track * 20f;
             }
+            // Weeds take the idle siding along its length and the gaps between sidings beyond the standing rakes.
+            for (float u = -280f + idle * 20f + Range(rng, 0f, 15f); u < 290f;)
+            {
+                float run = Math.Min(296f - u, Range(rng, 18f, 55f));
+                Blob(f, rng, u + run * .5f, -30f + idle * 5.5f, 1f, 0f, run, Range(rng, 4.6f, 6.2f), LandmarkSurfaceKind.Overgrown, .162f);
+                u += run + Range(rng, 3f, 14f);
+            }
+            for (int gap = 0; gap < 3; gap++)
+            {
+                float from = Math.Max(rakeEnd[gap], rakeEnd[gap + 1]) + Range(rng, 8f, 20f);
+                if (from < 290f) Strip(f, from, -27.25f + gap * 5.5f, 297f, -27.25f + gap * 5.5f, 1.2f, LandmarkSurfaceKind.Overgrown, .162f);
+            }
+            Blob(f, rng, 312f, -21.75f, 1f, 0f, 30f, 26f, LandmarkSurfaceKind.Overgrown, .162f);
             for (int i = 0; i < 3; i++) Building(f, "Scenery_FreightShed", -179f + i * 151f, 23f + (i % 2) * 8f, false, new Vector3(40.8f, 9.787f, 21.839f), 26f);
             Building(f, "Scenery_SignalBox", -270f, 28f, true, new Vector3(10.6f, 8.15f, 11.135f), 10f, 3);
             Building(f, "Scenery_Warehouse", 232f, 21f, true, new Vector3(18f, 9f, 30f), 22f);
@@ -182,8 +211,15 @@ namespace DroneSandbox
             for (int i = 0; i < 12; i++) Prop(f, "Scenery_FreightGroup", -208f + (i % 6) * 85f, 43f + (i / 6) * 10f, i % 6, rng);
             Vehicles(f, rng, -65f, 53f, 6); Vehicles(f, rng, 88f, 53f, 7);
             Prop(f, "Scenery_AggregatePile", 311f, 42f, 5, rng, new Vector3(1.1f, 1f, .8f));
-            Weather(f, rng, 10f, 6f, 480f, 8f, 22);
-            Corners(f, rng); Perimeter(f, 377f, -87f, 87f, true);
+            Corners(f, rng); RailUse(f, rng); Perimeter(f, 377f, -87f, 87f, true);
+        }
+
+        // The rust-stained formation is wider than the ballast, showing between neighbouring sidings and at their ends.
+        static void Formation(WorldFeature f, Vector2 a, Vector2 b)
+        {
+            Vector2 d = b - a;
+            f.surfaces.Add(new LandmarkSurface { area = new FeatureArea { center = (a + b) / 2f, along = d.normalized,
+                halfLength = d.magnitude / 2f + 1.5f, halfWidth = 3.4f }, kind = LandmarkSurfaceKind.TrackBed, lift = DecalLift });
         }
 
         // Short collinear neighbours stop MapLayout's Catmull-Rom pass overshooting a long siding at the throat.
@@ -202,7 +238,17 @@ namespace DroneSandbox
         static void Building(WorldFeature f, string model, float u, float v, bool along, Vector3 size, float flat, int shape = 0, float scale = 1f, bool detail = false)
         {
             f.buildings.Add(new LandmarkBuilding { model = model, position = f.Area.Point(u, v),
-                facing = along ? f.along : -f.Area.Across, size = size * scale, flat = flat, shape = shape, scale = scale, detail = detail });
+                facing = along ? f.along : -f.Area.Across, size = size * scale, flat = flat, shape = shape, scale = scale, detail = detail,
+                roof = detail || shape == 1 || shape == 2 || shape == 4 ? 0 : RoofAge(f.variantSeed, u, v) });
+        }
+
+        // Roofs were re-sheeted at different times: about 40% original, then weathered, rusted and new, by position only.
+        static int RoofAge(int seed, float u, float v)
+        {
+            uint h = unchecked((uint)seed * 2654435761u ^ (uint)Mathf.RoundToInt(u * 4f) * 73856093u ^ (uint)Mathf.RoundToInt(v * 4f) * 19349663u);
+            h = unchecked((h ^ (h >> 15)) * 2246822519u); h ^= h >> 13;
+            int roll = (int)(h % 20u);
+            return roll < 8 ? 0 : roll < 13 ? 1 : roll < 16 ? 2 : 3;
         }
 
         // Lift prevents z fighting in both the detailed and HLOD meshes; surface queries follow this order.
@@ -228,10 +274,15 @@ namespace DroneSandbox
                 case LandmarkSurfaceKind.Concrete: return new Color(0.55f, 0.55f, 0.51f);
                 case LandmarkSurfaceKind.Asphalt: return new Color(0.15f, 0.15f, 0.15f);
                 case LandmarkSurfaceKind.Paint: return new Color(0.85f, 0.85f, 0.82f);
-                case LandmarkSurfaceKind.Rail: return new Color(0.27f, 0.26f, 0.24f);
+                case LandmarkSurfaceKind.Rail: return new Color(0.21f, 0.20f, 0.19f);
                 case LandmarkSurfaceKind.Soil: return new Color(0.32f, 0.29f, 0.23f);
                 case LandmarkSurfaceKind.Wear: return new Color(0.24f, 0.25f, 0.23f);
                 case LandmarkSurfaceKind.Overgrown: return new Color(0.32f, 0.37f, 0.25f);
+                case LandmarkSurfaceKind.Patch: return new Color(0.46f, 0.46f, 0.42f);
+                case LandmarkSurfaceKind.Stain: return new Color(0.22f, 0.21f, 0.19f);
+                case LandmarkSurfaceKind.TrackBed: return new Color(0.36f, 0.26f, 0.19f);
+                case LandmarkSurfaceKind.Aggregate: return new Color(0.60f, 0.57f, 0.50f);
+                case LandmarkSurfaceKind.Rut: return new Color(0.33f, 0.30f, 0.25f);
                 default: return new Color(0.42f, 0.40f, 0.36f);
             }
         }

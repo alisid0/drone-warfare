@@ -37,13 +37,28 @@ namespace DroneSandbox
             return new[] { new Vector2(-h, 0), new Vector2(h, 0), new Vector2(hi, depth), new Vector2(lo, depth) };
         }
 
+        // Ground use codes shared by the painters and the sector: 0 lawn, 1 soil, 2 gravel, 3 rough, 4 oil stain, 5 mud.
+        public const int Lawn = 0, Soil = 1, Gravel = 2, Rough = 3, Stain = 4, Mud = 5;
+
+        // Farms, sheds and about half the houses have a drive; town land uses and the village fringe have none of their own.
+        public bool HasDrive => (landUse == 0 || landUse == 5) && (farm || shed || (identity & 1) == 0);
+        // About three drives in five have a car standing by the house, with a dark drip patch on the gravel.
+        public bool HasStain => HasDrive && !farm && (identity >> 11) % 5 < 3;
+        // The farm's muck heap stands on the far side of the yard from the drive.
+        public Vector2 MuckHeap => Point(-frontage * .5f + 5f, YardStart + 6f);
+        float RutU => DriveU - 2.5f;
+
+        // The drive widens where vehicles swing in from the street.
+        float DriveHalf(float v) => driveWidth * .5f + Math.Max(0f, 1.8f - v) * .7f;
+
         // Work yards use a softened oval and a side drive; doors have a separate narrow approach.
         public int UseAt(float u, float v)
         {
             if (landUse > 0 && landUse < 5) return TownUse(u, v);
-            if (square) return 2;
-            if (Math.Abs(u) < pathWidth * .5f && v < setback) return 2;
-            if ((farm || shed || (identity & 1) == 0) && Math.Abs(u - DriveU) < driveWidth * .5f && v < YardEnd) return 2;
+            if (landUse >= 6) return FringeUse(u, v);
+            if (square) return Gravel;
+            if (Math.Abs(u) < pathWidth * .5f && v < setback) return Gravel;
+            if (HasDrive && Math.Abs(u - DriveU) < DriveHalf(v) && v < YardEnd) return StainAt(u, v) ? Stain : Gravel;
             return WorkAt(u, v);
         }
 
@@ -51,22 +66,102 @@ namespace DroneSandbox
         public int WorkAt(float u, float v)
         {
             if (landUse > 0 && landUse < 5) return TownUse(u, v);
-            if (square) return 2;
+            if (landUse >= 6) return FringeUse(u, v);
+            if (square) return Gravel;
+            if (StainAt(u, v)) return Stain;
+            if (farm && (Point(u, v) - MuckHeap).sqrMagnitude < 30f) return Mud;
             float mid = (YardStart + YardEnd) * .5f, ry = (YardEnd - YardStart) * .5f;
             float rx = frontage * (farm ? .38f : .29f);
             float a = (u - (farm ? 0f : frontage * .06f)) / rx, b = (v - mid) / Math.Max(1f, ry);
-            if (a * a + b * b < 1f + .08f * (float)Math.Sin(v * .72f + identity % 19)) return farm ? 2 : 1;
+            if (a * a + b * b < 1f + .08f * (float)Math.Sin(v * .72f + identity % 19)) return farm ? FarmYard(u, v) : Soil;
+            // Tractors leave by the back of the yard for the fields: two wheel lines to the rear boundary.
+            if (farm && v > YardEnd - 2f && Math.Abs(Math.Abs(u - RutU) - .95f) < .32f) return Mud;
             if (cultivated && v > YardEnd + 1f && v < depth - 2f && u < -1f && u > -frontage * .5f + 2.5f)
-                return (v - YardEnd) % 2.7f < 1.7f ? 1 : 0;
-            if (shed && Math.Abs(u - DriveU + 3f) < 3.8f && Math.Abs(v - Math.Min(depth - 5f, YardEnd + 1f)) < 4f) return 1;
-            return untended ? 3 : 0;
+                return (v - YardEnd) % 2.7f < 1.7f ? Soil : Lawn;
+            if (shed && Math.Abs(u - DriveU + 3f) < 3.8f && Math.Abs(v - Math.Min(depth - 5f, YardEnd + 1f)) < 4f) return Soil;
+            if (shed && !farm && Trodden(u, v)) return Soil;
+            if (untended) return Rough;
+            // Gardens are not all kept alike: some let a back corner go.
+            return !farm && !cultivated && (identity >> 13) % 10 < 3 && v > depth * .72f && u < -frontage * .1f ? Rough : Lawn;
+        }
+
+        // Gravel yard with mud where machinery turns at the gate, in front of the barn and in damp hollows.
+        int FarmYard(float u, float v)
+        {
+            float du = (u - DriveU) / 5f, dv = (v - YardStart) / 6f;
+            if (du * du + dv * dv < 1f) return Mud;
+            float barnU = frontage < 28f ? 0f : -4f, barnV = Math.Min(depth - 9f, YardEnd + 5f);
+            if (Math.Abs(u - barnU) < 6.5f && v > barnV - 13f) return Mud;
+            return Math.Sin(u * .31f + identity % 7) * Math.Sin(v * .27f + identity % 5) > .45 ? Mud : Gravel;
+        }
+
+        // A parked car's drip patch on the drive beside the house.
+        bool StainAt(float u, float v)
+        {
+            if (!HasStain) return false;
+            float a = (u - DriveU) / .9f, b = (v - setback - 3.2f) / 2.3f;
+            return a * a + b * b < 1f;
+        }
+
+        // A worn line across the lawn from the back door to the shed.
+        bool Trodden(float u, float v)
+        {
+            Vector2 a = new Vector2(0f, setback + 4f), b = new Vector2(DriveU - 3f, Math.Min(depth - 5f, YardEnd + 1f) - 3f), d = b - a;
+            float t = Math.Max(0f, Math.Min(1f, Vector2.Dot(new Vector2(u, v) - a, d) / Math.Max(.01f, d.sqrMagnitude)));
+            return (new Vector2(u, v) - a - d * t).sqrMagnitude < .2f;
+        }
+
+        // Paddocks are grazed with tussocks and a trodden gateway; orchards keep rough grass under their rows; rough
+        // grass is an irregular patch that fades out before the plot's edge, so no rectangle shows.
+        int FringeUse(float u, float v)
+        {
+            float h = frontage * .5f, x = u + (identity % 97) * 3.1f, z = v + (identity >> 8) % 89 * 2.7f;
+            if (landUse == 6)
+            {
+                Vector2 gate = new Vector2(h - 4f, 0f);
+                if ((new Vector2(u, v) - gate).sqrMagnitude < 26f) return Noise(x * .6f, z * .6f) < .45f ? Mud : Soil;
+                if (h - Math.Abs(u) < 1.2f || depth - v < 1.2f) return Rough;
+                return Noise(x / 2.6f, z / 2.6f) > .7f ? Rough : Lawn;
+            }
+            if (landUse == 7) return (u + h - 4f) % 7f < 1.6f && u + h > 2.5f && v > 2f && v < depth - 2f ? Rough : Lawn;
+            float edge = Math.Min(h - Math.Abs(u), Math.Min(v, depth - v));
+            return Noise(x / 11f, z / 11f) * .7f + Noise(x / 4f, z / 4f) * .3f - .4f * Math.Max(0f, 1f - edge / 10f) > .42f ? Rough : Lawn;
+        }
+
+        // Smooth lattice noise in plot metres; integer hashing keeps workers and the sector in agreement.
+        static float Noise(float x, float z)
+        {
+            int i = (int)Math.Floor(x), j = (int)Math.Floor(z);
+            float a = x - i, b = z - j; a = a * a * (3f - 2f * a); b = b * b * (3f - 2f * b);
+            float top = Lattice(i, j) + (Lattice(i + 1, j) - Lattice(i, j)) * a, bottom = Lattice(i, j + 1) + (Lattice(i + 1, j + 1) - Lattice(i, j + 1)) * a;
+            return top + (bottom - top) * b;
+        }
+
+        // One lattice value in [0, 1].
+        static float Lattice(int x, int z)
+        {
+            uint h = unchecked((uint)x * 374761393u + (uint)z * 668265263u + 2246822519u);
+            h = unchecked((h ^ (h >> 13)) * 1274126177u); h ^= h >> 16;
+            return (h & 65535) / 65535f;
+        }
+
+        // Whether one boundary run is built: edge 0 is the frontage, 1 and the last are the sides, others the rear.
+        public bool EdgeShown(int edge)
+        {
+            if (boundary == 0) return false;
+            int last = shape == 2 ? 5 : 3;
+            int bit = edge == 0 ? 1 : edge == 1 ? 2 : edge == last ? 8 : 4;
+            return (open & bit) == 0;
         }
 
         static readonly Vector3 grass = FarDetailPalette.Decode(new Color(.24f, .29f, .13f));
         static readonly Vector3 soil = FarDetailPalette.Decode(new Color(.26f, .20f, .12f));
         static readonly Vector3 gravel = FarDetailPalette.Decode(new Color(.39f, .36f, .29f));
-        static readonly Vector3 rough = FarDetailPalette.Decode(new Color(.22f, .26f, .12f));
+        // Rough ground is the sector's dry meadow layer (Ground.Paint layer 4), so near and far agree.
+        static readonly Vector3 rough = FarDetailPalette.Means[4];
         static readonly Vector3 hedge = FarDetailPalette.Decode(new Color(.16f, .22f, .10f));
+        static readonly Vector3 stain = FarDetailPalette.Decode(new Color(.19f, .17f, .14f));
+        static readonly Vector3 mud = FarDetailPalette.Decode(new Color(.21f, .16f, .10f));
 
         // Vertex access avoids allocating an outline for each pixel in the regional or world picture.
         Vector2 Corner(int i)
@@ -87,7 +182,7 @@ namespace DroneSandbox
             float nearest = float.MaxValue;
             for (int edge = 0; edge < count; edge++)
             {
-                if (edge == 0 && (Math.Abs(point.x) < 1.3f || Math.Abs(point.x - DriveU) < 2f)) continue;
+                if (!EdgeShown(edge) || edge == 0 && (Math.Abs(point.x) < 1.3f || Math.Abs(point.x - DriveU) < 2f)) continue;
                 Vector2 a = Corner(edge), b = Corner((edge + 1) % count);
                 if ((identity + edge) % 2 == 0) b = Vector2.Lerp(a, b, .72f);
                 else a = Vector2.Lerp(a, b, .28f);
@@ -106,14 +201,20 @@ namespace DroneSandbox
             for (int j = -1; j <= 1; j += 2) for (int i = -1; i <= 1; i += 2)
             {
                 int use = WorkAt(u + i * q, v + j * q);
-                sum += use == 1 ? soil : use == 2 ? gravel : use == 3 ? rough : lawn ?? grass;
+                sum += use == Soil ? soil : use == Gravel ? gravel : use == Rough ? rough : use == Stain ? stain : use == Mud ? mud : lawn ?? grass;
             }
             Vector3 colour = sum * .25f;
-            float door = FarDetailData.BandCoverage(pathWidth * .5f - Math.Abs(u), pathWidth * .5f, pixel)
-                * FarDetailData.Coverage(setback-v,pixel);
-            float drive = farm || shed || (identity & 1) == 0 ? FarDetailData.BandCoverage(driveWidth * .5f - Math.Abs(u-DriveU),driveWidth*.5f,pixel)
+            float door = landUse < 6 ? FarDetailData.BandCoverage(pathWidth * .5f - Math.Abs(u), pathWidth * .5f, pixel)
+                * FarDetailData.Coverage(setback-v,pixel) : 0f;
+            float flare = DriveHalf(v);
+            float drive = HasDrive ? FarDetailData.BandCoverage(flare - Math.Abs(u-DriveU),flare,pixel)
                 * FarDetailData.Coverage(YardEnd-v,pixel) : 0f;
             colour += (gravel-colour) * Math.Max(door,drive);
+            if (HasStain)
+            {
+                float a = (u - DriveU) / .9f, b = (v - setback - 3.2f) / 2.3f;
+                colour += (stain - colour) * FarDetailData.Coverage((1f - (float)Math.Sqrt(a * a + b * b)) * .9f, pixel);
+            }
             if (boundary != 0)
             {
                 float half = boundary == 1 ? .375f : .15f;
@@ -127,6 +228,27 @@ namespace DroneSandbox
     // Stratified choices keep small settlements within the requested mixes without changing any other random stream.
     public static class VillageUse
     {
+        // A fifth leave the frontage open and a third let the garden run into the land behind; farms always open at the
+        // back for the tractor. Side runs are decided by where they meet the street, so neighbours drop the same one
+        // and their gardens merge.
+        static int Openings(VillagePlot p)
+        {
+            int open = 0, h = p.identity >> 7;
+            if (h % 5 == 0) open |= 1;
+            if (p.farm || (h >> 3) % 3 == 0) open |= 4;
+            if (Merged(p.Point(p.frontage * .5f, 0f))) open |= 2;
+            if (Merged(p.Point(-p.frontage * .5f, 0f))) open |= 8;
+            return open;
+        }
+
+        // One shared street corner, on a 6 m grid in plan coordinates: about one in four is left unfenced.
+        static bool Merged(Vector2 corner)
+        {
+            uint h = unchecked((uint)Mathf.FloorToInt(corner.x / 6f) * 73856093u ^ (uint)Mathf.FloorToInt(corner.y / 6f) * 19349663u);
+            h = unchecked((h ^ (h >> 13)) * 0x5bd1e995u);
+            return (h >> 7) % 4 == 0;
+        }
+
         // Rank independent uses separately: a shed does not imply a vegetable garden or a log pile.
         public static void Assign(List<VillagePlot> plots, int owner, int seed, Vector2 core)
         {
@@ -153,7 +275,8 @@ namespace DroneSandbox
                 if (!p.farm && !p.town) p.setback = p.core ? 4.6f + (float)rng.NextDouble() * 1.5f
                     : p.old ? 5.8f + (float)rng.NextDouble() * 2.1f : 10f + (float)rng.NextDouble() * 6f;
                 if (p.core || p.landUse == 5) p.shed = true;
-                p.boundary = k % 5 == 0 ? 0 : 1 + k % 3;
+                p.boundary = (p.identity >> 3) % 10 < 3 ? 0 : 1 + k % 3;
+                p.open = Openings(p);
                 plots[ids[k]] = p;
             }
             for (int use = 0; use < 6; use++)

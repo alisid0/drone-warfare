@@ -40,20 +40,27 @@ namespace DroneSandbox
         // Two renderers per occupied block replace the old settlement-wide enclosure mesh.
         public static int VillagePlots(Transform root, List<VillagePlot> plots, int budget)
         {
+            // Gardens are batched before the fringe's paddock rails and orchard hedges, so a tight allowance drops
+            // fringe fencing first; open rough grass is ground paint only and needs no renderer at all.
             var blocks = new SortedDictionary<long, List<VillagePlot>>();
+            var fringe = new SortedDictionary<long, List<VillagePlot>>();
             foreach (var p in plots)
             {
                 PaintUse(p);
+                if (p.landUse >= 6 && p.boundary == 0) continue;
                 Vector2 c = p.Point(0f, p.depth * .5f);
                 int x = Mathf.FloorToInt(c.x / 96f), z = Mathf.FloorToInt(c.y / 96f);
                 long key = ((long)x << 32) ^ (uint)z;
-                if (!blocks.TryGetValue(key, out var list)) blocks.Add(key, list = new List<VillagePlot>());
+                var target = p.landUse >= 6 ? fringe : blocks;
+                if (!target.TryGetValue(key, out var list)) target.Add(key, list = new List<VillagePlot>());
                 list.Add(p);
             }
             var materials = new[] { Art.Shared(new Color(.24f,.29f,.13f)), Art.Shared(new Color(.26f,.20f,.12f)),
                 Art.Shared(new Color(.39f,.36f,.29f)), Art.Shared(new Color(.16f,.22f,.10f)), Art.Shared(new Color(.82f,.82f,.76f)) };
             int used = 0;
-            foreach (var block in blocks.Values)
+            var ordered = new List<List<VillagePlot>>(blocks.Values);
+            ordered.AddRange(fringe.Values);
+            foreach (var block in ordered)
             {
                 if (used + 2 > budget) break;
                 var holder = new GameObject("Village 96 m block"); holder.transform.SetParent(root, false);
@@ -64,12 +71,13 @@ namespace DroneSandbox
                     foreach (var p in block)
                     {
                         if (p.landUse > 0 && p.landUse < 5) { TownLandUse(mesh, p, lod); continue; }
-                        if (lod == 0) Surface(mesh, p);
-                        if (p.square || p.boundary == 0) continue;
+                        if (lod == 0 && p.landUse < 6) Surface(mesh, p);
+                        // Paddock rails and orchard hedges are drawn; squares, open plots and rough grass have none.
+                        if (p.square && p.landUse < 6 || p.boundary == 0) continue;
                         var polygon = p.Outline();
                         for (int edge = 0; edge < polygon.Length; edge++)
                         {
-                            if (lod == 1 && (edge == 0 || p.boundary == 2)) continue;
+                            if (!p.EdgeShown(edge) || lod == 1 && (edge == 0 || p.boundary == 2)) continue;
                             Vector2 a = polygon[edge], b = polygon[(edge + 1) % polygon.Length];
                             // Missing runs leave open neighbouring gardens; the front also has two deliberate gates.
                             if ((p.identity + edge) % 2 == 0) b = Vector2.Lerp(a, b, .72f);
@@ -103,15 +111,21 @@ namespace DroneSandbox
                     int use = u > end ? -1 : p.WorkAt(u, v);
                     if (use == last) continue;
                     float finish = Math.Min(end, u - step * .5f);
-                    if (last == 1 || last == 2) Ground.Wear(p.Point(start, v), p.Point(finish, v), step, .85f);
-                    if (last == 3) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .55f, 4);
+                    if (last == VillagePlot.Soil || last == VillagePlot.Gravel) Ground.Wear(p.Point(start, v), p.Point(finish, v), step, .85f);
+                    if (last == VillagePlot.Rough) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .55f, 4);
+                    if (last == VillagePlot.Stain || last == VillagePlot.Mud) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .8f, 6); // wet mud layer
                     start = Math.Max(lo + .6f, u - step * .5f); last = use;
                 }
             }
+            if (p.landUse >= 6) return;
             // These exact-width approaches connect the road edge, gate and door; the drive runs beside the house.
             Ground.Wear(p.Point(0f, -1.8f), p.Point(0f, p.setback), p.pathWidth > 0f ? p.pathWidth : 1.4f, .85f);
-            if (p.farm || p.shed || (p.identity & 1) == 0)
-                Ground.Wear(p.Point(p.DriveU, -1.8f), p.Point(p.DriveU, p.YardEnd), p.driveWidth > 0f ? p.driveWidth : 3f, .85f);
+            if (!p.HasDrive) return;
+            float drive = p.driveWidth > 0f ? p.driveWidth : 3f;
+            Ground.Wear(p.Point(p.DriveU, -1.8f), p.Point(p.DriveU, p.YardEnd), drive, .85f);
+            // Wheels cut the corners where the drive meets the street, and a parked car drips by the house.
+            Ground.Wear(p.Point(p.DriveU, -1.8f), p.Point(p.DriveU, 1.2f), drive + 2.4f, .7f);
+            if (p.HasStain) Ground.Paint(p.Point(p.DriveU, p.setback + 1.6f), p.Point(p.DriveU, p.setback + 4.8f), 1.5f, .8f, 6);
         }
 
         // Only occupied working ground gets geometry; lawns retain the terrain's continuous grass material.
@@ -119,8 +133,10 @@ namespace DroneSandbox
         {
             // Worn yards are terrain splats, avoiding stepped polygon islands and duplicate ground sheets.
             Strip(mesh, p, 0f, 0f, p.setback, p.pathWidth > 0f ? p.pathWidth : 1.4f, 2);
-            if (p.farm || p.shed || (p.identity & 1) == 0)
+            if (p.HasDrive)
                 Strip(mesh, p, p.DriveU, 0f, p.YardEnd, p.driveWidth > 0f ? p.driveWidth : 3f, 2);
+            // The parked car's drip patch sits just above the gravel strip, in the darker soil colour.
+            if (p.HasStain) Strip(mesh, p, p.DriveU, p.setback + 1.6f, p.setback + 4.8f, 1.4f, 1, .065f);
             if (!p.cultivated) return;
             for (float v = p.YardEnd + 1f; v < p.depth - 3f; v += 2.7f)
             {
@@ -133,13 +149,13 @@ namespace DroneSandbox
         }
 
         // Access strips preserve their physical widths while following the slope at two-metre intervals.
-        static void Strip(VillageMesh mesh, VillagePlot p, float u, float start, float end, float width, int material)
+        static void Strip(VillageMesh mesh, VillagePlot p, float u, float start, float end, float width, int material, float lift = .055f)
         {
             for (float v = start; v < end; v += 2f)
             {
                 float back = Math.Min(end, v + 2f), half = width * .5f;
-                mesh.Quad(material, At(p.Point(u-half,v),.055f), At(p.Point(u+half,v),.055f),
-                    At(p.Point(u+half,back),.055f), At(p.Point(u-half,back),.055f));
+                mesh.Quad(material, At(p.Point(u-half,v),lift), At(p.Point(u+half,v),lift),
+                    At(p.Point(u+half,back),lift), At(p.Point(u-half,back),lift));
             }
         }
 

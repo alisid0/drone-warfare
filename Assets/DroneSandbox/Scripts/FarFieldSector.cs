@@ -36,7 +36,7 @@ namespace DroneSandbox
                     foreach (var piece in pieces)
                     {
                         MapLayout.Fields.Add(piece); FarFieldSurface.Register(piece, plot);
-                        if (parcel.hedge || parcel.use == 1 || parcel.use == 2) AddEdges(piece, plot);
+                        if (parcel.hedge) AddEdges(piece, plot);
                     }
                 }
             }
@@ -171,6 +171,7 @@ namespace DroneSandbox
         }
 
         // Boundary props stop at real margins; artificial sector cuts must never acquire a hedge across the seam.
+        // Only the parcel's hedged edges get one; the others keep their strip, track or bare crop edge.
         static void AddEdges(FieldPlot f, FieldPlot original)
         {
             var corners = Corners(f);
@@ -188,6 +189,7 @@ namespace DroneSandbox
                 bool end = au * bu > 0f && Math.Abs(Math.Abs(au) - original.halfLength) <= .02f && Math.Abs(Math.Abs(bu) - original.halfLength) <= .02f;
                 if (!side && !end) continue;
                   int edge = side ? (av < 0f ? 0 : 2) : (au > 0f ? 1 : 3);
+                  if (FieldAppearance.EdgeUse(original.edges, edge) != (int)FieldEdge.Hedge) continue;
                   MapLayout.Boundaries.Add(new FieldBoundary { a = a, b = b, first = MapLayout.Fields.Count - 1,
                       second = -1, kind = FieldBoundaryKind.Hedge, hasGate = true,
                       gate = FieldAppearance.Gate(parentCorners[edge],parentCorners[(edge+1)%4]) });
