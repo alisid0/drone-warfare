@@ -118,29 +118,6 @@ namespace DroneSandbox
             if (drift > 0f) wet = Math.Min(1f, wet + drift); else rough = Math.Min(1f, rough - drift);
         }
 
-        // Sparse damp hollows use a separate broad signal so not every dark crop drift turns into bare ground.
-        public static float Patch(float x, float z, float pixel = 2f)
-        {
-            float a = Noise(x / 26f - 61f, z / 26f + 37f);
-            float b = Noise(x / 81f + 5f, z / 81f + 91f);
-            return Math.Max(0f, Math.Min(1f, (a - .72f) * 5f)) * Math.Max(0f, Math.Min(1f, (b - .56f) * 5f))
-                * Math.Min(1f, 26f / Math.Max(1f, pixel));
-        }
-
-        // Linear crop means are shared with the distant painter, including grass margins and damp rough patches.
-        public static Vector3 Colour(int layer, float x, float z, float edge, float pixel) => Colour(layer, x, z, edge, pixel, Margin(x, z));
-
-        // The same with the edge's own uncultivated width; zero when the caller has already subtracted it.
-        public static Vector3 Colour(int layer, float x, float z, float edge, float pixel, float margin)
-        {
-            Vector3 crop = FarDetailPalette.Means[layer] * (1f + .55f * (Growth(x, z, pixel) - .5f));
-            float patch = Patch(x, z, pixel);
-            Vector3 rough = FarDetailPalette.Means[4] * .8f + FarDetailPalette.Means[1] * .2f;
-            crop += (rough - crop) * patch;
-            float inside = FarDetailData.Coverage(edge - margin, pixel);
-            return rough + (crop - rough) * inside;
-        }
-
         // Project into the uncut parent frame before measuring distance to its two ends and sloping sides.
         public static float Edge(FieldPlot parent, Vector2 point)
         {

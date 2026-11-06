@@ -33,9 +33,10 @@ namespace DroneSandbox
                         Cut(fragment, blocked, pieces, 0);
                     }
                     Merge(pieces);
+                    float shade = FarFieldPlan.Shade(district, parcel);
                     foreach (var piece in pieces)
                     {
-                        MapLayout.Fields.Add(piece); FarFieldSurface.Register(piece, plot);
+                        MapLayout.Fields.Add(piece); FarFieldSurface.Register(piece, plot, shade);
                         if (parcel.hedge) AddEdges(piece, plot);
                     }
                 }
