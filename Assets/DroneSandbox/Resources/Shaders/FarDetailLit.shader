@@ -3,9 +3,9 @@ Shader "DroneSandbox/GroundDetail"
 {
     Properties
     {
-        _GroundControl("Surface and direction", 2D) = "black" {}
-        _GroundAlbedo("Shared ground albedo", 2DArray) = "" {}
-        _GroundNormal("Shared ground normals", 2DArray) = "" {}
+        _FarGroundControl("Surface and direction", 2D) = "black" {}
+        _FarGroundAlbedo("Shared ground albedo", 2DArray) = "" {}
+        _FarGroundNormal("Shared ground normals", 2DArray) = "" {}
 
         // Following set of parameters represent the parameters node inside the MaterialGraph.
         // They are use to fill a SurfaceData. With a MaterialGraph this should not exist.

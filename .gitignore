@@ -50,3 +50,7 @@ __pycache__/
 
 # Downloaded Poly Haven scans (Tools/fetch_models.py); import_scans.py exports what the game needs into Assets
 /Tools/scans/
+
+# Ground detail texture arrays, rebuilt by Configure Project (FarDetailShaderSetup)
+/Assets/DroneSandbox/Resources/Textures/GroundAlbedo.asset*
+/Assets/DroneSandbox/Resources/Textures/GroundNormal.asset*

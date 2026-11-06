@@ -1,8 +1,9 @@
 // HDRP Lit owns lighting, fog, decals, depth and motion vectors. This hook supplies only ground albedo/gradient.
-TEXTURE2D(_GroundControl);
-TEXTURE2D_ARRAY(_GroundAlbedo);
-TEXTURE2D_ARRAY(_GroundNormal);
-SAMPLER(sampler_GroundAlbedo);
+TEXTURE2D(_FarGroundControl);
+TEXTURE2D_ARRAY(_FarGroundAlbedo);
+TEXTURE2D_ARRAY(_FarGroundNormal);
+SAMPLER(sampler_FarGroundAlbedo);
+SAMPLER(sampler_FarGroundNormal); // its own: a pass that reads only normals must not hold the albedo's sampler alone
 
 #include "FarDetailPalette.hlsl"
 
@@ -29,7 +30,7 @@ void GroundSample(float4 code, float2 world, float2 dx, float2 dy, out float3 de
     float2 uv = float2(dot(world, across), dot(world, along)) / metres;
     float2 du = float2(dot(dx, across), dot(dx, along)) / metres;
     float2 dv = float2(dot(dy, across), dot(dy, along)) / metres;
-    float3 albedo = SAMPLE_TEXTURE2D_ARRAY_GRAD(_GroundAlbedo, sampler_GroundAlbedo, uv, layer, du, dv).rgb;
+    float3 albedo = SAMPLE_TEXTURE2D_ARRAY_GRAD(_FarGroundAlbedo, sampler_FarGroundAlbedo, uv, layer, du, dv).rgb;
     detail = albedo / max(GroundMean[layer], 0.001);
     float footprint = max(abs(dot(dx, across)) + abs(dot(dy, across)), 0.02);
     float v = dot(world, across);
@@ -45,7 +46,7 @@ void GroundSample(float4 code, float2 world, float2 dx, float2 dy, out float3 de
     slope = 0;
     if (layer < 5)
     {
-        float3 n = SAMPLE_TEXTURE2D_ARRAY_GRAD(_GroundNormal, sampler_GroundAlbedo, uv, layer, du, dv).xyz * 2 - 1;
+        float3 n = SAMPLE_TEXTURE2D_ARRAY_GRAD(_FarGroundNormal, sampler_FarGroundNormal, uv, layer, du, dv).xyz * 2 - 1;
         float2 q = n.xy / max(n.z, 0.15);
         slope = (across * q.x + along * q.y) * code.a;
     }
@@ -67,10 +68,10 @@ void FarDetailSurface(FragInputs input, inout SurfaceData surface, inout float3 
     float2 p = input.texCoord0.xy * 256.0 + 0.5;
     int2 cell = (int2)floor(p);
     float2 f = frac(p);
-    float4 a = LOAD_TEXTURE2D(_GroundControl, cell);
-    float4 b = LOAD_TEXTURE2D(_GroundControl, cell + int2(1, 0));
-    float4 c = LOAD_TEXTURE2D(_GroundControl, cell + int2(0, 1));
-    float4 d = LOAD_TEXTURE2D(_GroundControl, cell + 1);
+    float4 a = LOAD_TEXTURE2D(_FarGroundControl, cell);
+    float4 b = LOAD_TEXTURE2D(_FarGroundControl, cell + int2(1, 0));
+    float4 c = LOAD_TEXTURE2D(_FarGroundControl, cell + int2(0, 1));
+    float4 d = LOAD_TEXTURE2D(_FarGroundControl, cell + 1);
     float3 colour; float2 slope;
     GroundSample(a, world, dx, dy, colour, slope);
     if (any(a != b) || any(a != c) || any(a != d))

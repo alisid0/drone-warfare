@@ -26,7 +26,7 @@ namespace DroneSandbox
         public static void Bind(Material material, Texture2D colour, Texture2D control, int x, int z)
         {
             material.mainTexture = colour;
-            material.SetTexture("_GroundControl", control);
+            material.SetTexture("_FarGroundControl", control);
             material.SetTextureOffset("_BaseColorMap", new Vector2(x * 512f, z * 512f));
         }
     }

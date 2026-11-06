@@ -53,8 +53,16 @@ namespace DroneSandbox.EditorTools
             HdrpSetup.Finish(material, instancing: false);
             // No validation after this point: HDRP does not recognize the custom shader's name.
             material.shader = AssetDatabase.LoadAssetAtPath<Shader>(Shaders + "FarDetailLit.shader");
-            if (material.shader == null || ShaderUtil.ShaderHasError(material.shader)) throw new InvalidOperationException("Ground detail shader failed to import.");
-            material.SetTexture("_GroundAlbedo", albedo); material.SetTexture("_GroundNormal", normal);
+            if (material.shader == null) throw new InvalidOperationException("Ground detail shader failed to import.");
+            if (ShaderUtil.ShaderHasError(material.shader))
+            {
+                // Say what the compiler said: a bare "failed" left nothing to go on in the batch log.
+                var report = new StringBuilder("Ground detail shader has errors:");
+                foreach (var m in ShaderUtil.GetShaderMessages(material.shader))
+                    report.Append("\n  ").Append(m.severity).Append(' ').Append(m.file).Append(':').Append(m.line).Append(' ').Append(m.message).Append(' ').Append(m.messageDetails);
+                throw new InvalidOperationException(report.ToString());
+            }
+            material.SetTexture("_FarGroundAlbedo", albedo); material.SetTexture("_FarGroundNormal", normal);
             EditorUtility.SetDirty(material);
             AssetDatabase.SaveAssets();
         }
@@ -88,7 +96,7 @@ namespace DroneSandbox.EditorTools
             shader = shader.Substring(0, second) + "    CustomEditor \"Rendering.HighDefinition.LitGUI\"\n}\n";
             shader = shader.Replace("Shader \"HDRP/Lit\"", "Shader \"DroneSandbox/GroundDetail\"");
             int properties = shader.IndexOf('{', shader.IndexOf("Properties", StringComparison.Ordinal)) + 1;
-            shader = shader.Insert(properties, "\n        _GroundControl(\"Surface and direction\", 2D) = \"black\" {}\n        _GroundAlbedo(\"Shared ground albedo\", 2DArray) = \"\" {}\n        _GroundNormal(\"Shared ground normals\", 2DArray) = \"\" {}\n");
+            shader = shader.Insert(properties, "\n        _FarGroundControl(\"Surface and direction\", 2D) = \"black\" {}\n        _FarGroundAlbedo(\"Shared ground albedo\", 2DArray) = \"\" {}\n        _FarGroundNormal(\"Shared ground normals\", 2DArray) = \"\" {}\n");
             shader = shader.Replace(Lit + "LitData.hlsl", Shaders + "FarDetailLitData.hlsl");
             const string notice = "// Generated from the installed HDRP 17.6 Lit by FarDetailShaderSetup. Unity source: see ThirdPartyNotices.txt.\n";
             Write(Shaders + "FarDetailLit.shader", notice + shader);
