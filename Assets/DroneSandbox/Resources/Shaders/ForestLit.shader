@@ -10,6 +10,7 @@ Shader "DroneSandbox/ForestLit"
         _ForestRadius("Forest local radius axis", Vector) = (1,0,0,0)
         _ForestOrigin("Forest world origin", Vector) = (0,0,0,0)
         _ForestDetail("Shared world crown relief", 2D) = "gray" {}
+        _ForestDetailB("Alternate world crown relief", 2D) = "gray" {}
         _ForestEnabled("Forest fade enabled", Float) = 0
         _ForestTier("Forest tier", Float) = 0
         _ForestBuild("Forest refinement", Float) = 1
@@ -238,6 +239,8 @@ Shader "DroneSandbox/ForestLit"
     HLSLINCLUDE
     // ForestFade needs position in opaque depth/shadow passes too, before LitDepthPass packs the varyings.
     #define VARYINGS_NEED_POSITION_WS
+    #define ATTRIBUTES_NEED_TEXCOORD0
+    #define VARYINGS_NEED_TEXCOORD0
 
     #pragma target 4.5
     //#pragma enable_debug_symbols

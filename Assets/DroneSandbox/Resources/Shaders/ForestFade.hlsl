@@ -1,5 +1,5 @@
 // Complementary world-stable coverage intervals fade meshes, cards and canopy in every HDRP raster pass.
-void ForestFade(float3 positionRWS)
+void ForestFade(float3 positionRWS, float2 canopyUV)
 {
     // Invalid/unbound draw parameters fail open. Material properties live in UnityPerMaterial in every pass.
     if (_ForestEnabled < 0.5 || _ForestCamera.w < 0.5 || _ForestDistances.w < 1.0 || _ForestDistances.z < _ForestDistances.y
@@ -18,6 +18,9 @@ void ForestFade(float3 positionRWS)
     // Only completed cells may open the canopy. Crowns beyond them can arrive independently without shrinking the entire view.
     if (_ForestTier >= 3.0)
     {
+        // Keep dark understorey in glades and sparse rims even when nearby individual crowns are ready.
+        float cover = SAMPLE_TEXTURE2D_LOD(_BaseColorMap, sampler_BaseColorMap, canopyUV, 0).a;
+        card *= smoothstep(0.35, 0.85, cover);
         card *= 1.0 - smoothstep(max(0.0, _ForestSelection.w - 32.0), max(0.01, _ForestSelection.w), distance(world.xz, _ForestSelection.xz));
         float3 delta = world - _ForestSelection.xyz;
         float3 right = cross(float3(0.0, 1.0, 0.0), _ForestProjection.xyz);

@@ -196,10 +196,11 @@ void GetLayerTexCoord(FragInputs input, inout LayerTexCoord layerTexCoord)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitBuiltinData.hlsl"
 
 #include "ForestFade.hlsl"
+#include "ForestDetail.hlsl"
 
 void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs posInput, out SurfaceData surfaceData, out BuiltinData builtinData RAY_TRACING_OPTIONAL_PARAMETERS)
 {
-    ForestFade(input.positionRWS);
+    ForestFade(input.positionRWS, input.texCoord0.xy);
     // Fix case 1210058. With Lit.shader / LayeredLit.shader we always have UV1. But in the case of some SpeedTree mesh, there is no stream sent
     // and UV1 is corrupt when we use surface gradient. In case UV1 aren't required we set them to 0, so we ensure there is no garbage.
     // When using lightmaps, the uv1 is always valid but we don't update _UVMappingMask.y to 1
@@ -291,14 +292,14 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     #endif
 #endif
 
-    // Shared, mipmapped world detail gives even a 256 m bootstrap mesh individual crown light and normals.
+    // Mipmapped stochastic detail gives even the bootstrap surface separate crowns without a repeating 128 m tile.
     if (_ForestTier >= 3.0 && _ForestEnabled > 0.5)
     {
-        float2 forestUV = (GetAbsolutePositionWS(input.positionRWS).xz + _ForestOrigin.xy) / 128.0;
-        float4 detail = SAMPLE_TEXTURE2D(_ForestDetail, sampler_ForestDetail, forestUV);
-        float4 cluster = SAMPLE_TEXTURE2D(_ForestDetail, sampler_ForestDetail, forestUV * 0.381 + float2(0.173, 0.619));
-        surfaceData.baseColor *= (0.50 + detail.r) * (0.82 + cluster.r * 0.36);
-        float2 slope = (detail.gb * 2.0 - 1.0) * 0.50 + (cluster.gb * 2.0 - 1.0) * 0.22;
+        float2 forestWorld = GetAbsolutePositionWS(input.positionRWS).xz + _ForestOrigin.xy;
+        float3 detail = ForestCrownDetail(forestWorld);
+        float crownWeight = smoothstep(0.1, 0.7, alpha);
+        surfaceData.baseColor *= lerp(1.0, 1.0 + (detail.r - 0.5) * 1.6, crownWeight);
+        float2 slope = detail.gb * (0.65 * crownWeight);
         surfaceData.normalWS = normalize(surfaceData.normalWS + float3(slope.x, 0.0, slope.y));
     }
 
