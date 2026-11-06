@@ -89,6 +89,8 @@ namespace DroneSandbox
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
             log.WriteLine($"Varrow build ms: {World.Timings}");
+            log.WriteLine($"World build stages: {FarTerrain.BuildTimings}");
+            log.WriteLine($"Field layout stages: {MapLayout.Timings}; {MapLayout.FieldTimings}");
             log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count} ({MapLayout.FieldCoverage():P0} of the land), " +
                           $"screen {Screen.width}x{Screen.height}");
 
@@ -735,6 +737,8 @@ namespace DroneSandbox
             flightFrames.Sort();
             float p95 = flightFrames.Count > 0 ? flightFrames[Mathf.Min(flightFrames.Count - 1, Mathf.CeilToInt(flightFrames.Count * 0.95f) - 1)] : 0f;
             double meanCommit = FarDetail.TotalCommitMs / Mathf.Max(1, FarDetail.CommitFrames);
+            log.WriteLine($"World detail stage maxima: {FarDetailTiming.Breakdown}; collider bake worker worst {FarDetail.WorstBakeMs:F3} ms");
+            log.WriteLine($"World picture stages (pending {FarTerrain.PicturePending}): {FarTerrain.PictureTimings}");
             log.WriteLine($"World detail flight: live {FarDetail.Live}/{FarDetail.MaxTiles}, committed {FarDetail.Committed}, " +
                           $"generation last {FarDetail.LastGenerationMs:F2} ms, main-thread mean {meanCommit:F3} ms, worst {FarDetail.WorstCommitMs:F3} ms, " +
                           $"over 2 ms {FarDetail.BudgetOverruns}, pressure evictions {FarDetail.PressureEvictions}; frame p95 {p95:F2} ms ({flightFrames.Count} frames, screenshot I/O excluded), " +
@@ -1237,6 +1241,7 @@ namespace DroneSandbox
                 float took = Time.realtimeSinceStartup - started;
                 var plan = MapLayout.Plan;
                 log.WriteLine($"  build ms: {World.Timings}");
+                log.WriteLine($"  world build stages: {FarTerrain.BuildTimings}");
                 log.WriteLine($"Sector {n}: {plan.name} ({SectorTypes.Get(kind).name}, seed {seed}) built in {took:F1}s: " +
                               $"{plan.roads.Count} roads, {plan.villages.Count} villages, {plan.bridges.Count} bridges, {plan.ponds.Count} pools, " +
                               $"{plan.railways.Count} railways, {plan.sites.Count} sites, {MapLayout.Fields.Count} fields; " +
