@@ -701,6 +701,7 @@ namespace DroneSandbox
             if (swift != null) swift.MoveTo(game.basePosition + away.normalized * 16000f);
             var flightFrames = new List<float>(12000);
             FarDetail.ResetMetrics();
+            FarScatter.ResetTimings();
             bool lowField = false, lowForest = false;
             rts.selected.Clear();
             if (swift != null) rts.selected.Add(swift); // the feed has its own streaming priority and predicted velocity
@@ -738,6 +739,8 @@ namespace DroneSandbox
                           $"generation last {FarDetail.LastGenerationMs:F2} ms, main-thread mean {meanCommit:F3} ms, worst {FarDetail.WorstCommitMs:F3} ms, " +
                           $"over 2 ms {FarDetail.BudgetOverruns}, pressure evictions {FarDetail.PressureEvictions}; frame p95 {p95:F2} ms ({flightFrames.Count} frames, screenshot I/O excluded), " +
                           $"{Screen.width}x{Screen.height}, {SystemInfo.graphicsDeviceName}");
+            log.WriteLine($"World forest over the flight: {ForestLine()}");
+            if (FarScatter.Samples > 0 && FarScatter.MeanMs > 1f) errors++;
             if (!lowField || !lowForest || FarDetail.Live > FarDetail.MaxTiles || FarDetail.Committed == 0 ||
                 FarDetail.WorstCommitMs > 2.0 || meanCommit > 1.0 || p95 > 16.7f) errors++;
             if (swift == null || !swift.IsAlive || swiftFlown < 15000f || swiftLowest < 2f) errors++;
@@ -1265,8 +1268,7 @@ namespace DroneSandbox
                 yield return new WaitForSeconds(1.5f);
                 yield return Shot($"31_sector_{n:00}_{kind}");
                 // What of the woods this view drew: hd145's dense forest drew nothing in a Deep Forest sector.
-                log.WriteLine($"  forest drawn: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, " +
-                              $"canopy blocks {ForestHlod.BlocksDrawn} of {ForestHlod.CachedBlocks} cached, {World.TreeCount} sector trees");
+                log.WriteLine($"  {ForestLine()}");
                 photo.Exit();
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
@@ -2056,21 +2058,27 @@ namespace DroneSandbox
             Atmosphere.ApplyQuality(Camera.main);
         }
 
-        // The far forest builds a block at a time in a sliver of each frame, nearest first: hd144's forest shot caught
-        // 3 blocks after 6 s and showed bare ground for forest. Waits until no block has come for 2 s, up to 40 s.
+        // The far forest's canopy for the view: hd144's forest shot caught 3 blocks after 6 s and showed bare ground for
+        // forest. Coverage must be complete (no missing block) within 3 s of a 2.5 km jump; waits up to 15 s to see how
+        // long it really takes, and says so either way.
         IEnumerator ForestMassesSettle(string shot)
         {
-            float waited = 0f, still = 0f;
-            int last = -1;
-            while (waited < 40f && still < 2f)
-            {
-                yield return new WaitForSecondsRealtime(0.25f);
-                waited += 0.25f;
-                if (ForestHlod.CachedBlocks != last) { last = ForestHlod.CachedBlocks; still = 0f; }
-                else still += 0.25f;
-            }
-            log.WriteLine($"{shot}: forest masses settled at {ForestHlod.CachedBlocks} blocks after {waited:F1} s");
+            float forestWaitStarted = Time.unscaledTime;
+            yield return null;
+            while (ForestHlod.MissingBlocks > 0 && Time.unscaledTime - forestWaitStarted < 15f) yield return null;
+            float took = Time.unscaledTime - forestWaitStarted;
+            log.WriteLine($"{shot}: forest masses {(ForestHlod.MissingBlocks == 0 ? "settled" : "timed out")} at {ForestHlod.BlocksDrawn} blocks after {took:F2} s; " +
+                          $"missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, cached {ForestHlod.CachedBlocks}, builds {ForestHlod.CompletedBuilds}, " +
+                          $"refining {ForestHlod.Building}, last build slice {ForestHlod.BuildMs:F3} ms{(took > 3f ? " (over the 3 s target)" : "")}");
         }
+
+        // What of the woods the last camera drew, and what the forest cost (Codex's counters).
+        static string ForestLine() =>
+            $"forest drawn: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, canopy blocks {ForestHlod.BlocksDrawn} of {ForestHlod.CachedBlocks} cached, " +
+            $"{SectorForest.Stems.Count} sector trees; ready {SectorForest.Ready}, cells {FarScatter.ReadyCells}, tree reach {FarScatter.TierDistances.z:F0} m, " +
+            $"missing canopy {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, visited {FarScatter.RecordsVisited}, tree triangles {FarScatter.TreeTrianglesDrawn}, " +
+            $"canopy triangles {ForestHlod.TrianglesDrawn}, forest CPU {FarScatter.MainThreadMs:F3} ms (mean {FarScatter.MeanMs:F3}, worst {FarScatter.WorstMs:F3}, " +
+            $"{FarScatter.Samples} frames), crown CPU {Canopy.QueryMs:F3} ms, fallback materials {ForestMaterials.FallbackCount}";
 
         IEnumerator Shot(string name)
         {
