@@ -15,6 +15,8 @@ namespace DroneSandbox
         readonly WorldFeatureMap features; // the permanent landmarks' surfaces and graded platforms
         readonly int count;
         readonly Segment[] roads, rivers;
+        public readonly RoadNetwork roadNetwork;
+        public readonly RoadGatePlan roadGates;
         readonly Dictionary<long, Segment[]> riverCells;
         public readonly FarFieldPlan fields;
         public readonly FarDetailCover cover;
@@ -26,6 +28,8 @@ namespace DroneSandbox
         {
             seed = source.seed; heights = source.heights; covers = source.covers; count = source.count;
             roads = source.roads; rivers = source.rivers; riverCells = source.riverCells;
+            roadNetwork = source.roadNetwork;
+            roadGates = source.roadGates;
             lakes = source.lakes;
             features = source.features; fields = source.fields; cover = source.cover; villages = source.villages;
             this.coarse = coarse;
@@ -60,10 +64,12 @@ namespace DroneSandbox
             this.villages = villages ?? new VillagePlan(seed, roads, WorldPlan.Settlements);
             var streets = new List<Segment>(roads); streets.AddRange(this.villages.lanes);
             this.roads = streets.ToArray(); this.rivers = rivers; this.coarse = coarse;
+            roadNetwork = new RoadNetwork(this.roads);
             lakes = new LakeShore[WorldPlan.Lakes.Count];
             for (int i = 0; i < lakes.Length; i++) lakes[i] = new LakeShore(WorldPlan.Lakes[i]);
             cover = new FarDetailCover(seed, covers, count);
             fields = new FarFieldPlan(seed, roads, cover, Height);
+            roadGates = new RoadGatePlan(fields, roadNetwork);
             var cells = new Dictionary<long, List<Segment>>();
             foreach (var s in rivers)
             {
@@ -285,7 +291,7 @@ namespace DroneSandbox
                 float walked = 0f;
                 for (int k = 1; k < road.points.Count; k++)
                 {
-                    float width = road.kind == RoadClass.Highway ? 3.5f : road.kind == RoadClass.Road ? 2f : 1.5f;
+                    float width = RoadAppearance.HalfWidth(road.kind);
                     roads.Add(new FarDetailData.Segment { ax = road.points[k - 1].x, az = road.points[k - 1].y, bx = road.points[k].x, bz = road.points[k].y, widthA = width, widthB = width, kind = (int)road.kind, route = route, walked = walked });
                     walked += Vector2.Distance(road.points[k - 1], road.points[k]);
                 }

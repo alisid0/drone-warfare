@@ -43,6 +43,7 @@ namespace DroneSandbox
                     // Garden boundaries also belong to the shared plan, not the terrain's broad grass splat.
                     if (detail != null && detail.villages.At(new Vector2(x + origin.x, z + origin.y), out _)) continue;
                     if (detail != null && detail.NearWaterPaint(x + origin.x, z + origin.y, pixel)) continue;
+                    if (detail != null && detail.roadNetwork.At(x + origin.x, z + origin.y).edge < 4f + pixel) continue;
                     int side = Mathf.Abs(x) > Mathf.Abs(z) ? (x < 0 ? 0 : 1) : (z < 0 ? 2 : 3);
                     float along = side < 2 ? z : x;
                     float u = Mathf.Clamp01((along + half) / Ground.Size) * (edges[side].Length - 1);

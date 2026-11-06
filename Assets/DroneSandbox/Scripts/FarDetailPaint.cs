@@ -92,8 +92,15 @@ namespace DroneSandbox
             if (bank < 0f) strength = 0;
             if (lakeBank < 5f) layer = 2;
             if (lakeBank < 0f) strength = 0;
-            Road(x, z, lanes ?? roads, out float edge, out int kind, out _);
-            if (edge < 0f) { layer = 2; strength = kind == 0 ? (byte)50 : (byte)255; }
+            var road = roadNetwork.At(x, z);
+            if (road.found && road.edge < 2f) { layer = road.edge > .65f ? 4 : 0; strength = 255; angle = 0f; }
+            if (road.found && road.edge < 0f)
+            {
+                if (road.kind != RoadClass.Track) { layer = 2; strength = 50; }
+                else { layer = RoadAppearance.Ruts(road.across, road.along, .5f) > .3f ? 2 : 0; strength = 180; }
+            }
+            if (road.found && road.edge > 0f && road.edge < 25f && roadGates.Paint(Vector3.zero, x, z, road, .5f).sqrMagnitude > .0001f)
+            { layer = 2; strength = 180; angle = 0f; }
             int turn = (int)Math.Round(angle / Math.PI * 65535);
             return new Color32((byte)layer, (byte)(turn & 255), (byte)(turn >> 8), strength);
         }
@@ -113,15 +120,13 @@ namespace DroneSandbox
             // Inlets and outlets stay open through the shore band; a dry rim must never cross a river mouth.
             float mouth = BandCoverage(-bank, riverWidth, pixel) * (1f - Coverage(-lakeBank, pixel));
             c = Blend(basin, c, mouth);
-            Road(x, z, lanes, out float edge, out int kind, out float roadWidth);
-            c = Blend(c, FarDetailPalette.Means[4], BandCoverage(2f - edge, roadWidth + 2f, pixel));
-            Vector3 road = kind == 0 ? RoadColour : FarDetailPalette.Means[2];
-            return Blend(c, road, BandCoverage(-edge, roadWidth, pixel));
+            var road = roadNetwork.At(x, z);
+            c = RoadAppearance.Paint(c, road, pixel, land.Weight(Cover.Farmland) > .5f);
+            return land.Weight(Cover.Farmland) > .5f ? roadGates.Paint(c, x, z, road, pixel) : c;
         }
 
         static readonly Vector3 WaterColour = WaterAppearance.Lake;
         // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
-        static readonly Vector3 RoadColour = FarDetailPalette.Decode(C(78, 78, 80));
         static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
 
         // The ground of a wood seen from above, between and under its crowns: half the sector's litter, half shaded damp

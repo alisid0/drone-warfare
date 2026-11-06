@@ -199,7 +199,7 @@ namespace DroneSandbox
                 widthA = width,
                 widthB = width,
                 route = 10000 + id,
-                kind = (int)RoadClass.Track
+                kind = (int)(width >= 1.9f ? RoadClass.Road : RoadClass.Track)
             };
             lanes.Add(s);
             streets?.Add(s);
