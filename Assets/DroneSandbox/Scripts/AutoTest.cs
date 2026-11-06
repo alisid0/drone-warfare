@@ -659,6 +659,7 @@ namespace DroneSandbox
                           $"forest build {ForestHlod.BuildMs:F2} ms");
             rts.LookAt(new Vector3(1200f, 0f, 400f), 2500f, 60f);
             yield return new WaitForSecondsRealtime(1.5f);
+            yield return ForestMassesSettle("81_world_horizon");
             yield return Shot("81_world_horizon");
             log.WriteLine($"World scatter: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, houses {FarScatter.HousesDrawn}; " +
                           $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
@@ -743,7 +744,8 @@ namespace DroneSandbox
             yield return WorldMapCheck(game, rts, swift);
             Vector2 forest = ForestHlod.LargestForest() - FarTerrain.Origin;
             rts.LookAt(new Vector3(forest.x, 0f, forest.y), 2500f, 35f);
-            yield return new WaitForSecondsRealtime(6f);
+            yield return new WaitForSecondsRealtime(2f);
+            yield return ForestMassesSettle("88_world_forest_hlod");
             yield return Shot("88_world_forest_hlod");
             log.WriteLine($"World scatter: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, houses {FarScatter.HousesDrawn}; " +
                           $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
@@ -1262,6 +1264,9 @@ namespace DroneSandbox
                 photo.PlaceLooking(eye, Ground.OnGround((baseAt + hq) / 2f), 55f);
                 yield return new WaitForSeconds(1.5f);
                 yield return Shot($"31_sector_{n:00}_{kind}");
+                // What of the woods this view drew: hd145's dense forest drew nothing in a Deep Forest sector.
+                log.WriteLine($"  forest drawn: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, " +
+                              $"canopy blocks {ForestHlod.BlocksDrawn} of {ForestHlod.CachedBlocks} cached, {World.TreeCount} sector trees");
                 photo.Exit();
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
@@ -2049,6 +2054,22 @@ namespace DroneSandbox
             log.WriteLine(cost.ToString());
             Set(bounceOn, true, microOn, true, 2048);
             Atmosphere.ApplyQuality(Camera.main);
+        }
+
+        // The far forest builds a block at a time in a sliver of each frame, nearest first: hd144's forest shot caught
+        // 3 blocks after 6 s and showed bare ground for forest. Waits until no block has come for 2 s, up to 40 s.
+        IEnumerator ForestMassesSettle(string shot)
+        {
+            float waited = 0f, still = 0f;
+            int last = -1;
+            while (waited < 40f && still < 2f)
+            {
+                yield return new WaitForSecondsRealtime(0.25f);
+                waited += 0.25f;
+                if (ForestHlod.CachedBlocks != last) { last = ForestHlod.CachedBlocks; still = 0f; }
+                else still += 0.25f;
+            }
+            log.WriteLine($"{shot}: forest masses settled at {ForestHlod.CachedBlocks} blocks after {waited:F1} s");
         }
 
         IEnumerator Shot(string name)
