@@ -364,6 +364,7 @@ namespace DroneSandbox
             }
 
             // Use one height function for all tiers; averaging coarse vertices used to split shared block edges.
+            // Every block of a session shares data.local, so crown bumps never differ across a shared perimeter.
             float Height(int x, int z)
             {
                 int key = SampleIndex(x, z);
@@ -374,7 +375,7 @@ namespace DroneSandbox
                 else if (sampled[key]) return heights[key].y;
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
-                float relief = ForestPattern.Canopy(stand, world.x, world.y);
+                float relief = ForestPattern.Canopy(stand, world.x, world.y, data.local);
                 float floor = data.sampledGround != null ? data.sampledGround[key] : FarScatter.GroundAt(world - FarTerrain.Origin);
                 float height = floor + relief - 0.3f;
                 if (coarseHeights != null) coarseHeights.Add(key, new Vector2(floor, height));
@@ -453,7 +454,8 @@ namespace DroneSandbox
                 return index;
             }
 
-            // Entirely empty triangles disappear, while young margins descend gently into the actual ground.
+            // Only triangles outside the wood mask disappear; glades keep the understorey apron, so no level opens a hole
+            // onto coarser terrain, and the card fade still reveals the real glade floor near the camera.
             public void Face(int a, int b, int c)
             {
                 if (samples != null) return;

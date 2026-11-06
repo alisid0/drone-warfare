@@ -200,7 +200,7 @@ void GetLayerTexCoord(FragInputs input, inout LayerTexCoord layerTexCoord)
 
 void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs posInput, out SurfaceData surfaceData, out BuiltinData builtinData RAY_TRACING_OPTIONAL_PARAMETERS)
 {
-    ForestFade(input.positionRWS, input.texCoord0.xy);
+    ForestFade(input.positionRWS, input.texCoord0.xy, posInput.positionSS);
     // Fix case 1210058. With Lit.shader / LayeredLit.shader we always have UV1. But in the case of some SpeedTree mesh, there is no stream sent
     // and UV1 is corrupt when we use surface gradient. In case UV1 aren't required we set them to 0, so we ensure there is no garbage.
     // When using lightmaps, the uv1 is always valid but we don't update _UVMappingMask.y to 1

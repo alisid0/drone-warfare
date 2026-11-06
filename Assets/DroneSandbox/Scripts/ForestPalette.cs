@@ -15,6 +15,7 @@ namespace DroneSandbox
         public static readonly float[] RadiusPerHeight = { 0.39738891f, 0.17586441f, 0.21163066f, 0.21589965f };
         public static readonly Color Ground = new Color(49f / 255f, 70f / 255f, 45f / 255f).linear;
         public static readonly Color Meadow = new Color(105f / 255f, 126f / 255f, 86f / 255f).linear;
+        static readonly Color GladeFloor = Color.Lerp(Meadow, Ground, 0.3f);
         static readonly Color32[] PhotoColours = { new Color32(77, 98, 51, 255), new Color32(99, 116, 61, 255),
             new Color32(64, 87, 58, 255), new Color32(80, 99, 64, 255) };
         static readonly byte[] Pictures = System.Convert.FromBase64String(
@@ -96,14 +97,18 @@ namespace DroneSandbox
         }
 
         // Ten-to-25-metre crowns ride on 40-to-120-metre masses; coarse texels integrate away the small crowns.
+        // A glade fills only part of a coarse texel and its floor lies partly in crown shade, so it brightens less from afar.
         public static Color Surface(ForestPattern.Stand stand, float x, float z, float footprint)
         {
-            Color colour = Color.Lerp(Meadow, Linear(stand), Mathf.SmoothStep(0f, 1f, stand.cover)).gamma;
-            float fine = Mathf.Clamp01((32f - footprint) / 24f);
-            float light = ((ForestPattern.Noise(x, z, 13f, 33) - 0.5f) * 24f
-                + (ForestPattern.Noise(x + 8f, z - 3f, 23f, 82) - 0.5f) * 8f) * fine
-                + (ForestPattern.Noise(x, z, 57f, 83) - 0.5f) * 12f
-                + (ForestPattern.Noise(x - 21f, z, 113f, 84) - 0.5f) * 8f;
+            float woodOpen = 1f - Mathf.SmoothStep(0f, 1f, stand.wood);
+            float gladeOpen = Mathf.Max(0f, 1f - Mathf.SmoothStep(0f, 1f, stand.cover) - woodOpen);
+            Color floor = Color.Lerp(GladeFloor, Meadow, woodOpen / Mathf.Max(0.0001f, woodOpen + gladeOpen));
+            float open = woodOpen + gladeOpen * Mathf.Lerp(0.8f, 0.5f, Mathf.Clamp01((footprint - 16f) / 48f));
+            Color colour = Color.Lerp(Linear(stand), floor, open).gamma;
+            // Highlights follow the correlated stand height, so sunlit tall crowns group instead of forming texel-sized spots.
+            float light = (stand.age - 0.5f) * 12f
+                + (ForestPattern.Noise(x, z, 57f, 83) - 0.5f) * 8f
+                + (ForestPattern.Noise(x - 21f, z, 113f, 84) - 0.5f) * 6f;
             colour.r += light / 255f; colour.g += light / 255f; colour.b += light * 0.8f / 255f;
             // Alpha weights crown detail only; lighting supplies rim shade instead of baking a dark ring.
             colour.a = stand.cover;
