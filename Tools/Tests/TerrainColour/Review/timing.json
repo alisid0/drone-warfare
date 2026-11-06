@@ -1,0 +1,43 @@
+{
+ "note": "Managed .NET 8 harness on a busy 15 GB machine, best of three alternating before/after runs (Temp/terrain-colour/timing2), branch at 92cbd55 (before the MapLayout outline change). Sector numbers are the production builders; tiles, regional pages and the world block are worker costs, not main-thread streaming stages.",
+ "sector4-before": {
+  "layoutMs": 233.0,
+  "groundBuildMs": 561.9,
+  "splatMs": 490.1,
+  "farmlandBuildMs": 518.8,
+  "fieldMarginsMs": 51.4,
+  "tileMs": 54.4,
+  "regionalPageMs": 184.6,
+  "worldBlockMs": 1292.7
+ },
+ "sector4-after": {
+  "layoutMs": 236.0,
+  "groundBuildMs": 393.0,
+  "splatMs": 323.2,
+  "farmlandBuildMs": 466.6,
+  "fieldMarginsMs": 17.1,
+  "tileMs": 54.7,
+  "regionalPageMs": 205.3,
+  "worldBlockMs": 1325.1
+ },
+ "sector9-before": {
+  "layoutMs": 272.8,
+  "groundBuildMs": 644.7,
+  "splatMs": 652.7,
+  "farmlandBuildMs": 524.5,
+  "fieldMarginsMs": 51.6,
+  "tileMs": 53.5,
+  "regionalPageMs": 192.3,
+  "worldBlockMs": 1210.0
+ },
+ "sector9-after": {
+  "layoutMs": 274.3,
+  "groundBuildMs": 473.3,
+  "splatMs": 474.3,
+  "farmlandBuildMs": 453.2,
+  "fieldMarginsMs": 13.6,
+  "tileMs": 54.2,
+  "regionalPageMs": 216.3,
+  "worldBlockMs": 1253.7
+ }
+}

@@ -14,6 +14,7 @@ namespace DroneSandbox
         readonly FarDetailCover cover;
         readonly Func<float, float, float> height;
         readonly District[] districts = new District[Count * Count];
+        readonly Vector2[] sites = new Vector2[Count * Count];
         readonly object[] gates = new object[64];
         readonly Dictionary<long, FarDetailData.Segment[]> roadCells = new Dictionary<long, FarDetailData.Segment[]>();
         long buildTicks;
@@ -26,6 +27,8 @@ namespace DroneSandbox
         {
             this.seed = seed; this.cover = cover; this.height = height;
             for (int i = 0; i < gates.Length; i++) gates[i] = new object();
+            // Every pasture texel now asks for its district, so the jittered sites are hashed once, not nine times a query.
+            for (int j = 0; j < Count; j++) for (int i = 0; i < Count; i++) sites[j * Count + i] = SiteAt(First + i, First + j);
             var index = new Dictionary<long, List<FarDetailData.Segment>>();
             foreach (var s in roads)
             {
@@ -48,6 +51,7 @@ namespace DroneSandbox
             public int x, z;
             public Vector2 site, along;
             public float angle, width, slope, settlement, hedgeDensity, fallow;
+            public int hash;
             public Vector2[] outline;
             public Parcel[] parcels;
             internal int firstStrip;
@@ -83,10 +87,28 @@ namespace DroneSandbox
                         across = pv - lo, along = pu - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = sideUse == (int)FieldEdge.Hedge,
                         hedgeEnd = endUse == (int)FieldEdge.Hedge, sideUse = sideUse, endUse = endUse,
                         sideMargin = FieldAppearance.MarginFor(sideUse, x, z), endMargin = FieldAppearance.MarginFor(endUse, x, z),
-                        gateDistance = score < 3f ? FieldAppearance.GateDistance(pu,pv,p.u0,p.u1,p.a0,p.a1,p.b0,p.b1) : float.MaxValue };
+                        gateDistance = score < 3f ? FieldAppearance.GateDistance(pu,pv,p.u0,p.u1,p.a0,p.a1,p.b0,p.b1) : float.MaxValue,
+                        shade = Shade(this, p), soil = Soil(this, p) };
                     if (score >= 0f) return best;
                 }
                 return best;
+            }
+
+            // Which pasture paddock a point lies in (0-1 from its strip slot, below 0 outside the strips), and how far it
+            // is from that paddock's fences. Long slots are halved, so paddocks run about 50-240 m.
+            public float Paddock(float x, float z, out float boundary)
+            {
+                float dx = x - site.x, dz = z - site.y;
+                float u = dx * along.x + dz * along.y, v = -dx * along.y + dz * along.x;
+                boundary = 0f;
+                int row = (int)Math.Floor(v / width) - firstStrip;
+                if (row < 0 || row >= strips.Length) return -1f;
+                var strip = strips[row];
+                float length = strip.length > 240f ? strip.length * .5f : strip.length;
+                float w = (u - strip.offset) / length, r = v / width;
+                int column = (int)Math.Floor(w);
+                boundary = Math.Min(Math.Min(w - column, column + 1 - w) * length, Math.Min(r - (float)Math.Floor(r), (float)Math.Floor(r) + 1 - r) * width);
+                return FieldAppearance.Shade(column, row + firstStrip, hash, 91);
             }
         }
 
@@ -109,6 +131,24 @@ namespace DroneSandbox
                     along = along, halfLength = length * .5f, halfWidth = width * .25f,
                     taper = (b1 - b0 - a1 + a0) / width, shear = (b0 + b1 - a0 - a1) / (2f * length), crop = crop, edges = edges };
             }
+
+            // The parcel's middle in world metres, exactly as Plot places it before the sector origin is taken off.
+            public Vector2 Centre(District district)
+            {
+                Vector2 along = cross ? new Vector2(-district.along.y, district.along.x) : district.along;
+                return district.site + along * ((u0 + u1) * .5f) + new Vector2(-along.y, along.x) * ((a0 + a1 + b0 + b1) * .25f);
+            }
+        }
+
+        // One field's own shade from its parcel's stored edges, so the sector's crop mesh and every painter agree exactly.
+        public static float Shade(District district, Parcel p) =>
+            FieldAppearance.Shade(district.x, district.z, (int)Math.Floor(p.u0 * 8f) ^ (p.cross ? 1 << 30 : 0), (int)Math.Floor((p.a0 + p.b1) * 8f));
+
+        // The soil band under a field, taken at its middle so one field is one soil.
+        public static float Soil(District district, Parcel p)
+        {
+            Vector2 c = p.Centre(district);
+            return FieldAppearance.Soil(c.x, c.y);
         }
 
         // Strip offsets stagger cross-boundaries, while every slot still has constant-time lookup.
@@ -163,7 +203,7 @@ namespace DroneSandbox
         District BuildDistrict(int x, int z)
         {
             int hash = Hash(x, z);
-            var d = new District { x = x, z = z, site = Site(x, z) };
+            var d = new District { x = x, z = z, site = Site(x, z), hash = hash };
             float sx = d.site.x, sz = d.site.y;
             d.slope = height == null ? 0f : (float)Math.Sqrt(Math.Pow((height(sx + 96f, sz) - height(sx - 96f, sz)) / 192f, 2)
                 + Math.Pow((height(sx, sz + 96f) - height(sx, sz - 96f)) / 192f, 2));
@@ -404,6 +444,13 @@ namespace DroneSandbox
 
         // Preserve the old jittered sites so before/after topology audits compare the same 500 districts.
         public Vector2 Site(int x, int z)
+        {
+            int i = x - First, j = z - First;
+            return i >= 0 && j >= 0 && i < Count && j < Count ? sites[j * Count + i] : SiteAt(x, z);
+        }
+
+        // The jittered site itself, from the stable hash.
+        Vector2 SiteAt(int x, int z)
         { int h = Hash(x, z); return new Vector2((x + .15f + .7f * (h & 1023) / 1023f) * DistrictSize, (z + .15f + .7f * (h >> 10 & 1023) / 1023f) * DistrictSize); }
 
         // Stable integer hashing is independent of thread scheduling and sector-local RNG consumption.

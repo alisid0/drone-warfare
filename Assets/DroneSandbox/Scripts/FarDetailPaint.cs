@@ -53,6 +53,7 @@ namespace DroneSandbox
         {
             public int layer, use, sideUse, endUse; // FieldEdge of the nearest side and end
             public float worldX, worldZ, gateDistance, angle, projection, across, along, width, length, side, end, districtEdge, sideMargin, endMargin;
+            public float shade, soil; // the parcel's own variation and the soil band under it (FieldPalette.CropTint)
             public bool hedge, hedgeEnd; // the nearest side or end is a woody boundary
         }
 
@@ -73,13 +74,21 @@ namespace DroneSandbox
             float bank = Bank(x, z, streams ?? rivers, out _);
             float lakeBank = LakeBank(x, z, 2f, out _);
             if (cover == Cover.Water) cover = Cover.Pasture; // vector water below owns the visible edge
-            int layer = cover == Cover.Farmland ? 4 : GroundLayer(cover, x, z); float angle = 0f;
+            int layer = -1; float angle = 0f;
             byte strength = 255;
             if (land.Weight(Cover.Farmland) > 0f)
             {
-                var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
-                if (f.side < f.sideMargin || f.end < f.endMargin || f.use > 2 || FieldAppearance.Patch(x, z) > .4f) layer = 4;
+                // Crop rows inside the cultivated part; a rough margin keeps the dry-grass texture, strips and the
+                // grass between fields the meadow's. Damp hollows stay the same crop, only darker.
+                var f = FieldAt(x, z); angle = f.angle;
+                if (f.layer >= 5 && f.side >= 0f && f.end >= 0f)
+                {
+                    bool margin = f.side < f.sideMargin || f.end < f.endMargin;
+                    int use = f.side - f.sideMargin < f.end - f.endMargin ? f.sideUse : f.endUse;
+                    layer = f.use > 2 ? 4 : !margin ? f.layer : use == (int)FieldEdge.Wide ? 4 : 0;
+                }
             }
+            if (layer < 0) layer = GroundLayer(cover == Cover.Farmland ? Cover.Pasture : cover, x, z);
             // A garden painted over farmland must also suppress that field's procedural crop rows.
             if (villages.At(new Vector2(x, z), out var garden))
             {
@@ -113,7 +122,7 @@ namespace DroneSandbox
             float bank = Bank(x, z, streams, out float riverWidth);
             var land = cover.At(x, z);
             Vector3 c = CoverColour(x, z, pixel, land);
-            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Pasture, x, z));
+            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Village, x, z, pixel));
             c = PaintRiver(c, bank, riverWidth, pixel);
             float lakeBank = LakeBank(x, z, pixel, out bool reservoir);
             Vector3 basin = PaintLake(c, lakeBank, reservoir, pixel);
@@ -128,6 +137,8 @@ namespace DroneSandbox
         static readonly Vector3 WaterColour = WaterAppearance.Lake;
         // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
         static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
+        // A grass strip along a field edge (and between an orchard's rows), and a rough uncut margin (FieldPalette, as the sector's meshes).
+        static readonly Vector3 StripColour = FieldPalette.Strip, RoughColour = FieldPalette.Rough;
 
         // The ground of a wood seen from above, between and under its crowns: half the sector's litter, half shaded damp
         // grass (sRGB about 63, 73, 50, near ChatGPT's dense-canopy shadow). Plain litter showed brown halos round the
@@ -142,12 +153,12 @@ namespace DroneSandbox
             {
                 if (s.a == Cover.Farmland) return Blend(FarmColour(x, z, pixel), WoodFloor, wood);
                 if (s.a == Cover.Forest && wood == 1f) return WoodFloor;
-                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water) return GroundColour(s.a, x, z);
+                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water) return GroundColour(s.a, x, z, pixel);
             }
-            Vector3 grass = GroundColour(Cover.Pasture, x, z);
+            Vector3 grass = GroundColour(Cover.Pasture, x, z, pixel);
             Vector3 farm = s.Weight(Cover.Farmland) > 0f ? FarmColour(x, z, pixel) : grass;
             Vector3 Colour(Cover kind) => kind == Cover.Farmland ? farm
-                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Village || kind == Cover.Water ? grass : GroundColour(kind, x, z);
+                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Village || kind == Cover.Water ? grass : GroundColour(kind, x, z, pixel);
             Vector3 c;
             if (s.a == s.b && s.a == s.c && s.a == s.d) c = Colour(s.a);
             else c = Blend(Blend(Colour(s.a), Colour(s.b), s.u), Blend(Colour(s.c), Colour(s.d), s.u), s.v);
@@ -155,24 +166,33 @@ namespace DroneSandbox
         }
 
         // Only coarse crop pixels need four ownership samples; cover, grass noise and vector masks are evaluated once.
+        // The broad hollow under a pixel is shared by its quarter samples, and so is the meadow between parcels.
         Vector3 FarmColour(float x, float z, float pixel)
         {
             var f = FieldAt(x, z);
-            if (pixel <= 4.01f || f.layer >= 5 && Math.Min(f.side, f.end) > pixel) return FieldColour(f, pixel);
+            float low = Low(x, z);
+            if (pixel <= 4.01f || f.layer >= 5 && Math.Min(f.side, f.end) > pixel) return FieldColour(f, x, z, pixel, low);
             float q = pixel * .25f;
-            return (FieldColour(FieldAt(x - q, z - q), pixel * .5f) + FieldColour(FieldAt(x + q, z - q), pixel * .5f)
-                + FieldColour(FieldAt(x - q, z + q), pixel * .5f) + FieldColour(FieldAt(x + q, z + q), pixel * .5f)) * .25f;
+            Vector3 meadow = Vector3.zero; bool hasMeadow = false;
+            Vector3 Part(float px, float pz)
+            {
+                var s = FieldAt(px, pz);
+                if (s.layer >= 5) return FieldColour(s, px, pz, pixel * .5f, low);
+                if (!hasMeadow) { meadow = GroundColour(Cover.Pasture, x, z, pixel); hasMeadow = true; }
+                return meadow;
+            }
+            return (Part(x - q, z - q) + Part(x + q, z - q) + Part(x - q, z + q) + Part(x + q, z + q)) * .25f;
         }
 
         // Match Ground's grass layering and high-ground bias; the sector collar uses its actual splat weights.
-        Vector3 GroundColour(Cover cover, float x, float z)
+        Vector3 GroundColour(Cover cover, float x, float z, float pixel = 2f)
         {
             if (cover == Cover.Water) return WaterColour;
             if (cover == Cover.Rock) return FarDetailPalette.Means[3];
             if (cover == Cover.Wetland) return FarDetailPalette.Means[1];
             if (cover == Cover.Forest) return WoodFloor;
-            Grass(x, z, out float wet, out float rough);
-            return Blend(Blend(FarDetailPalette.Means[0], FarDetailPalette.Means[4], rough), FarDetailPalette.Means[1], wet);
+            Grass(x, z, pixel, cover == Cover.Pasture || cover == Cover.Farmland, out float wet, out float rough, out float soil);
+            return FieldPalette.Grass(wet, rough, soil);
         }
 
         // Dominant fine texture only; the macro colour retains continuous grass mixtures without extra samplers.
@@ -180,17 +200,34 @@ namespace DroneSandbox
         {
             if (cover == Cover.Rock) return 3;
             if (cover == Cover.Wetland || cover == Cover.Forest) return 1;
-            Grass(x, z, out float wet, out float rough);
+            Grass(x, z, 2f, cover == Cover.Pasture || cover == Cover.Farmland, out float wet, out float rough, out _);
             return wet > .4f ? 1 : rough > .3f ? 4 : 0;
         }
 
-        // Ground.BuildSplat's wet/rough transfer; broad colour variation stays small and tied to the terrain.
-        void Grass(float x, float z, out float wet, out float rough)
+        // Ground.BuildSplat's grass: drainage (broad hollows damp, high ground dry) with the broad drift only nudging it,
+        // then the shared paddock use and 12-35 m grazing drifts (FieldAppearance.Grass). Gardens and town ground keep
+        // the plain meadow.
+        void Grass(float x, float z, float pixel, bool paddocks, out float wet, out float rough, out float soil)
         {
             float drift = Noise(x / 80f + 70f, z / 80f + 20f) * .65f + Noise(x / 25f + 9f, z / 25f + 4f) * .35f;
             float high = Smooth((Height(x, z) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
-            float wetness = Clamp(.5f - .45f * high - .7f * (drift - .5f), 0, 1);
-            wet = .8f * Smooth((wetness - .55f) / .4f); rough = .55f * Smooth((.45f - wetness) / .4f);
+            float hollow = Smooth((Low(x, z) - .3f) / 1.6f);
+            float wetness = Clamp(.5f + .75f * hollow - .45f * high - .3f * (drift - .5f), 0, 1);
+            float amount = 0f, paddock = paddocks ? Paddock(x, z, pixel, out amount) : -1f;
+            FieldAppearance.Grass(x, z, wetness, paddock, amount, pixel, out wet, out rough, out soil);
+        }
+
+        // The pasture paddock at a point (0-1, below 0 for none) and how strongly its use shows: faded to a neutral
+        // fence line at its edge and away from open pasture and farmland. Shared with the sector splat.
+        public float Paddock(float x, float z, float pixel, out float amount)
+        {
+            amount = 0f;
+            var land = cover.At(x, z);
+            float pastoral = land.Weight(Cover.Pasture) + land.Weight(Cover.Farmland);
+            if (pastoral <= 0f) return -1f;
+            float kind = fields.At(x, z).Paddock(x, z, out float boundary);
+            if (kind >= 0f) amount = pastoral * Coverage(boundary - 1f, pixel);
+            return kind;
         }
 
         // One bounded parcel definition supplies the painters, sector meshes and high-frequency row orientation.
@@ -199,25 +236,36 @@ namespace DroneSandbox
             return fields.At(x, z).Sample(x, z);
         }
 
-        // The same crop means as the sector, with footprint-integrated boundary strips rather than thresholded pixels.
-        Vector3 FieldColour(FieldSample f, float pixel)
+        // The same crops as the sector's meshes (FieldAppearance.Crop: this field's hue, value and soil, growth drifts and a
+        // soft damp hollow), with footprint-integrated margins per edge rather than thresholded pixels: a grass strip,
+        // a rough uncut margin or a field track, and crop right to a bare edge. Outside every parcel lies the meadow.
+        Vector3 FieldColour(FieldSample f, float x, float z, float pixel, float low)
         {
-            if (f.layer < 5) return FarDetailPalette.Means[4];
-            Vector3 c = FieldAppearance.Colour(f.layer, f.worldX, f.worldZ, Math.Min(f.side - f.sideMargin, f.end - f.endMargin), pixel, 0f);
+            if (f.layer < 5) return GroundColour(Cover.Pasture, x, z, pixel);
+            float projection = f.projection, footprint = pixel * projection;
+            float edge = Math.Min(f.side - f.sideMargin, f.end - f.endMargin);
+            Vector3 c = FieldAppearance.Crop(f.layer, f.worldX, f.worldZ, pixel, f.shade, f.soil, FieldAppearance.Damp(f.worldX, f.worldZ, low), edge);
             if (f.use == 3 || f.use == 4)
             {
                 float pitch = f.use == 3 ? 10f : 5f, width = f.use == 3 ? 2.8f : 1.5f;
-                float row = PeriodicBand(f.across + width, pitch, 2f * width, pixel * f.projection);
-                c = Blend(FarDetailPalette.Means[4], f.use == 3 ? FarDetailPalette.Means[1] * .8f : FarDetailPalette.Means[6], row);
+                float row = PeriodicBand(f.across + width, pitch, 2f * width, footprint);
+                c = Blend(StripColour, f.use == 3 ? FarDetailPalette.Means[1] * .8f : FarDetailPalette.Means[6], row);
             }
-            float projection = f.projection, footprint = pixel * projection;
+            float inSide = Coverage(f.side - f.sideMargin, footprint), inEnd = Coverage(f.end - f.endMargin, footprint);
+            if (inSide * inEnd < 1f)
+            {
+                float a = 1f - inSide, b = 1f - inEnd;
+                Vector3 edgeColour = (MarginColour(f.sideUse) * a + MarginColour(f.endUse) * b) / (a + b);
+                c = Blend(edgeColour, c, inSide * inEnd);
+            }
             // Field tracks: two worn wheel lines inside the uncultivated edge, grass between them.
             float ruts = 0f;
             if (f.sideUse == (int)FieldEdge.Track) ruts = Math.Max(ruts, BandCoverage(f.side - .55f, .28f, footprint) + BandCoverage(f.side - 2.3f, .28f, footprint));
             if (f.endUse == (int)FieldEdge.Track) ruts = Math.Max(ruts, BandCoverage(f.end - .55f, .28f, footprint) + BandCoverage(f.end - 2.3f, .28f, footprint));
             c = Blend(c, FarDetailPalette.Means[2], Math.Min(1f, ruts) * .8f);
+            // Outside the parcel the meadow runs to the crop, as in the sector's splat (no uncut frame).
             float crop = Coverage(f.side, footprint) * Coverage(f.end, footprint);
-            Vector3 margin = Blend(FarDetailPalette.Means[4], c, crop);
+            Vector3 margin = crop < 1f ? Blend(GroundColour(Cover.Pasture, x, z, pixel), c, crop) : c;
             // A hedge stands on the parcel's own edge, as Farmland builds it, with an opening at the gate.
             float side = Math.Max(f.hedge ? BandCoverage(.85f - Math.Abs(f.side), .85f, footprint) : 0f,
                 f.hedgeEnd ? BandCoverage(.85f - Math.Abs(f.end), .85f, footprint) : 0f);
@@ -235,8 +283,11 @@ namespace DroneSandbox
         static readonly Vector3 VillageSoil=FarDetailPalette.Decode(new Color(.26f,.20f,.12f));
         static readonly Vector3 VillageGravel=FarDetailPalette.Decode(new Color(.43f,.41f,.35f));
 
+        // An edge's uncultivated colour: rough for a wide margin, otherwise a grass strip (a track's grass, a hedge's foot).
+        static Vector3 MarginColour(int use) => use == (int)FieldEdge.Wide ? RoughColour : StripColour;
+
         // Exposed for the deterministic field/mask harness.
-        public Color32 Field(float x, float z) => FarDetailPalette.Encode(FieldColour(FieldAt(x, z), 2f));
+        public Color32 Field(float x, float z) => FarDetailPalette.Encode(FieldColour(FieldAt(x, z), x, z, 2f, Low(x, z)));
 
         // Union distances avoid painting a polyline's bends repeatedly and darkening road junctions.
         static void Road(float x, float z, Segment[] lanes, out float edge, out int kind, out float halfWidth)

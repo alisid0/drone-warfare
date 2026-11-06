@@ -123,9 +123,13 @@ namespace DroneSandbox
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var renderer = go.AddComponent<MeshRenderer>();
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            // Each field a slightly different shade, like real ones.
-            float shade = 0.9f + (float)rng.NextDouble() * 0.18f;
-            var tint = new Color(shade, shade, shade * (0.94f + (float)rng.NextDouble() * 0.08f));
+            // Each field its own hue and value, as the distant painter shows the same parcel (FieldPalette.CropTint):
+            // how far its crop has ripened or greened, its own shade and the soil band under it. The two draws keep the
+            // farm's random stream, and so its bales and hedge trees, where they were.
+            rng.NextDouble(); rng.NextDouble();
+            Vector2 middle = surface.center + (MapLayout.Plan.world != null ? MapLayout.Plan.world.center : Vector2.zero);
+            Vector3 linear = FieldPalette.CropTint(5 + (int)plot.crop, FarFieldSurface.Shade(plot), FieldAppearance.Soil(middle.x, middle.y));
+            var tint = new Color(Mathf.LinearToGammaSpace(linear.x), Mathf.LinearToGammaSpace(linear.y), Mathf.LinearToGammaSpace(linear.z));
             if (fieldTemplate == null) fieldTemplate = Resources.Load<Material>("Materials/FieldLit");
             var material = fieldTemplate != null ? new Material(fieldTemplate) { color = tint } : Art.NewMaterial(tint);
             made.Add(material);
@@ -150,11 +154,11 @@ namespace DroneSandbox
 
         // ---- What shows from the air ----
 
-        // A field's detail map, one byte per 25 cm: HDRP darkens or lightens the crop by how far it is from a half
+        // A field's detail map, one byte per 50 cm: HDRP darkens or lightens the crop by how far it is from a half
         // (FieldLit ignores the detail map's normal and smoothness, so the red channel is all it needs).
-        // Low-frequency growth is sampled on a 2 m grid (about 64 times fewer noise calls); wheel tracks still
-        // use 50 cm texels. Its pattern is picked by where the field lies, not from the map's random numbers, so the rest of the map
-        // (built from the same sequence) comes out as before.
+        // Growth drifts and damp hollows are sampled on a 2 m grid (about 64 times fewer noise calls); wheel tracks
+        // still use 50 cm texels. Both come from world positions shared with the distant painter, not from the map's
+        // random numbers, so the rest of the map (built from the same sequence) comes out as before.
         static Texture2D FieldDetail(FieldPlot plot)
         {
             float width = plot.halfWidth * 2f, length = plot.halfLength * 2f;
@@ -172,10 +176,11 @@ namespace DroneSandbox
                     float across = x * 2f, along = y * 2f;
                     // Match the physical world coordinates of the distant painter, including tapered parcels.
                     Vector2 point = plot.center + plot.along * (along - length * .5f) + plot.Across * (across - width * .5f);
+                    // Damp gathers where the sector's own ground lies below its surroundings (the hollows its light shows).
+                    float low = Ground.LowAt(point);
                     if (MapLayout.Plan.world != null) point += MapLayout.Plan.world.center;
                     else point += FieldPlot.Warp(point);
-                    growth[y * nw + x] = new Vector2(FieldAppearance.Growth(point.x, point.y),
-                        plot.crop == Crop.Wheat ? FieldAppearance.Patch(point.x, point.y) : 0f);
+                    growth[y * nw + x] = new Vector2(FieldAppearance.Growth(point.x, point.y), FieldAppearance.Damp(point.x, point.y, low));
                 }
             });
             var bytes = new byte[w * h];
@@ -208,17 +213,17 @@ namespace DroneSandbox
         // How much lighter (above 1) or darker the crop is at this spot, in metres across and along the field.
         static float Brightness(Crop crop, float across, float along, float width, float length, float seed, float tramOffset, Vector2 noise)
         {
-            // Drifts of better and worse growth (soil, damp, how the seed fell), bigger and smaller.
+            // Drifts of better and worse growth (soil, damp, how the seed fell) over 12-35 m, as the distant painter
+            // draws them, and a soft damp hollow: the same crop, darker and taller, never a different material.
             float drift = noise.x;
-            float patchy = .55f;
-            float f = 1f + (drift - 0.5f) * patchy;
+            float f = (1f + (drift - 0.5f) * FieldPalette.GrowthContrast) * Mathf.Lerp(1f, FieldPalette.DampBrightness, noise.y);
             // A paddock too small for the big machines shows no headland or tramlines (drawn there they make a
             // stamped frame), and of the big fields only about two in three show them clearly.
             bool worked = length > 40f && width > 28f && Mathf.Repeat(seed * 7.13f, 1f) < 0.65f;
 
             // Thinner and trampled along the edges (ploughed soil turned up paler).
             float edge = Mathf.Min(Mathf.Min(across, width - across), Mathf.Min(along, length - along));
-            f *= Mathf.Lerp(crop == Crop.Ploughed ? 1.06f : 0.84f, 1f, Mathf.SmoothStep(0f, 1f, edge / 2.5f));
+            f *= Mathf.Lerp(crop == Crop.Ploughed ? 1.06f : FieldPalette.EdgeThinning, 1f, Mathf.SmoothStep(0f, 1f, edge / 2.5f));
 
             if (crop == Crop.Ploughed)
             {
@@ -248,9 +253,6 @@ namespace DroneSandbox
             {
                 float sides = Mathf.Min(Mathf.Abs(across - headlandTrack), Mathf.Abs(across - (width - headlandTrack)));
                 if (worked && sides < 1.5f && inside) f *= Track(sides);
-                // Patches knocked flat by wind and rain, which catch the light.
-                float lodged = noise.y;
-                f *= 1f + 0.14f * Mathf.SmoothStep(0f, 1f, (lodged - 0.72f) * 8f);
             }
             return f;
         }

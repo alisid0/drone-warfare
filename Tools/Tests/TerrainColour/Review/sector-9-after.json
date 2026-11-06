@@ -1,0 +1,107 @@
+{
+  "owner": 9,
+  "name": "Carrick",
+  "fields": 435,
+  "layoutTimings": "blocked map 49 ms, parcels 80 ms, district occupancy 92%, farmland coverage 91.2%",
+  "times": {
+    "worldCaptureMs": 1165.2144,
+    "layoutMs": 277.9472,
+    "groundBuildMs": 491.0731,
+    "splatMs": 505.4089,
+    "farmlandBuildMs": 507.6007,
+    "fieldMarginsMs": 14.3449,
+    "tileMs": 55.7811,
+    "regionalPageMs": 215.2722,
+    "worldBlockMs": 1249.8402
+  },
+  "stats": {
+    "means": {
+      "between": {
+        "r": 106.9,
+        "g": 118.7,
+        "b": 79.8,
+        "samples": 40555
+      },
+      "crop-MownHay": {
+        "r": 151,
+        "g": 149.7,
+        "b": 84.7,
+        "samples": 96639
+      },
+      "crop-Ploughed": {
+        "r": 82,
+        "g": 61.5,
+        "b": 41.3,
+        "samples": 97209
+      },
+      "crop-Sunflower": {
+        "r": 95.6,
+        "g": 93.3,
+        "b": 24.5,
+        "samples": 51893
+      },
+      "crop-Wheat": {
+        "r": 167.7,
+        "g": 145.9,
+        "b": 90.4,
+        "samples": 111985
+      },
+      "crop-YoungCrop": {
+        "r": 86.3,
+        "g": 95.6,
+        "b": 44.7,
+        "samples": 73494
+      },
+      "margin-Hedge": {
+        "r": 83.4,
+        "g": 96.7,
+        "b": 60.4,
+        "samples": 1737
+      },
+      "margin-Strip": {
+        "r": 102.2,
+        "g": 115.7,
+        "b": 73.8,
+        "samples": 4314
+      },
+      "margin-Track": {
+        "r": 101.7,
+        "g": 112.4,
+        "b": 75.3,
+        "samples": 4062
+      },
+      "margin-Wide": {
+        "r": 105.8,
+        "g": 113.5,
+        "b": 77.4,
+        "samples": 5798
+      },
+      "pasture": {
+        "r": 108.2,
+        "g": 119.6,
+        "b": 80.9,
+        "samples": 20142
+      }
+    },
+    "fieldLumaSpread": {
+      "crop-MownHay": 4.34,
+      "crop-Ploughed": 1.78,
+      "crop-Sunflower": 2.92,
+      "crop-Wheat": 6.28,
+      "crop-YoungCrop": 2.39
+    },
+    "meadow": {
+      "openShare": 1,
+      "samples": 54756,
+      "lumaStd": 4.13,
+      "below64mStd": 2.59
+    },
+    "dampCropShare": 0.0046,
+    "cropLowPercentiles": {
+      "p50": 0.015,
+      "p90": 0.179,
+      "p97": 0.242,
+      "p99": 0.283
+    }
+  }
+}

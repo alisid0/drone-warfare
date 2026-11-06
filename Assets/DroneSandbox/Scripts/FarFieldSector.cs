@@ -33,9 +33,10 @@ namespace DroneSandbox
                         Cut(fragment, blocked, pieces, 0);
                     }
                     Merge(pieces);
+                    float shade = FarFieldPlan.Shade(district, parcel);
                     foreach (var piece in pieces)
                     {
-                        MapLayout.Fields.Add(piece); FarFieldSurface.Register(piece, plot);
+                        MapLayout.Fields.Add(piece); FarFieldSurface.Register(piece, plot, shade);
                         if (parcel.hedge) AddEdges(piece, plot);
                     }
                 }
@@ -90,21 +91,39 @@ namespace DroneSandbox
         }
 
         // Obstacle subdivisions keep the parent's crop. The existing 2 m exclusion map includes works and reserved land.
+        // A road or track crossing the whole field splits it along the crossing, a slanting outline trims its ends, and
+        // anything else halves it.
         static void Cut(FieldPlot f, Func<Vector2, bool> blocked, List<FieldPlot> pieces, int depth)
         {
             int nu = Math.Max(1, (int)Math.Ceiling(2f * f.halfLength / 2f)), nv = Math.Max(1, (int)Math.Ceiling(2f * f.halfWidth * (1f + Math.Abs(f.taper)) / 2f));
             int clear = 0, total = (nu + 1) * (nv + 1);
             var low = new int[nu + 1]; var high = new int[nu + 1]; var counts = new int[nu + 1];
-            for(int i=0;i<=nu;i++) { low[i]=nv+1; high[i]=-1; }
+            // Each column's and each row's blocked run, to recognise a crossing.
+            var gapLow = new int[nu + 1]; var gapHigh = new int[nu + 1]; var gaps = new int[nu + 1];
+            var rowLow = new int[nv + 1]; var rowHigh = new int[nv + 1]; var rowGaps = new int[nv + 1];
+            for(int i=0;i<=nu;i++) { low[i]=nv+1; high[i]=-1; gapLow[i]=nv+1; gapHigh[i]=-1; }
+            for(int j=0;j<=nv;j++) { rowLow[j]=nu+1; rowHigh[j]=-1; }
             for (int j = 0; j <= nv; j++) for (int i = 0; i <= nu; i++)
             {
                 Vector2 p = f.Point(f.halfLength * (2f * i / nu - 1f), f.halfWidth * (2f * j / nv - 1f));
                 if (!blocked(p)) { clear++; counts[i]++; low[i]=Math.Min(low[i],j); high[i]=Math.Max(high[i],j); }
+                else
+                {
+                    gaps[i]++; gapLow[i]=Math.Min(gapLow[i],j); gapHigh[i]=Math.Max(gapHigh[i],j);
+                    rowGaps[j]++; rowLow[j]=Math.Min(rowLow[j],i); rowHigh[j]=Math.Max(rowHigh[j],i);
+                }
             }
             if (clear == 0) return;
             if (clear == total) { pieces.Add(f); return; }
             if (FitVerge(f,low,high,counts,nu,nv,blocked,out var fitted)) { pieces.Add(fitted); return; }
             if (depth >= 16 || f.halfLength < 6f && f.halfWidth < 6f) return;
+            if (SplitAlong(f, nu, nv, gapLow, gapHigh, gaps, out var first, out var second) || SplitAcross(f, nu, nv, rowLow, rowHigh, rowGaps, out first, out second))
+            {
+                Cut(first, blocked, pieces, depth + 1);
+                Cut(second, blocked, pieces, depth + 1);
+                return;
+            }
+            if (TrimEnds(f, nu, low, high, counts, clear, out var trimmed)) { Cut(trimmed, blocked, pieces, depth + 1); return; }
             bool along = f.halfLength > f.halfWidth;
             var a = Slice(f, along, false); var b = Slice(f, along, true);
             Cut(a, blocked, pieces, depth + 1);
@@ -120,13 +139,16 @@ namespace DroneSandbox
             float V(int i,int j) { float u=f.halfLength*(2f*i/nu-1f); return f.shear*u+f.HalfWidthAt(u)*(2f*j/nv-1f); }
             float a0=V(0,low[0]),a1=V(0,high[0]),b0=V(nu,low[nu]),b1=V(nu,high[nu]);
             float lower=0f,upper=0f,area=0f;
+            bool lowFitted=false,highFitted=false;
             for(int i=0;i<=nu;i++)
             {
                 float t=i/(float)nu,lo=V(i,low[i]),hi=V(i,high[i]);
                 lower=Math.Max(lower,lo-Mathf.Lerp(a0,b0,t)); upper=Math.Max(upper,Mathf.Lerp(a1,b1,t)-hi);
-                area+=hi-lo;
+                area+=hi-lo; lowFitted|=low[i]>0; highFitted|=high[i]<nv;
             }
-            a0+=lower+.65f; b0+=lower+.65f; a1-=upper+.65f; b1-=upper+.65f;
+            // Only a side fitted to an obstacle steps back; the field's own clear side stays on its parcel line.
+            float lowInset=lowFitted?.65f:0f, highInset=highFitted?.65f:0f;
+            a0+=lower+lowInset; b0+=lower+lowInset; a1-=upper+highInset; b1-=upper+highInset;
             float width=a1-a0+b1-b0;
             if(Math.Min(a1-a0,b1-b0)<1f || width*.5f < area/(nu+1)*.90f) return false;
             result=f;result.center+=f.Across*((a0+a1+b0+b1)*.25f);result.halfWidth=width*.25f;
@@ -136,6 +158,88 @@ namespace DroneSandbox
             for(int j=0;j<=rows;j++) for(int i=0;i<=nu;i++)
                 if(blocked(result.Point(result.halfLength*(2f*i/nu-1f),result.halfWidth*(2f*j/rows-1f)))) return false;
             return true;
+        }
+
+        // A slanting outline across a field's end leaves only slivers in its last columns. Keep the longest stretch of
+        // columns with one clear run of at least two samples, cut square there, so the slant becomes a fitted side
+        // instead of a staircase of halvings; at most a sixth of the clear ground, in the slivers, is given up.
+        static bool TrimEnds(FieldPlot f, int nu, int[] low, int[] high, int[] counts, int clear, out FieldPlot trimmed)
+        {
+            trimmed = default;
+            int bestFrom = 0, bestTo = -1, bestSum = 0;
+            for (int i = 0; i <= nu;)
+            {
+                if (counts[i] < 2 || high[i] - low[i] + 1 != counts[i]) { i++; continue; }
+                int from = i, sum = 0;
+                while (i <= nu && counts[i] >= 2 && high[i] - low[i] + 1 == counts[i]) sum += counts[i++];
+                if (sum > bestSum) { bestSum = sum; bestFrom = from; bestTo = i - 1; }
+            }
+            float step = 2f * f.halfLength / nu;
+            if (bestTo < 0 || bestFrom == 0 && bestTo == nu || bestSum < clear * 5 / 6 || (bestTo - bestFrom) * step < 6f) return false;
+            trimmed = Piece(f, -f.halfLength + bestFrom * step, -f.halfLength + bestTo * step);
+            return true;
+        }
+
+        // A road or track running end to end leaves one blocked run in every column. Cut along a straight line through
+        // the runs' middles, so each side can fit a straight verge where halving left a staircase of little fields.
+        static bool SplitAlong(FieldPlot f, int nu, int nv, int[] low, int[] high, int[] gaps, out FieldPlot lower, out FieldPlot upper)
+        {
+            lower = upper = default;
+            if (nv < 4 || nu < 2) return false;
+            float V(int i, float j) { float u = f.halfLength * (2f * i / nu - 1f); return f.shear * u + f.HalfWidthAt(u) * (2f * j / nv - 1f); }
+            double st = 0, sm = 0, stt = 0, stm = 0;
+            for (int i = 0; i <= nu; i++)
+            {
+                if (gaps[i] == 0 || high[i] - low[i] + 1 != gaps[i] || low[i] == 0 && high[i] == nv) return false;
+                float t = i / (float)nu, m = V(i, (low[i] + high[i]) * .5f);
+                st += t; sm += m; stt += t * t; stm += t * m;
+            }
+            int n = nu + 1;
+            double det = n * stt - st * st;
+            float slope = (float)((n * stm - st * sm) / det), start = (float)((sm - slope * st) / n);
+            float m0 = start, m1 = start + slope, a0 = V(0, 0), a1 = V(0, nv), b0 = V(nu, 0), b1 = V(nu, nv);
+            if (m0 < a0 + 1.5f || m0 > a1 - 1.5f || m1 < b0 + 1.5f || m1 > b1 - 1.5f) return false;
+            lower = Between(f, a0, m0, b0, m1); upper = Between(f, m0, a1, m1, b1);
+            return true;
+        }
+
+        // A road or track crossing from side to side leaves one blocked run in every row. Ends stay square to the rows,
+        // so both pieces stop at the last clear sample before the run: the sliver its slant takes is lost, not stepped.
+        static bool SplitAcross(FieldPlot f, int nu, int nv, int[] low, int[] high, int[] gaps, out FieldPlot near, out FieldPlot far)
+        {
+            near = far = default;
+            if (nu < 4) return false;
+            int first = nu, last = 0, widest = 0;
+            for (int j = 0; j <= nv; j++)
+            {
+                if (gaps[j] == 0 || high[j] - low[j] + 1 != gaps[j]) return false;
+                first = Math.Min(first, low[j]); last = Math.Max(last, high[j]); widest = Math.Max(widest, gaps[j]);
+            }
+            float step = 2f * f.halfLength / nu;
+            if ((first - 1) * step < 4f || (nu - last - 1) * step < 4f || (last - first + 1 - widest) * step > Math.Max(12f, f.halfLength / 3f)) return false;
+            near = Piece(f, -f.halfLength, -f.halfLength + (first - 1) * step);
+            far = Piece(f, -f.halfLength + (last + 1) * step, f.halfLength);
+            return true;
+        }
+
+        // The part of a trapezoid between two straight lines from end to end, given by their across offsets at the
+        // near and far ends (lower a0 to b0, upper a1 to b1), in the trapezoid's own frame.
+        static FieldPlot Between(FieldPlot f, float a0, float a1, float b0, float b1)
+        {
+            var result = f; float width = a1 - a0 + b1 - b0;
+            result.center += f.Across * ((a0 + a1 + b0 + b1) * .25f); result.halfWidth = width * .25f;
+            result.taper = (b1 - b0 - a1 + a0) / width; result.shear = (b0 + b1 - a0 - a1) / (4f * f.halfLength);
+            return result;
+        }
+
+        // The part of a trapezoid between two row positions, keeping its sides, rows and crop.
+        static FieldPlot Piece(FieldPlot f, float from, float to)
+        {
+            float middle = (from + to) * .5f, slope = f.halfWidth * f.taper / f.halfLength;
+            var result = f;
+            result.center += (f.along + f.Across * f.shear) * middle;
+            result.halfLength = (to - from) * .5f; result.halfWidth = f.HalfWidthAt(middle); result.taper = slope * result.halfLength / result.halfWidth;
+            return result;
         }
 
         // Road-edge pieces belong to their parent field, sharing crop, rows and one cached detail map. Merge

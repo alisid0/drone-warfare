@@ -518,7 +518,7 @@ namespace DroneSandbox
                 for (float x = -Ground.Size * .5f + 3f; x < Ground.Size * .5f; x += 8f)
                 {
                     var p = new Vector2(x, z);
-                    if (Plan.world.CoverAt(x, z) != Cover.Farmland || Blocked(p)) continue;
+                    if (Blocked(p)) continue;
                     land++;
                     if (InField(p, 0f)) filled++;
                 }
@@ -789,7 +789,9 @@ namespace DroneSandbox
                 {
                     var p = new Vector2(-fieldReach + (i + 0.5f) * BlockCell, -fieldReach + (j + 0.5f) * BlockCell);
                     // Most lake/forest cells cannot grow a field; reject them before shoreline, village and slope queries.
-                    blocked[j * blockCount + i] = (Plan.world != null && Plan.world.CoverAt(p.x, p.y) != Cover.Farmland)
+                    // Cultivation stops at the smooth farm outline the painters draw (FarDetailCover.Farm); the nearest
+                    // 32 m cover sample would step every farm edge in 32 m stairs.
+                    blocked[j * blockCount + i] = (Plan.world != null && !DetailPlan.cover.Farm(p.x + Plan.world.center.x, p.y + Plan.world.center.y))
                         || (Plan.world == null && (Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack))
                         || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
