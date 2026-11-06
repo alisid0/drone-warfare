@@ -1279,7 +1279,9 @@ namespace DroneSandbox
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
                 rts.LookAt(game.Mission.cameraFocus, 70f * Scale.Camera, game.Mission.cameraYaw);
-                yield return new WaitForSeconds(2f);
+                // Real seconds: the canopy wait above lets the mission run long enough to pause itself (a tip, an
+                // alert), and a game-time wait under a pause never ended (hd149 hung here).
+                yield return new WaitForSecondsRealtime(2f);
                 yield return Shot($"32_mission_{n:00}_{situation}");
             }
             game.OpenMenu();
