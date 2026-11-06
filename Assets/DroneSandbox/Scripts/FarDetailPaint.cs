@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace DroneSandbox
@@ -7,12 +9,14 @@ namespace DroneSandbox
     public sealed partial class FarDetailData
     {
         // World setup culls vectors once per 32-pixel block and uses the same coverage painter as streaming.
-        public Color32[] WorldPixels(int resolution)
+        public Color32[] WorldPixels(int resolution, CancellationToken cancellation = default)
         {
+            cancellation.ThrowIfCancellationRequested();
             var pixels = new Color32[resolution * resolution];
             float pixel = WorldPlan.Size / resolution;
             int blocks = (resolution + 31) / 32;
-            System.Threading.Tasks.Parallel.For(0, blocks * blocks, block =>
+            // Leave CPU capacity for the player and cap simultaneous district construction on 15 GB machines.
+            Parallel.For(0, blocks * blocks, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellation }, block =>
             {
                 int bx = block % blocks * 32, bz = block / blocks * 32;
                 float x0 = -WorldPlan.Half + bx * pixel, z0 = -WorldPlan.Half + bz * pixel;
@@ -24,6 +28,23 @@ namespace DroneSandbox
                         pixels[j * resolution + i] = Paint(x, z, at, lanes, streams, pixel);
                     }
             });
+            return pixels;
+        }
+
+        // A small cover-only picture is available immediately, without first-touching the whole world's farms.
+        public Color32[] PreviewPixels(int resolution)
+        {
+            var pixels = new Color32[resolution * resolution];
+            float step = WorldPlan.Size / resolution;
+            for (int j = 0; j < resolution; j++) for (int i = 0; i < resolution; i++)
+            {
+                float x = -WorldPlan.Half + (i + .5f) * step, z = -WorldPlan.Half + (j + .5f) * step;
+                Cover kind = CoverAt(x, z);
+                Vector3 colour = kind == Cover.Water ? WaterColour : kind == Cover.Forest ? WoodFloor
+                    : kind == Cover.Farmland ? (FarDetailPalette.Means[5] + FarDetailPalette.Means[9]) * .5f
+                    : kind == Cover.Wetland ? FarDetailPalette.Means[1] : kind == Cover.Rock ? FarDetailPalette.Means[3] : FarDetailPalette.Means[0];
+                pixels[j * resolution + i] = FarDetailPalette.Encode(colour);
+            }
             return pixels;
         }
 

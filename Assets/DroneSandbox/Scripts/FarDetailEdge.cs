@@ -11,7 +11,7 @@ namespace DroneSandbox
         static int previousX, previousZ, previousWidth, previousHeight;
 
         // Restore the last sector's patch first; rebuilding a sector must not leave its palette stamped into the world.
-        public static void Apply(Texture2D texture, Vector2 origin)
+        public static void Apply(Texture2D texture, Vector2 origin, bool upload = true)
         {
             if (previousTexture == texture && previousPixels != null)
                 texture.SetPixels(previousX, previousZ, previousWidth, previousHeight, previousPixels);
@@ -51,7 +51,14 @@ namespace DroneSandbox
                     pixels[j * width + i] = FarDetailPalette.Encode(Blend(edge, original, distance, Collar));
                 }
             texture.SetPixels(x0, z0, width, height, pixels);
-            texture.Apply(true, false);
+            if (upload) texture.Apply(true, false);
+        }
+
+        // Resizing the preview replaces every pixel; a saved collar from its old resolution must not be restored.
+        public static void Forget(Texture2D texture)
+        {
+            if (previousTexture != texture) return;
+            previousTexture = null; previousPixels = null;
         }
 
         // Read four narrow splat strips once during sector build, never from the streaming update.
