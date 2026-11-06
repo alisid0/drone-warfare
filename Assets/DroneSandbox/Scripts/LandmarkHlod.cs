@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Permanent roofs, tanks and yard surfaces: at most twelve material submissions per feature, no scene objects.
+    // Permanent yard surfaces and distant masses hand over to instanced FBX buildings without scenery objects.
     public sealed class LandmarkHlod
     {
         // Native resources live until FarScatter clears its origin/seed cache or the owner is destroyed.
@@ -18,6 +18,8 @@ namespace DroneSandbox
 
         readonly Dictionary<int, Batch> batches = new Dictionary<int, Batch>();
         readonly Material[] materials = new Material[LandmarkMesh.MaterialCount];
+        readonly LandmarkInstances instances = new LandmarkInstances();
+        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
         public static int DrawCalls { get; private set; }
         public static int TrianglesDrawn { get; private set; }
 
@@ -26,6 +28,7 @@ namespace DroneSandbox
         {
             foreach (var batch in batches.Values) Art.Discard(batch.mesh);
             batches.Clear();
+            instances.Clear();
             for (int i = 0; i < materials.Length; i++) { Art.Discard(materials[i]); materials[i] = null; }
             DrawCalls = TrianglesDrawn = 0;
         }
@@ -45,6 +48,14 @@ namespace DroneSandbox
                     batch = Upload(LandmarkMesh.Build(f, FarTerrain.Origin, false)); batches.Add(f.id, batch);
                 }
                 if (batch.mesh == null) continue;
+                Vector2 projection = LandmarkLod.Projection(camera);
+                float distance = projection.y >= 0f ? projection.y : Mathf.Sqrt(bounds.SqrDistance(camera.transform.position)) * projection.x;
+                if (distance < LandmarkLod.Far)
+                {
+                    instances.Draw(f, camera, bounds);
+                    DrawCalls += instances.DrawCalls; TrianglesDrawn += instances.Triangles;
+                }
+                LandmarkInstances.SetView(properties, camera, true);
                 for (int sub = 0; sub < batch.materials.Count; sub++)
                 {
                     int index = batch.materials[sub];
@@ -52,8 +63,14 @@ namespace DroneSandbox
                     {
                         materials[index] = Art.NewMaterial(LandmarkMesh.Color(index));
                         materials[index].SetFloat("_Smoothness", 0.12f);
+                        if (index >= 5 && index <= 8)
+                        {
+                            var adapted = LandmarkInstances.Adapt(materials[index]);
+                            if (adapted != null) { Art.Discard(materials[index]); materials[index] = adapted; }
+                        }
                     }
                     var rp = new RenderParams(materials[index]) { camera = camera, worldBounds = batch.bounds,
+                        matProps = index >= 5 && index <= 8 ? properties : null,
                         shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
                     Graphics.RenderMesh(rp, batch.mesh, sub, Matrix4x4.identity); DrawCalls++;
                 }
