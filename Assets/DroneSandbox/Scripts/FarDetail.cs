@@ -50,8 +50,8 @@ namespace DroneSandbox
         public static double GenerationP99Ms { get; private set; } = 400;
         public static int Preparing { get; private set; }
         public static float PrefetchMetres => instance?.route?.Lead ?? 0f;
-        // The followed eye and its projected route, which ForestHlod prefetches along too.
-        internal static FarDetailRoute Route => instance != null && instance.enabled && instance.plan != null ? instance.route : null;
+        // The followed eye and its projected route, which ForestHlod prefetches along too; none while no world streams.
+        internal static FarDetailRoute Route => instance != null && instance.enabled && instance.plan != null && FarTerrain.Active ? instance.route : null;
 
         // One pooled resource set retains its mesh and CPU-readable texture for reuse without GPU allocation churn.
         sealed class Slot
