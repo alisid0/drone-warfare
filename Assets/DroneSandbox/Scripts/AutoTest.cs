@@ -89,6 +89,7 @@ namespace DroneSandbox
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
             log.WriteLine($"Varrow build ms: {World.Timings}");
+            log.WriteLine($"forest build ms: total {SectorForest.BuildMilliseconds:F1}, stems {SectorForest.StemsMilliseconds:F1}, indices {SectorForest.IndicesMilliseconds:F1}, canopy preparation {SectorForest.CanopyMilliseconds:F1}; stems {SectorForest.Stems.Count}, cells {SectorForest.LocalCells.Count}");
             log.WriteLine($"World build stages: {FarTerrain.BuildTimings}");
             log.WriteLine($"Field layout stages: {MapLayout.Timings}; {MapLayout.FieldTimings}");
             log.WriteLine($"Started. Drones: {game.drones.Count}, enemies: {game.enemies.Count}, fields: {MapLayout.Fields.Count} ({MapLayout.FieldCoverage():P0} of the land), " +
