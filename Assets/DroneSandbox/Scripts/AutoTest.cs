@@ -1266,6 +1266,7 @@ namespace DroneSandbox
                 eye.y = Ground.HeightAt(eye) + 140f;
                 photo.PlaceLooking(eye, Ground.OnGround((baseAt + hq) / 2f), 55f);
                 yield return new WaitForSeconds(1.5f);
+                yield return ForestMassesSettle($"31_sector_{n:00}_{kind}");
                 yield return Shot($"31_sector_{n:00}_{kind}");
                 // What of the woods this view drew: hd145's dense forest drew nothing in a Deep Forest sector.
                 log.WriteLine($"  {ForestLine()}");
