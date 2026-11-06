@@ -39,9 +39,20 @@ namespace DroneSandbox
                 Mathf.Lerp(Unit(i, j + 1, salt), Unit(i + 1, j + 1, salt), u), v);
         }
 
+        // Two rotated lattices at unrelated spacings give 50-120 m height waves without a regular grid of mounds.
+        public static float Broad(float x, float z, int salt)
+        {
+            float a = Noise(x * 0.866f - z * 0.5f, x * 0.5f + z * 0.866f, 101f, salt);
+            float b = Noise(x * 0.934f + z * 0.358f, z * 0.934f - x * 0.358f, 53f, salt + 1);
+            return a * 0.66f + b * 0.34f;
+        }
+
         // Warped ellipses retain elongated openings; distance is in metres so every rim has a physical width.
+        // A 600 m presence field clusters them, so dense woodland is not punched by a near-regular 192 m lattice.
         public static float Glade(float x, float z)
         {
+            float presence = Mathf.SmoothStep(0f, 1f, (Noise(x, z, 610f, 120) - 0.36f) / 0.12f);
+            if (presence <= 0f) return 1f;
             const float step = 192f;
             int i = Mathf.FloorToInt(x / step), j = Mathf.FloorToInt(z / step);
             float margin = 1f;
@@ -51,10 +62,11 @@ namespace DroneSandbox
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     int a = i + dx, b = j + dz;
-                    if (Unit(a, b, 60) > 0.9f) continue;
+                    if (Unit(a, b, 60) > 0.72f) continue;
                     float cx = (a + Unit(a, b, 61)) * step;
                     float cz = (b + Unit(a, b, 62)) * step;
-                    float radius = 24f + 18f * Unit(a, b, 63);
+                    float size = Unit(a, b, 63);
+                    float radius = 18f + 26f * size * size;
                     float stretch = Mathf.Sqrt(1.7f + Unit(a, b, 64));
                     float rx = radius * stretch, rz = radius / stretch;
                     float angle = Unit(a, b, 66) * Mathf.PI, ca = Mathf.Cos(angle), sa = Mathf.Sin(angle);
@@ -64,7 +76,7 @@ namespace DroneSandbox
                     float distance = EllipseDistance(u, v, rx, rz);
                     margin = Mathf.Min(margin, Mathf.Clamp01(distance / (10f + 15f * Unit(a, b, 69))));
                 }
-            return margin;
+            return Mathf.Lerp(1f, margin, presence);
         }
 
         // First-order ellipse distance is exact at the rim and along either axis, unlike a fixed radial multiplier.
@@ -98,23 +110,24 @@ namespace DroneSandbox
         // Cover is categorical in WorldPlan; interpolation belongs only to this visual forest mask.
         static float Wood(float x, float z) => WorldPlan.Inside(x, z) && WorldPlan.CoverAt(x, z) == Cover.Forest ? 1f : 0f;
 
-        // Warped species districts have soft ecotones; the age lattice below makes correlated 40-120 m stands.
+        // Warped 35-90 m species stands have narrow ecotones; two broad lattices make correlated 50-120 m heights.
         public static Stand At(float x, float z) => At(x, z, Edge(x, z));
 
         // Sector reserves supply their own boundary, but share species, ages and glades with the world.
         public static Stand At(float x, float z, float edge)
         {
             if (edge <= 0f) return new Stand { radius = 2f, width = 1f };
-            float sx = x + (Noise(x, z, 190f, 16) - 0.5f) * 130f;
-            float sz = z + (Noise(x, z, 170f, 17) - 0.5f) * 130f;
-            int i = Mathf.FloorToInt(sx / 240f), j = Mathf.FloorToInt(sz / 240f), patch = 0, nextPatch = 0;
+            const float patchStep = 64f;
+            float sx = x + (Noise(x, z, 61f, 16) - 0.5f) * 40f;
+            float sz = z + (Noise(x, z, 57f, 17) - 0.5f) * 40f;
+            int i = Mathf.FloorToInt(sx / patchStep), j = Mathf.FloorToInt(sz / patchStep), patch = 0, nextPatch = 0;
             float best = float.MaxValue, second = float.MaxValue;
             for (int dz = -1; dz <= 1; dz++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     int a = i + dx, b = j + dz;
-                    float u = (a + Unit(a, b, 11)) * 240f - sx;
-                    float v = (b + Unit(a, b, 12)) * 240f - sz;
+                    float u = (a + Unit(a, b, 11)) * patchStep - sx;
+                    float v = (b + Unit(a, b, 12)) * patchStep - sz;
                     float distance = u * u + v * v;
                     if (distance < best)
                     {
@@ -123,12 +136,14 @@ namespace DroneSandbox
                     else if (distance < second) { second = distance; nextPatch = Hash(a, b, 13); }
                 }
             float elevation = WorldPlan.Ready ? WorldPlan.Height(x, z) : 120f;
+            // Elevation sets the conifer share; half-kilometre districts lean broadleaf or conifer around it.
             float conifer = Mathf.Lerp(0.18f, 0.72f, Mathf.SmoothStep(0f, 1f, (elevation - 120f) / 220f));
+            conifer = Mathf.Clamp(conifer + (Noise(x, z, 530f, 121) - 0.5f) * 0.6f, 0.05f, 0.95f);
             int species = Species(patch, conifer), neighbour = Species(nextPatch, conifer);
-            float blend = 0.5f * (1f - Mathf.SmoothStep(0f, 1f, (Mathf.Sqrt(second) - Mathf.Sqrt(best)) / 50f));
+            float blend = 0.5f * (1f - Mathf.SmoothStep(0f, 1f, (Mathf.Sqrt(second) - Mathf.Sqrt(best)) / 14f));
             float ax = x + (Noise(x, z, 67f, 19) - 0.5f) * 26f;
             float az = z + (Noise(x, z, 71f, 20) - 0.5f) * 26f;
-            float age = Mathf.Clamp01((Noise(ax, az, 64f, 14) - 0.22f) / 0.56f);
+            float age = Mathf.Clamp01((Broad(ax, az, 122) - 0.29f) / 0.42f);
             float glade = Glade(x, z), margin = Mathf.Min(edge, glade);
             float height = (12f + 12f * age) * Rim(margin);
             float tint = Noise(x, z, 80f, 83) * 0.7f + Noise(x, z, 12f, 84) * 0.3f;
@@ -193,11 +208,13 @@ namespace DroneSandbox
             float density = Mathf.Max(stand.cover, stand.wood * 0.025f);
             if (Unit(i, j, 43) >= density * Mathf.Lerp(0.88f, 1f, cluster)) return false;
             float individual = Unit(i, j, 49);
+            // Neighbours share most of their vigour over 20-40 m; the rest keeps adjacent crowns distinct.
+            float vigour = Mathf.Lerp(individual, Noise(world.x, world.y, 29f, 125), 0.6f);
             if (Unit(i, j, 47) < stand.blend) stand.species = stand.neighbour;
             stand.neighbour = stand.species; stand.blend = 0f;
-            stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 5f * stand.cover, 2f + individual * 2f, 26f);
+            stand.height = Mathf.Clamp(stand.height + (vigour - 0.5f) * 6f * stand.cover, 2f + individual * 2f, 26f);
             // The canopy fade uses a conservative two-metre crown, including the youngest edge trees.
-            stand.radius = Mathf.Max(2f, stand.radius * (0.78f + individual * 0.44f));
+            stand.radius = Mathf.Max(2f, stand.radius * (0.62f + vigour * 0.76f));
             // Isolated old trees and groups of saplings interrupt the stand's average silhouette.
             if (Unit(i, j, 50) > 0.97f && stand.cover > 0.95f) { stand.radius = 4.6f; stand.height = 23f; }
             stand.width = stand.radius / (stand.height * ForestPalette.RadiusPerHeight[stand.species]);
