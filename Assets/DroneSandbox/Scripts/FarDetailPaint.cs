@@ -52,7 +52,7 @@ namespace DroneSandbox
         public struct FieldSample
         {
             public int layer, use;
-            public float angle, projection, across, along, width, length, side, end, districtEdge;
+            public float worldX, worldZ, gateDistance, angle, projection, across, along, width, length, side, end, districtEdge;
             public bool hedge;
         }
 
@@ -78,14 +78,14 @@ namespace DroneSandbox
             if (land.Weight(Cover.Farmland) > 0f)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
-                if (f.side < 0f || f.end < 0f || f.use > 2) layer = 4;
+                if (Math.Min(f.side, f.end) < FieldAppearance.Margin(x, z) || f.use > 2 || FieldAppearance.Patch(x, z) > .4f) layer = 4;
             }
             // A garden painted over farmland must also suppress that field's procedural crop rows.
             if (villages.At(new Vector2(x, z), out var garden))
             {
                 garden.Coordinates(new Vector2(x, z), out float u, out float v);
                 int ground = garden.GroundMaterial(u, v);
-                layer = ground == 0 ? 4 : 2; angle = 0f;
+                layer = ground == 0 || ground == 3 ? 4 : 2; angle = 0f;
                 strength = ground == 2 ? (byte)50 : (byte)255;
             }
             if (bank < 4f) layer = 2;
@@ -106,7 +106,7 @@ namespace DroneSandbox
             float bank = Bank(x, z, streams, out float riverWidth);
             var land = cover.At(x, z);
             Vector3 c = CoverColour(x, z, pixel, land);
-            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel);
+            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Pasture, x, z));
             c = PaintRiver(c, bank, riverWidth, pixel);
             float lakeBank = LakeBank(x, z, pixel, out bool reservoir);
             Vector3 basin = PaintLake(c, lakeBank, reservoir, pixel);
@@ -198,7 +198,7 @@ namespace DroneSandbox
         Vector3 FieldColour(FieldSample f, float pixel)
         {
             if (f.layer < 5) return FarDetailPalette.Means[4];
-            Vector3 c = FarDetailPalette.Means[f.layer];
+            Vector3 c = FieldAppearance.Colour(f.layer, f.worldX, f.worldZ, Math.Min(f.side, f.end), pixel);
             if (f.use == 3 || f.use == 4)
             {
                 float pitch = f.use == 3 ? 10f : 5f, width = f.use == 3 ? 2.8f : 1.5f;
@@ -209,28 +209,15 @@ namespace DroneSandbox
             float crop = Coverage(f.side, pixel * projection) * Coverage(f.end, pixel * projection);
             float side = Math.Max(BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection), BandCoverage(-f.end - 1.5f, 1.5f, pixel * projection));
             Vector3 hedge = HedgeColour;
-            Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f : 0f);
+            Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f * Coverage(f.gateDistance - 2f, pixel) : 0f);
             return Blend(margin, c, crop);
         }
 
         // The exact scenery parcel supplies front lawn, rear yard, vegetable beds and its boundary lines.
-        Vector3 VillageColour(float x, float z, VillagePlot p, float pixel)
+        Vector3 VillageColour(float x, float z, VillagePlot p, float pixel, Vector3 lawn)
         {
-            p.Coordinates(new Vector2(x,z),out float u,out float v);
-            if(p.square) return VillageGravel;
-            float half=p.frontage*.5f;
-            Vector3 c=VillageGrass;
-            float yard=Coverage(v-p.setback-4f,pixel)*Coverage(Math.Min(p.depth-2f,p.setback+(p.farm?25f:12f))-v,pixel)*Coverage(half-2f-Math.Abs(u),pixel);
-            c=Blend(c,p.farm?VillageGravel:VillageSoil,yard);
-            if(!p.church&&!p.farm)
-            {
-                float beds=Coverage(-1f-u,pixel)*Coverage(u+half-2f,pixel)*Coverage(v-p.setback-15f,pixel)*Coverage(p.depth-3f-v,pixel);
-                c=Blend(c,VillageSoil,beds*PeriodicBand(v-p.setback-15f,2.8f,1.6f,pixel));
-            }
-            float drive=BandCoverage(1.2f-Math.Abs(u),1.2f,pixel)*Coverage(p.setback+8f-v,pixel);
-            c=Blend(c,VillageGravel,drive);
-            float edge=Math.Min(half-Math.Abs(u),Math.Min(p.depth-v,Math.Abs(u)>2f?v:100f));
-            return Blend(c,p.church||p.style==1?VillageGravel:HedgeColour,Coverage(.65f-edge,pixel));
+            p.Coordinates(new Vector2(x, z), out float u, out float v);
+            return p.Colour(u, v, pixel, lawn);
         }
 
         static readonly Vector3 VillageGrass=FarDetailPalette.Decode(new Color(.24f,.29f,.13f));

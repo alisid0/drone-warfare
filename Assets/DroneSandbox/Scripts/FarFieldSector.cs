@@ -174,6 +174,7 @@ namespace DroneSandbox
         static void AddEdges(FieldPlot f, FieldPlot original)
         {
             var corners = Corners(f);
+            var parentCorners = Corners(original);
             for (int i = 0; i < 4; i++)
             {
                 Vector2 a = corners[i], b = corners[(i + 1) % 4];
@@ -186,7 +187,10 @@ namespace DroneSandbox
                 bool side = av * bv > 0f && Math.Abs(Math.Abs(av) - original.HalfWidthAt(au)) <= .02f && Math.Abs(Math.Abs(bv) - original.HalfWidthAt(bu)) <= .02f;
                 bool end = au * bu > 0f && Math.Abs(Math.Abs(au) - original.halfLength) <= .02f && Math.Abs(Math.Abs(bu) - original.halfLength) <= .02f;
                 if (!side && !end) continue;
-                MapLayout.Boundaries.Add(new FieldBoundary { a = a, b = b, first = MapLayout.Fields.Count - 1, second = -1, kind = FieldBoundaryKind.Hedge });
+                  int edge = side ? (av < 0f ? 0 : 2) : (au > 0f ? 1 : 3);
+                  MapLayout.Boundaries.Add(new FieldBoundary { a = a, b = b, first = MapLayout.Fields.Count - 1,
+                      second = -1, kind = FieldBoundaryKind.Hedge, hasGate = true,
+                      gate = FieldAppearance.Gate(parentCorners[edge],parentCorners[(edge+1)%4]) });
             }
         }
     }

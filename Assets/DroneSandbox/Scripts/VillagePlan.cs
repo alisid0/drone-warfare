@@ -6,13 +6,16 @@ using Random = System.Random;
 namespace DroneSandbox
 {
     // A street parcel is shared by the scenery builder and both distant painters, in physical metres.
-    public struct VillagePlot
+    public partial struct VillagePlot
     {
         public Vector2 front, along, outward;
         public float frontage, depth, setback;
         public int owner, style;
         public bool town, farm, church, square;
         public string model;
+        public bool old, cultivated, shed, logs, untended, roofChanged;
+        public int shape, palette, boundary, identity, settlement;
+        public float scale, pathWidth, driveWidth, roadWidth;
         public Vector2 House => front + outward * setback;
 
         // Signed distances from the side and front of this irregular street parcel.
@@ -27,29 +30,16 @@ namespace DroneSandbox
         public bool Contains(Vector2 p, float margin = 0f)
         {
             Coordinates(p, out float u, out float v);
-            return Math.Abs(u) <= frontage * .5f + margin && v >= -margin && v <= depth + margin;
+            Limits(v, out float lo, out float hi);
+            return u >= lo - margin && u <= hi + margin && v >= -margin && v <= depth + margin;
         }
 
         // Both the garden mesh and tile detail control use this property layout: lawn, soil or gravel.
-        public int GroundMaterial(float u, float v)
-        {
-            if (square)
-                return 2;
-            float half = frontage * .5f;
-            if (Math.Abs(u) < 1.2f && v < setback + 8f)
-                return 2;
-            if (Math.Abs(u) < half - 2f && v > setback + 4f && v < Math.Min(depth - 2f, setback + (farm ? 25f : 12f)))
-                return farm ? 2 : 1;
-            if (!church && !farm && u > -half + 2f && u < -1f)
-                for (float row = setback + 15f; row < depth - 4f; row += 2.8f)
-                    if (v >= row && v < Math.Min(row + 1.6f, depth - 3f))
-                        return 1;
-            return 0;
-        }
+        public int GroundMaterial(float u, float v) => UseAt(u, v);
     }
 
     // Immutable road-facing village and town plots. World snapshots never consult sector-local random state.
-    public sealed class VillagePlan
+    public sealed partial class VillagePlan
     {
         public readonly List<VillagePlot> plots = new List<VillagePlot>();
         public readonly List<FarDetailData.Segment> lanes = new List<FarDetailData.Segment>();
@@ -77,7 +67,8 @@ namespace DroneSandbox
                     along = d.normalized;
                 }
 
-                float reach = s.town ? s.radius * .85f : Math.Min(s.radius * .85f, 220f);
+                if (!s.town) { Grow(owner, s, roads, anchor); continue; }
+                float reach = s.radius * .85f;
                 var street = new List<FarDetailData.Segment>();
                 foreach (var road in roads)
                 {
@@ -189,6 +180,7 @@ namespace DroneSandbox
                         }
                     }
                 }
+                VillageUse.Assign(plots, owner, seed, anchor);
             }
         }
 

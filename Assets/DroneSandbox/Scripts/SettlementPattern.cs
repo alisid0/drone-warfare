@@ -12,8 +12,9 @@ namespace DroneSandbox
         public struct House
         {
             public Vector2 world;
-            public float yaw;
+            public float yaw, scale;
             public int kind;
+            public float Scale => scale > 0f ? scale : 1f;
         }
 
         // A block switches as one unit, keeping whole streets intact at the 1.5 km handover.
@@ -49,7 +50,7 @@ namespace DroneSandbox
                 long key = ((long)x << 32) ^ (uint)z;
                 if (!groups.TryGetValue(key, out var block))
                 { block = new Block { center = new Vector2((x + .5f) * BlockSize, (z + .5f) * BlockSize) }; groups.Add(key, block); }
-                block.houses.Add(new House { world = at, kind = kind, yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg });
+                block.houses.Add(new House { world = at, kind = kind, scale = p.Scale, yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg });
             }
             foreach (var block in groups.Values) yield return block;
         }
@@ -64,8 +65,8 @@ namespace DroneSandbox
             for (int k = 0; k < 4; k++)
             {
                 Vector2 axis = k == 0 ? ax : k == 1 ? az : k == 2 ? bx : bz;
-                float ar = (Mathf.Abs(Vector2.Dot(axis, ax)) * Size[a.kind].x + Mathf.Abs(Vector2.Dot(axis, az)) * Size[a.kind].z) * 0.5f;
-                float br = (Mathf.Abs(Vector2.Dot(axis, bx)) * Size[b.kind].x + Mathf.Abs(Vector2.Dot(axis, bz)) * Size[b.kind].z) * 0.5f;
+                float ar = (Mathf.Abs(Vector2.Dot(axis, ax)) * Size[a.kind].x + Mathf.Abs(Vector2.Dot(axis, az)) * Size[a.kind].z) * 0.5f * a.Scale;
+                float br = (Mathf.Abs(Vector2.Dot(axis, bx)) * Size[b.kind].x + Mathf.Abs(Vector2.Dot(axis, bz)) * Size[b.kind].z) * 0.5f * b.Scale;
                 if (Mathf.Abs(Vector2.Dot(delta, axis)) >= ar + br + 1f) return false;
             }
             return true;

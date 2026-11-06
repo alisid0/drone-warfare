@@ -77,8 +77,9 @@ namespace DroneSandbox
                     float score = Math.Min(side, end);
                     if (score < nearest) continue;
                     nearest = score;
-                    best = new FarDetailData.FieldSample { use = p.use, layer = 5 + (int)p.crop, angle = angle + (p.cross ? (float)Math.PI * .5f : 0f), projection = Math.Abs(along.x) + Math.Abs(along.y), width = hi - lo, length = p.u1 - p.u0,
-                        across = pv - lo, along = pu - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = p.hedge };
+                    best = new FarDetailData.FieldSample { worldX = x, worldZ = z, use = p.use, layer = 5 + (int)p.crop, angle = angle + (p.cross ? (float)Math.PI * .5f : 0f), projection = Math.Abs(along.x) + Math.Abs(along.y), width = hi - lo, length = p.u1 - p.u0,
+                        across = pv - lo, along = pu - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = p.hedge,
+                        gateDistance = score < 3f ? FieldAppearance.GateDistance(pu,pv,p.u0,p.u1,p.a0,p.a1,p.b0,p.b1) : float.MaxValue };
                     if (score >= 0f) return best;
                 }
                 return best;
