@@ -82,6 +82,7 @@ namespace DroneSandbox
                 }
             IndexSites();
             ClearWorn();
+            canopy = null; // the last sector's woods
 
             FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
@@ -640,6 +641,87 @@ namespace DroneSandbox
             pending.Clear();
         }
 
+        // ---- The forest floor ----
+
+        // How thickly wooded each 2 m square is: about 4 inside a wood planted at real spacing, falling off over its
+        // last 10 m. Made from where the woods could grow (World's candidates, so a wood thinned by the tree budget
+        // still has its floor) plus, at half weight, every tree actually planted.
+        const float CanopyCell = 2f;
+        static float[] canopy;
+        static int canopyRes;
+
+        // How wooded the ground at (x, z) is (see canopy); 0 before the woods are planted. Safe from worker threads.
+        public static float CanopyAt(float x, float z)
+        {
+            if (canopy == null) return 0f;
+            float gx = (x + Size / 2f) / CanopyCell - 0.5f, gz = (z + Size / 2f) / CanopyCell - 0.5f;
+            int i = Mathf.Clamp(Mathf.FloorToInt(gx), 0, canopyRes - 2), j = Mathf.Clamp(Mathf.FloorToInt(gz), 0, canopyRes - 2);
+            float u = Mathf.Clamp01(gx - i), v = Mathf.Clamp01(gz - j);
+            float a = canopy[j * canopyRes + i], b = canopy[j * canopyRes + i + 1];
+            float c = canopy[(j + 1) * canopyRes + i], d = canopy[(j + 1) * canopyRes + i + 1];
+            return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
+        }
+
+        // The woods stood on the meadow layer and looked like trees in a park. Under them now: fallen leaves and
+        // needles (the litter layer), dark mossy patches (the damp grass) and a ragged edge where the wood gives way to
+        // open ground. Paths, yards and rock keep their own layers. Written in bands of 512 rows over the woods'
+        // bounds, so neither the copy of the splat nor the uploads grow with the whole map (hd127).
+        public static void PaintForestFloor(List<Vector2> woodland, IReadOnlyList<Vector2> trees)
+        {
+            if (terrain == null) return;
+            canopyRes = Mathf.CeilToInt(Size / CanopyCell);
+            canopy = new float[canopyRes * canopyRes];
+            Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
+            foreach (var p in woodland) { Spread(p, 1f); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p); }
+            for (int t = 0; t < trees.Count; t++) { Spread(trees[t], 0.5f); lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]); }
+            if (lo.x > hi.x) return;
+
+            var data = terrain.terrainData;
+            int res = data.alphamapResolution;
+            float cell = Size / res;
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x - 12f + Size / 2f) / cell), 0, res - 1), x1 = Mathf.Clamp(Mathf.CeilToInt((hi.x + 12f + Size / 2f) / cell), 0, res - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y - 12f + Size / 2f) / cell), 0, res - 1), z1 = Mathf.Clamp(Mathf.CeilToInt((hi.y + 12f + Size / 2f) / cell), 0, res - 1);
+            int w = x1 - x0 + 1;
+            for (int band = z0; band <= z1; band += 512)
+            {
+                int h = Mathf.Min(512, z1 - band + 1);
+                var maps = data.GetAlphamaps(x0, band, w, h);
+                if (maps.GetLength(2) <= LitterLayer) return;
+                System.Threading.Tasks.Parallel.For(0, h, j =>
+                {
+                    for (int i = 0; i < w; i++)
+                    {
+                        float x = -Size / 2f + (x0 + i + 0.5f) * cell, z = -Size / 2f + (band + j + 0.5f) * cell;
+                        float ragged = (Mathf.PerlinNoise(x * 0.11f + 41f, z * 0.11f + 7f) - 0.5f) * 1.4f;
+                        float floor = Mathf.SmoothStep(0f, 1f, (CanopyAt(x, z) + ragged - 1.2f) / 1.8f);
+                        floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3]) * 1.5f); // tracks, yards, rock
+                        if (floor <= 0.001f) continue;
+                        // Moss and damp grass where the canopy opens a little, in patches 10-25 m across.
+                        float moss = 0.55f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.045f + 3f, z * 0.045f + 19f) - 0.5f) / 0.2f);
+                        for (int k = 0; k < maps.GetLength(2); k++) maps[j, i, k] *= 1f - floor;
+                        maps[j, i, LitterLayer] += floor * (1f - moss);
+                        maps[j, i, 1] += floor * moss;
+                    }
+                });
+                data.SetAlphamaps(x0, band, maps);
+            }
+        }
+
+        // Adds one wood point's share to the canopy grid: a 4.5 m Gaussian, cut off at 9 m.
+        static void Spread(Vector2 p, float weight)
+        {
+            const float reach = 9f, spread = 2f * 4.5f * 4.5f;
+            int r = Mathf.CeilToInt(reach / CanopyCell);
+            int ci = Mathf.FloorToInt((p.x + Size / 2f) / CanopyCell), cj = Mathf.FloorToInt((p.y + Size / 2f) / CanopyCell);
+            for (int j = Mathf.Max(0, cj - r); j <= Mathf.Min(canopyRes - 1, cj + r); j++)
+                for (int i = Mathf.Max(0, ci - r); i <= Mathf.Min(canopyRes - 1, ci + r); i++)
+                {
+                    float dx = -Size / 2f + (i + 0.5f) * CanopyCell - p.x, dz = -Size / 2f + (j + 0.5f) * CanopyCell - p.y;
+                    float d2 = dx * dx + dz * dz;
+                    if (d2 < reach * reach) canopy[j * canopyRes + i] += weight * Mathf.Exp(-d2 / spread);
+                }
+        }
+
         struct WornStrip
         {
             public Vector2 a, b, lo, hi;
@@ -770,8 +852,16 @@ namespace DroneSandbox
                 Layer("dirt", "dirt", 5f, new Color(1.2f, 1.23f, 1.28f), new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
                 Layer("rock", "rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
                 Layer("dry", "meadow", 8f, new Color(0.68f, 0.83f, 0.80f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
+                // Fallen leaves, needles and twigs (Tools/make_forest_floor.py), toned from its orange-brown to the
+                // dull grey-brown litter seen between trees from the air (66, 58, 42); warmer read as rust halos (hd141).
+                Layer("litter", "litter", 6f, new Color(0.59f, 0.88f, 1.55f), new Color(0.30f, 0.23f, 0.15f), new Color(0.18f, 0.14f, 0.09f)),
             };
         }
+
+        // The litter layer's average colour in linear light (its photo's mean times the tint above), for the world
+        // picture's collar round the sector (FarDetailEdge).
+        public static readonly Vector3 LitterMean = new Vector3(0.0539f, 0.0421f, 0.0229f);
+        public const int LitterLayer = 5;
 
         // Uses Resources/Textures/Terrain/<file>_diff (and _nor) when present, else a generated noise texture.
         static TerrainLayer Layer(string name, string file, float tile, Color tint, Color light, Color dark)
@@ -794,7 +884,7 @@ namespace DroneSandbox
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
             float hw = MapLayout.RiverHalfWidth;
-            var splat = new float[SplatRes, SplatRes, 5];
+            var splat = new float[SplatRes, SplatRes, 6]; // the litter layer waits for the woods (PaintForestFloor)
             var junctions = MapLayout.Junctions;
             var tracks = MapLayout.TrackField;
             System.Threading.Tasks.Parallel.For(0, SplatRes, zi =>

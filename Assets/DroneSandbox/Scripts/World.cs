@@ -51,11 +51,13 @@ namespace DroneSandbox
             foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
             Lap("villages");
-            Grass.Plant(Ground.Current); // after the villages, so it keeps off their worn paths and yards
-            Lap("grass");
             Features.Build(scenery); // reserve orchard trees before filling the wild woods
             BuildWoods(scenery, rng);
             Lap("woods");
+            Ground.PaintForestFloor(woodland, Undergrowth.Trees);
+            Lap("forest floor");
+            Grass.Plant(Ground.Current); // after the villages and woods, so it keeps off worn paths, yards and forest floor
+            Lap("grass");
             BuildRocks(scenery, rng);
             Undergrowth.Build(scenery);
             Lap("undergrowth");
@@ -464,6 +466,7 @@ namespace DroneSandbox
             // Fewer, larger blocks with real tree spacing. Collect candidates first, then sample across all woods
             // when the budget fills, so neither the last wood nor the last row gets chopped off.
             var candidates = new List<(Vector2 p, bool outer, float age)>();
+            woodland.Clear();
             var plan = MapLayout.Plan;
             if (plan.world != null)
             {
@@ -528,6 +531,7 @@ namespace DroneSandbox
 
             }
 
+            foreach (var c in candidates) woodland.Add(c.p);
             int startCount = TreeCount;
             for (int i = candidates.Count - 1; i >= 0 && TreeCount - startCount < 8000 && TreeCount < TreeLimit; i--)
             {
@@ -566,6 +570,9 @@ namespace DroneSandbox
                 walked += length;
             }
         }
+
+        // Where the woods could grow, before the tree budget thinned them: the forest floor covers all of it.
+        static readonly List<Vector2> woodland = new List<Vector2>();
 
         // Logging clearings (Features fills them with stumps and log stacks) stay open.
         static bool InClearing(Vector2 p)

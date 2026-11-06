@@ -62,8 +62,8 @@ namespace DroneSandbox
                 for (int i = 0; i < n; i++)
                 {
                     Vector3 sum = Vector3.zero;
-                    for (int b = 0; b < band; b++) for (int layer = 0; layer < Mathf.Min(5, data.alphamapLayers); layer++)
-                            sum += FarDetailPalette.Means[layer] * (side < 2 ? strips[side][i, b, layer] : strips[side][b, i, layer]);
+                    for (int b = 0; b < band; b++) for (int layer = 0; layer < Mathf.Min(6, data.alphamapLayers); layer++)
+                            sum += (layer < 5 ? FarDetailPalette.Means[layer] : Ground.LitterMean) * (side < 2 ? strips[side][i, b, layer] : strips[side][b, i, layer]);
                     edges[side][i] = sum / band;
                 }
             }

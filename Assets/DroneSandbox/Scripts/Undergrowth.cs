@@ -29,6 +29,9 @@ namespace DroneSandbox
             placedCells.Clear();
         }
 
+        // Every tree planted so far, from all builders (Ground.PaintForestFloor lays the forest floor under them).
+        public static IReadOnlyList<Vector2> Trees => trees;
+
         // World.Place notes trees from every builder, so woods cannot overlap gardens, orchards or each other.
         public static void NoteTree(Vector2 p)
         {
