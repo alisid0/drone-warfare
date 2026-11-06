@@ -3,6 +3,7 @@ Shader "DroneSandbox/ForestLit"
 {
     Properties
     {
+        _ForestEnabled("Forest fade enabled", Float) = 0
         _ForestTier("Forest tier", Float) = 0
         _ForestBuild("Forest refinement", Float) = 1
         _ForestCamera("Forest camera", Vector) = (0,0,0,0)
@@ -228,6 +229,8 @@ Shader "DroneSandbox/ForestLit"
     }
 
     HLSLINCLUDE
+    // ForestFade needs position in opaque depth/shadow passes too, before LitDepthPass packs the varyings.
+    #define VARYINGS_NEED_POSITION_WS
 
     #pragma target 4.5
     //#pragma enable_debug_symbols
@@ -339,7 +342,7 @@ Shader "DroneSandbox/ForestLit"
     //-------------------------------------------------------------------------------------
 
     // #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.cs.hlsl"
-    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitProperties.hlsl"
+    #include "Assets/DroneSandbox/Resources/Shaders/ForestLitProperties.hlsl"
 
     // TODO:
     // Currently, Lit.hlsl and LitData.hlsl are included for every pass. Split Lit.hlsl in two:
@@ -363,6 +366,7 @@ Shader "DroneSandbox/ForestLit"
             Cull [_CullMode]
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
@@ -403,6 +407,7 @@ Shader "DroneSandbox/ForestLit"
             Cull Off
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
@@ -453,6 +458,7 @@ Shader "DroneSandbox/ForestLit"
             }
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -540,6 +546,7 @@ Shader "DroneSandbox/ForestLit"
             Cull Off
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -617,6 +624,7 @@ Shader "DroneSandbox/ForestLit"
             ColorMask 0
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -661,6 +669,7 @@ Shader "DroneSandbox/ForestLit"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -726,6 +735,7 @@ Shader "DroneSandbox/ForestLit"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -794,6 +804,7 @@ Shader "DroneSandbox/ForestLit"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -856,6 +867,7 @@ Shader "DroneSandbox/ForestLit"
             ZTest [_ZTestTransparent]
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -987,6 +999,7 @@ Shader "DroneSandbox/ForestLit"
             ColorMask [_ColorMaskTransparentVelTwo] 2
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -1108,6 +1121,7 @@ Shader "DroneSandbox/ForestLit"
             ColorMask 0
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -1145,6 +1159,7 @@ Shader "DroneSandbox/ForestLit"
             ZTest LEqual // If the object have already been render in depth prepass, it will re-render to tag stencil
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             // enable dithering LOD crossfade
@@ -1175,6 +1190,7 @@ Shader "DroneSandbox/ForestLit"
             ZTest LEqual
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
