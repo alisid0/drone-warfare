@@ -91,7 +91,8 @@ namespace DroneSandbox
         }
 
         // Obstacle subdivisions keep the parent's crop. The existing 2 m exclusion map includes works and reserved land.
-        // A road or track crossing the whole field splits it along the crossing; anything else halves it.
+        // A road or track crossing the whole field splits it along the crossing, a slanting outline trims its ends, and
+        // anything else halves it.
         static void Cut(FieldPlot f, Func<Vector2, bool> blocked, List<FieldPlot> pieces, int depth)
         {
             int nu = Math.Max(1, (int)Math.Ceiling(2f * f.halfLength / 2f)), nv = Math.Max(1, (int)Math.Ceiling(2f * f.halfWidth * (1f + Math.Abs(f.taper)) / 2f));
@@ -122,6 +123,7 @@ namespace DroneSandbox
                 Cut(second, blocked, pieces, depth + 1);
                 return;
             }
+            if (TrimEnds(f, nu, low, high, counts, clear, out var trimmed)) { Cut(trimmed, blocked, pieces, depth + 1); return; }
             bool along = f.halfLength > f.halfWidth;
             var a = Slice(f, along, false); var b = Slice(f, along, true);
             Cut(a, blocked, pieces, depth + 1);
@@ -155,6 +157,26 @@ namespace DroneSandbox
             int rows=Math.Max(1,(int)Math.Ceiling(result.halfWidth*2f*(1f+Math.Abs(result.taper))/2f));
             for(int j=0;j<=rows;j++) for(int i=0;i<=nu;i++)
                 if(blocked(result.Point(result.halfLength*(2f*i/nu-1f),result.halfWidth*(2f*j/rows-1f)))) return false;
+            return true;
+        }
+
+        // A slanting outline across a field's end leaves only slivers in its last columns. Keep the longest stretch of
+        // columns with one clear run of at least two samples, cut square there, so the slant becomes a fitted side
+        // instead of a staircase of halvings; at most a sixth of the clear ground, in the slivers, is given up.
+        static bool TrimEnds(FieldPlot f, int nu, int[] low, int[] high, int[] counts, int clear, out FieldPlot trimmed)
+        {
+            trimmed = default;
+            int bestFrom = 0, bestTo = -1, bestSum = 0;
+            for (int i = 0; i <= nu;)
+            {
+                if (counts[i] < 2 || high[i] - low[i] + 1 != counts[i]) { i++; continue; }
+                int from = i, sum = 0;
+                while (i <= nu && counts[i] >= 2 && high[i] - low[i] + 1 == counts[i]) sum += counts[i++];
+                if (sum > bestSum) { bestSum = sum; bestFrom = from; bestTo = i - 1; }
+            }
+            float step = 2f * f.halfLength / nu;
+            if (bestTo < 0 || bestFrom == 0 && bestTo == nu || bestSum < clear * 5 / 6 || (bestTo - bestFrom) * step < 6f) return false;
+            trimmed = Piece(f, -f.halfLength + bestFrom * step, -f.halfLength + bestTo * step);
             return true;
         }
 
