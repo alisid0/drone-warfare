@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Recipe woods retain a 4 m local surface; world tiles refine at 16/32 m and batch into 2 km draw blocks.
+    // Recipe woods retain a 4 m surface; world tiles use 16/32 m interiors and 8 m rims in 2 km draw blocks.
     // Generation is sliced between small sampling batches on the main thread, so changing WorldPlan cannot race a worker.
     public sealed class ForestHlod
     {
@@ -310,6 +310,9 @@ namespace DroneSandbox
             readonly Data data;
             readonly Dictionary<long, int> indices = new Dictionary<long, int>();
             readonly Dictionary<long, float> heights = new Dictionary<long, float>();
+            readonly Dictionary<long, float> covers = new Dictionary<long, float>();
+            readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>();
+            readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>();
             public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
             public readonly List<Vector2> uv = new List<Vector2>();
             public readonly List<float> ground = new List<float>(), crown = new List<float>();
@@ -328,7 +331,52 @@ namespace DroneSandbox
                 float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.cover) * 1.7f;
                 height = FarScatter.GroundAt(world - FarTerrain.Origin) + relief - 0.3f;
                 heights.Add(key, height);
+                if (!data.local && data.step <= 32) covers.Add(key, stand.cover);
                 return height;
+            }
+
+            // Refine only mixed woodland margins; solid interiors retain the existing triangle budget.
+            public int RimStep(int x, int z, int step)
+            {
+                if (data.local || step > 32 || step <= 8) return step;
+                long key = ((long)x << 32) ^ (uint)z;
+                if (rimSteps.TryGetValue(key, out int result)) return result;
+                float low = 1f, high = 0f;
+                for (int i = 0; i < 5; i++)
+                {
+                    int px = x + (i == 4 ? step / 2 : (i & 1) * step);
+                    int pz = z + (i == 4 ? step / 2 : (i >> 1) * step);
+                    Height(px, pz);
+                    float cover = covers[((long)px << 32) ^ (uint)pz];
+                    low = Mathf.Min(low, cover); high = Mathf.Max(high, cover);
+                }
+                // Keep the shared block perimeter at its fixed 8 m spacing, regardless of refinement order.
+                result = low < 0.95f && high > 0.02f ? 8 : step;
+                rimSteps.Add(key, result);
+                return result;
+            }
+
+            // Both sides use the coarser parent's whole edge, including any finer neighbours along that edge.
+            public int EdgeStep(int x, int z, bool horizontal)
+            {
+                if (horizontal ? z == 0 || z == BlockSize : x == 0 || x == BlockSize) return data.local ? 4 : 8;
+                int ax = horizontal ? x : x - 1, az = horizontal ? z - 1 : z;
+                int a = TileStep(data, ax / TileSize * TileSize, az / TileSize * TileSize);
+                int b = TileStep(data, x / TileSize * TileSize, z / TileSize * TileSize);
+                int span = Mathf.Max(a, b), stride = Mathf.Min(a, b);
+                if (horizontal) x = x / span * span; else z = z / span * span;
+                long key = ((long)x << 33) ^ ((long)z << 1) ^ (horizontal ? 1L : 0L);
+                if (edgeSteps.TryGetValue(key, out int result)) return result;
+                result = span;
+                for (int t = 0; t < span; t += stride)
+                {
+                    int px = x + (horizontal ? t : 0), pz = z + (horizontal ? 0 : t);
+                    ax = horizontal ? px : px - 1; az = horizontal ? pz - 1 : pz;
+                    result = Mathf.Min(result, RimStep(ax / a * a, az / a * a, a));
+                    result = Mathf.Min(result, RimStep(px / b * b, pz / b * b, b));
+                }
+                edgeSteps.Add(key, result);
+                return result;
             }
 
             // Central differences use the same world-space surface on both sides of every tile and block boundary.
@@ -366,6 +414,7 @@ namespace DroneSandbox
                 data.triangles = triangles.ToArray();
             }
         }
+
 
         // Stitch a quad to the finer nodes on any neighbouring edge; regular interiors need only two triangles.
         static void Quad(Surface surface, int x, int z, int step, int south, int north, int west, int east)
@@ -413,9 +462,24 @@ namespace DroneSandbox
                     for (int z = tz; z < tz + TileSize; z += step)
                         for (int x = tx; x < tx + TileSize; x += step)
                         {
-                            Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
-                                x == tx ? west : step, x + step == tx + TileSize ? east : step);
-                            yield return null;
+                            if (data.local || data.step >= 64)
+                            {
+                                Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
+                                    x == tx ? west : step, x + step == tx + TileSize ? east : step);
+                                yield return null;
+                                continue;
+                            }
+                            int detail = surface.RimStep(x, z, step);
+                            for (int vz = z; vz < z + step; vz += detail)
+                                for (int vx = x; vx < x + step; vx += detail)
+                                {
+                                    Quad(surface, vx, vz, detail,
+                                        vz == z ? surface.EdgeStep(vx, z, true) : detail,
+                                        vz + detail == z + step ? surface.EdgeStep(vx, z + step, true) : detail,
+                                        vx == x ? surface.EdgeStep(x, vz, false) : detail,
+                                        vx + detail == x + step ? surface.EdgeStep(x + step, vz, false) : detail);
+                                    yield return null;
+                                }
                         }
                 }
             var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
