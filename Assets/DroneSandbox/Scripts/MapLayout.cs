@@ -783,12 +783,13 @@ namespace DroneSandbox
                 for (int i = 0; i < blockCount; i++)
                 {
                     var p = new Vector2(-fieldReach + (i + 0.5f) * BlockCell, -fieldReach + (j + 0.5f) * BlockCell);
-                    blocked[j * blockCount + i] = (Plan.world == null && (Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack))
+                    // Most lake/forest cells cannot grow a field; reject them before shoreline, village and slope queries.
+                    blocked[j * blockCount + i] = (Plan.world != null && Plan.world.CoverAt(p.x, p.y) != Cover.Farmland)
+                        || (Plan.world == null && (Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack))
                         || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
-                        || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p)
-                        || (Plan.world != null && Plan.world.CoverAt(p.x, p.y) != Cover.Farmland);
+                        || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p);
                     if (!blocked[j * blockCount + i])
                         foreach (var orchard in Plan.orchards)
                             if (orchard.Contains(p, 3f)) { blocked[j * blockCount + i] = true; break; }

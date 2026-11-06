@@ -1,0 +1,27 @@
+Baseline 6611380 (managed harness, sequential processes, DOTNET_PROCESSOR_COUNT=2)
+
+snapshot cold 177.09 ms
+snapshot repeat 40.59 ms; shared False
+picture cold 2607.06 ms; hash 24C7EF4116C25C0C; working set 198 MiB
+regional paint + BC1 111.47 ms; payload 194208 bytes
+LakeDistrict layout 795.20 ms; shared plan 43 ms, river 198 ms, roads 8 ms, villages 23 ms, road fields 45 ms, fields 462 ms, ; blocked map 360 ms, parcels 87 ms, district occupancy 34%, farmland coverage 89.2%; fields 358; hash 2C94ADB5891A6987
+Reservoir layout 1091.91 ms; shared plan 54 ms, river 314 ms, roads 0 ms, villages 29 ms, road fields 28 ms, fields 663 ms, ; blocked map 621 ms, parcels 42 ms, district occupancy 0%, farmland coverage 0.0%; fields 0; hash CBF29CE484222325
+
+After (same generated world; explicit two-worker picture cap)
+
+snapshot cold 179.06 ms
+snapshot repeat 0.00 ms; shared True
+preview 6.03 ms; districts 0
+picture cold 4181.80 ms; hash 24C7EF4116C25C0C; working set 191 MiB
+district count 3933, construction CPU 442.66 ms
+regional paint + BC1 110.61 ms; payload 194208 bytes
+LakeDistrict layout 520.74 ms; shared plan 2 ms, river 191 ms, roads 8 ms, villages 19 ms, road fields 40 ms, fields 245 ms, ; blocked map 152 ms, parcels 81 ms, district occupancy 34%, farmland coverage 89.2%; fields 358; hash 2C94ADB5891A6987
+Reservoir layout 371.20 ms; shared plan 0 ms, river 286 ms, roads 0 ms, villages 13 ms, road fields 21 ms, fields 48 ms, ; blocked map 15 ms, parcels 33 ms, district occupancy 0%, farmland coverage 0.0%; fields 0; hash CBF29CE484222325
+tile reuse, linear odd-size mip filtering and paint cancellation passed
+snapshot ownership and same-seed invalidation passed
+Regional lifecycle passed: 81 pages, 811 aligned copies, no partial/stale publication
+Picture lifecycle passed: cancellation drains before replacement, only latest texture published
+Picture upload failure releases its result and is not retried
+
+Final API build: Unity 6000.6.7f1 assemblies, C# 9, .NET Standard 2.1, 0 warnings, 0 errors.
+Native graphics/physics time and the 2 ms player budget were not measured.
