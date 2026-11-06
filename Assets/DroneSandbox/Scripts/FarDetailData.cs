@@ -26,6 +26,7 @@ namespace DroneSandbox
         {
             seed = source.seed; heights = source.heights; covers = source.covers; count = source.count;
             roads = source.roads; rivers = source.rivers; riverCells = source.riverCells;
+            lakes = source.lakes;
             features = source.features; fields = source.fields; cover = source.cover; villages = source.villages;
             this.coarse = coarse;
         }
@@ -59,12 +60,14 @@ namespace DroneSandbox
             this.villages = villages ?? new VillagePlan(seed, roads, WorldPlan.Settlements);
             var streets = new List<Segment>(roads); streets.AddRange(this.villages.lanes);
             this.roads = streets.ToArray(); this.rivers = rivers; this.coarse = coarse;
+            lakes = new LakeShore[WorldPlan.Lakes.Count];
+            for (int i = 0; i < lakes.Length; i++) lakes[i] = new LakeShore(WorldPlan.Lakes[i]);
             cover = new FarDetailCover(seed, covers, count);
             fields = new FarFieldPlan(seed, roads, cover, Height);
             var cells = new Dictionary<long, List<Segment>>();
             foreach (var s in rivers)
             {
-                float pad = Math.Max(s.widthA, s.widthB) + 5f;
+                float pad = Math.Max(s.widthA, s.widthB) + 32f; // also covers filtered shoreline pixels at the sector collar
                 int x0 = (int)Math.Floor((Math.Min(s.ax, s.bx) - pad) / Size), x1 = (int)Math.Floor((Math.Max(s.ax, s.bx) + pad) / Size);
                 int z0 = (int)Math.Floor((Math.Min(s.az, s.bz) - pad) / Size), z1 = (int)Math.Floor((Math.Max(s.az, s.bz) + pad) / Size);
                 for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++)
@@ -289,7 +292,12 @@ namespace DroneSandbox
                 route++;
             }
             foreach (var river in Rivers) for (int k = 1; k < river.points.Count; k++)
-                    rivers.Add(new FarDetailData.Segment { ax = river.points[k - 1].x, az = river.points[k - 1].y, bx = river.points[k].x, bz = river.points[k].y, widthA = river.halfWidths[k - 1], widthB = river.halfWidths[k] });
+                {
+                    Vector2 a = river.points[k - 1], b = river.points[k];
+                    rivers.Add(new FarDetailData.Segment { ax = a.x, az = a.y, bx = b.x, bz = b.y,
+                        widthA = WaterAppearance.HalfWidth(river.halfWidths[k - 1], a.x, a.y),
+                        widthB = WaterAppearance.HalfWidth(river.halfWidths[k], b.x, b.y) });
+                }
             var lanes = roads.ToArray();
             if (villageCover != cover) { villageSnapshot = new VillagePlan(Seed, lanes, Settlements); villageCover = cover; }
             double start = timer.Elapsed.TotalMilliseconds;
