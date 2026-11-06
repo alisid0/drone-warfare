@@ -1,0 +1,172 @@
+[
+  {
+    "kind": "IndustrialZone",
+    "slantRange": 300,
+    "lodBias": 1,
+    "verticalFov": 45,
+    "fullCompoundTriangles": 9048,
+    "materialSlotSubmissions": 40,
+    "groups": [
+      {
+        "model": "Scenery_Chimney",
+        "lod": 2,
+        "instances": 2,
+        "triangles": 2256,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_CoolingTower",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 260,
+        "materialSlots": 3
+      },
+      {
+        "model": "Scenery_FactoryHall",
+        "lod": 1,
+        "instances": 2,
+        "triangles": 2120,
+        "materialSlots": 6
+      },
+      {
+        "model": "Scenery_FactoryHall",
+        "lod": 2,
+        "instances": 3,
+        "triangles": 612,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_FreightGroup",
+        "lod": 2,
+        "instances": 5,
+        "triangles": 120,
+        "materialSlots": 2
+      },
+      {
+        "model": "Scenery_FreightShed",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 152,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_OfficeBlock",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 120,
+        "materialSlots": 4
+      },
+      {
+        "model": "Scenery_StorageTank",
+        "lod": 2,
+        "instances": 4,
+        "triangles": 456,
+        "materialSlots": 2
+      },
+      {
+        "model": "Scenery_Warehouse",
+        "lod": 2,
+        "instances": 2,
+        "triangles": 2952,
+        "materialSlots": 8
+      }
+    ]
+  },
+  {
+    "kind": "Airfield",
+    "slantRange": 300,
+    "lodBias": 1,
+    "verticalFov": 45,
+    "fullCompoundTriangles": 996,
+    "materialSlotSubmissions": 20,
+    "groups": [
+      {
+        "model": "Scenery_AircraftShelter",
+        "lod": 2,
+        "instances": 3,
+        "triangles": 504,
+        "materialSlots": 4
+      },
+      {
+        "model": "Scenery_ControlTower",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 80,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_FuelFarm",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 156,
+        "materialSlots": 3
+      },
+      {
+        "model": "Scenery_HangarLarge",
+        "lod": 2,
+        "instances": 2,
+        "triangles": 136,
+        "materialSlots": 4
+      },
+      {
+        "model": "Scenery_OfficeBlock",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 120,
+        "materialSlots": 4
+      }
+    ]
+  },
+  {
+    "kind": "RailJunction",
+    "slantRange": 300,
+    "lodBias": 1,
+    "verticalFov": 45,
+    "fullCompoundTriangles": 3000,
+    "materialSlotSubmissions": 29,
+    "groups": [
+      {
+        "model": "Scenery_FreightShed",
+        "lod": 2,
+        "instances": 3,
+        "triangles": 456,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_GantryCrane",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 168,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_RailContainerWagon",
+        "lod": 2,
+        "instances": 5,
+        "triangles": 300,
+        "materialSlots": 3
+      },
+      {
+        "model": "Scenery_RailHopper",
+        "lod": 2,
+        "instances": 4,
+        "triangles": 512,
+        "materialSlots": 3
+      },
+      {
+        "model": "Scenery_SignalBox",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 88,
+        "materialSlots": 5
+      },
+      {
+        "model": "Scenery_Warehouse",
+        "lod": 2,
+        "instances": 1,
+        "triangles": 1476,
+        "materialSlots": 8
+      }
+    ]
+  }
+]
