@@ -24,7 +24,7 @@ namespace DroneSandbox
             public Matrix4x4 local;
         }
 
-        // The model's full height normalizes both real meshes and cards to the stand's same 8-24 m trees.
+        // The model's full height normalizes meshes and cards to the same 5-24 m trees, including young margins.
         sealed class Model
         {
             public Part[] parts;
@@ -294,7 +294,9 @@ namespace DroneSandbox
                     if (InSector(p) && !SectorForest.Ready) continue;
                     var at = new Vector3(p.x, GroundAt(p) - 0.15f, p.y);
                     var tree = new Tree { position = at, stand = stand };
-                    var rotation = Quaternion.Euler(0f, ForestPattern.Unit(i, j, 44) * 360f, 0f);
+                    float lean = (1f - stand.cover) * 14f;
+                    var rotation = Quaternion.Euler((ForestPattern.Unit(i, j, 51) - 0.5f) * lean,
+                        ForestPattern.Unit(i, j, 44) * 360f, (ForestPattern.Unit(i, j, 52) - 0.5f) * lean);
                     // Cache both roots once: flight changes the tier, not thousands of TRS matrices each frame.
                     for (int tier = 0; tier < 3; tier++)
                     {
@@ -322,12 +324,12 @@ namespace DroneSandbox
                 for (int species = 0; species < 4; species++)
                     for (int shade = 0; shade < 3; shade++)
                         models[tier * 12 + species * 3 + shade] = LoadModel(tier == 1 ? Trees[species].Replace("Scenery_", "Forest_") + "_Reduced" : Trees[species],
-                            tier == 1 ? 0 : tier, ForestPattern.Tint(shade), tier);
-            for (int i = 0; i < Houses.Length; i++) models[36 + i] = LoadModel(Houses[i], 1, 1f, 3);
+                            tier == 1 ? 0 : tier, ForestPattern.Tint(shade), tier, species);
+            for (int i = 0; i < Houses.Length; i++) models[36 + i] = LoadModel(Houses[i], 1, 1f, 3, -1);
         }
 
         // Read every renderer of the selected LOD and use its transformed bounds to normalize tree height.
-        Model LoadModel(string name, int lod, float tint, int tier)
+        Model LoadModel(string name, int lod, float tint, int tier, int species)
         {
             var prefab = Resources.Load<GameObject>("Models/" + name);
             if (prefab == null) return null;
@@ -360,6 +362,11 @@ namespace DroneSandbox
                         material.SetFloat("_ForestTier", tier); material.SetFloat("_ForestBuild", 1f);
                     }
                     var colour = material.color; colour.r *= tint; colour.g *= tint; colour.b *= tint;
+                    if (species >= 0 && (materials[i].name.StartsWith("Leaves") || materials[i].name.StartsWith("Impostor")))
+                    {
+                        Color correction = ForestPalette.PhotoTint(species);
+                        colour.r *= correction.r; colour.g *= correction.g; colour.b *= correction.b;
+                    }
                     material.color = colour; materials[i] = material; ownedMaterials.Add(material);
                 }
                 var box = filter.sharedMesh.bounds;
