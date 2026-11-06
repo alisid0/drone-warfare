@@ -135,7 +135,8 @@ float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 
     cover = inside ? smoothstep(0.0, edge, min((1.0 - best.q) * best.radius * 0.5, crease)) : 0.0;
     tone = ForestCrownRemix(best.hash);
     float value = (0.84 + 0.32 * ForestCrownUnit(tone, 0u)) * (1.0 - 0.20 * (inside ? best.q : 1.0));
-    float gap = 0.6 + 0.08 * broadleaf;
+    // Wide edges blend each rim with its gap; lifting the gap as they widen keeps the mean steady with distance.
+    float gap = lerp(0.6 + 0.08 * broadleaf, 0.9, 0.55 * saturate((edge - 0.8) / 4.0));
     float factor = gap + (value - gap) * cover;
     // Emergent crowns shade what lies below them on the side away from the sun, onto gaps and lower neighbours; a
     // shadow moves at most a quarter cell.
@@ -171,7 +172,7 @@ float ForestCrownDetail(float2 world, float2 dx, float2 dy, float3 macro, float 
         float3 clump = SAMPLE_TEXTURE2D_GRAD(_ForestDetail, sampler_ForestDetail, uv, mul(rotate, dx) / 40.0, mul(rotate, dy) / 40.0).rgb;
         raw *= (1.0 + (clump.r - 0.5) * 0.8 * (0.5 + 0.5 * cover)) * (1.331 - 0.098 * broadleaf);
         crownSlope += (clump.gb * 2.0 - 1.0) * 0.35 * cover;
-        float fade = big ? 1.0 - smoothstep(1.9, 3.6, footprint) : 1.0 - smoothstep(1.4, 2.8, footprint);
+        float fade = big ? 1.0 - smoothstep(2.2, 3.6, footprint) : 1.0 - smoothstep(1.9, 3.5, footprint);
         float k = fade * strength;
         factor += (raw - factor) * k;
         // Lattice slopes are in rotated metres; turn them back to world x/z.
