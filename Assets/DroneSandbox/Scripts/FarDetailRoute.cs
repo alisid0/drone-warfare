@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = System.Random;
 
 namespace DroneSandbox
 {
-    // Which 512 m detail tiles the streamer wants, and by when: the camera's ready zone and the followed drone's
-    // neighbourhood now, then the tiles along the drone's queued route by the real seconds it needs to reach them.
+    // Which 512 m detail tiles the streamer wants, and by when: the camera's ready zone and the followed drone's 600 m
+    // zone now, then the tiles along the drone's queued route by the real seconds its zone needs to reach them.
     // Pure data with no engine objects, so the offline harness drives exactly this planner.
     public sealed class FarDetailRoute
     {
@@ -68,7 +69,7 @@ namespace DroneSandbox
             Vector2 velocity = hasDrone ? droneVelocity : cameraVelocity;
             Eye = hasDrone ? drone : cameraFocus;
             EyeSpeed = velocity.magnitude;
-            EyeZone = hasDrone ? Bubble : Zone;
+            EyeZone = Zone; // the same 600 m as the camera's zone, so a following camera's gaps are ReadyAhead's too
             Disc(cameraFocus, Zone, 0f, 1f, 0f, 0, false);
             Disc(cameraEye, Bubble, 0f, 1f, 0f, 0, false);
             // Distance from speed times the multiplier, p99 generation latency and a 3 s margin, kept to 2-3 km.
