@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep Forest — offline comparison</title>
+<style>
+body{margin:32px auto;padding:0 24px;max-width:1800px;background:#17201b;color:#e6ece7;font:16px/1.5 system-ui,sans-serif}h1{font-size:30px}p{max-width:1000px;color:#c4cec6}section{margin:36px 0}h2{font-size:22px}figure{margin:0;min-width:0}img{display:block;width:100%;border:1px solid #435448}a{color:#c0d6a2}figcaption{padding:8px 0}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}@media(max-width:800px){.pair{grid-template-columns:1fr}}
+</style>
+<h1>Deep Forest: logical density and rendered tiers</h1>
+<p>Matched Blender structural reviews at 1600×900, using production placements, canopy geometry and repository tree assets. These are <strong>not Unity/HDRP screenshots</strong>, a reconstruction of the exact hd139 frame, or evidence of GPU timing and smooth transitions. The scene is cropped to the 2 km sector. See the <a href="../HANDOFF.txt">handoff and required Canopy integration patch</a>.</p>
+<p>Baseline: 11,500 planted tree objects. Candidate: 108,777 logical stems, shared glades/species recipe and instanced camera tiers. The coarse intermediate canopy surface and glade rims need native visual review.</p>
+<section><h2>100 m</h2><div class="pair"><figure><a href="deepforest_100m_before.png"><img src="deepforest_100m_before.png" alt="Before at 100 metres: sparse trees beside a separate dense core"></a><figcaption>Before — 8184f6e placement</figcaption></figure><figure><a href="deepforest_100m_after.png"><img src="deepforest_100m_after.png" alt="After at 100 metres: dense nearby crowns and a continuous canopy beyond"></a><figcaption>After — camera tiers and logical woods</figcaption></figure></div></section>
+<section><h2>300 m</h2><div class="pair"><figure><a href="deepforest_300m_before.png"><img src="deepforest_300m_before.png" alt="Before forest from 300 metres"></a><figcaption>Before</figcaption></figure><figure><a href="deepforest_300m_after.png"><img src="deepforest_300m_after.png" alt="After forest from 300 metres, with connected canopy and glades"></a><figcaption>After</figcaption></figure></div></section>
+<section><h2>1 km — supplementary view</h2><div class="pair"><figure><a href="deepforest_1000m_before.png"><img loading="lazy" src="deepforest_1000m_before.png" alt="Before forest from one kilometre"></a><figcaption>Before</figcaption></figure><figure><a href="deepforest_1000m_after.png"><img loading="lazy" src="deepforest_1000m_after.png" alt="After forest from one kilometre"></a><figcaption>After</figcaption></figure></div></section>
+<section><h2>2.5 km</h2><div class="pair"><figure><a href="deepforest_2500m_before.png"><img loading="lazy" src="deepforest_2500m_before.png" alt="Before sector from 2.5 kilometres"></a><figcaption>Before</figcaption></figure><figure><a href="deepforest_2500m_after.png"><img loading="lazy" src="deepforest_2500m_after.png" alt="After sector from 2.5 kilometres showing species patches and irregular glades"></a><figcaption>After</figcaption></figure></div></section>
+</html>

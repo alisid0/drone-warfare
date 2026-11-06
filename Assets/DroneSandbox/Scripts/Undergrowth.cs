@@ -23,6 +23,7 @@ namespace DroneSandbox
         // Clears the last sector's occupancy grids and renderer allowance before any new trees are planted.
         public static void Reset()
         {
+            SectorForest.Reset();
             rendererCount = 0;
             trees.Clear();
             treeCells.Clear();
@@ -299,12 +300,18 @@ namespace DroneSandbox
             return best;
         }
 
-        static IEnumerable<Vector2> TreesNear(Vector2 p, float radius) => Near(treeCells, p, radius);
+        // Logical and decorative stems share the occupancy grid, regardless of render tier.
+        public static IEnumerable<Vector2> TreesNear(Vector2 p, float radius) => Near(treeCells, p, radius);
 
         // Whether a tree stands within `room` of p: Situations keeps mission targets out from under the canopies.
         public static bool UnderTrees(Vector2 p, float room)
         {
-            foreach (var _ in TreesNear(p, room)) return true;
+            int reach = Mathf.CeilToInt(room / Cell);
+            var c = CellOf(p);
+            for (int dz = -reach; dz <= reach; dz++)
+                for (int dx = -reach; dx <= reach; dx++)
+                    if (treeCells.TryGetValue(new Vector2Int(c.x + dx, c.y + dz), out var list))
+                        foreach (var q in list) if ((q - p).sqrMagnitude < room * room) return true;
             return false;
         }
 
