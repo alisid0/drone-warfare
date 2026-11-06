@@ -11,9 +11,10 @@ namespace DroneSandbox
         public Vector2 front, along, outward;
         public float frontage, depth, setback;
         public int owner, style;
+        public int landUse; // 1 allotments, 2 playing field, 3 cemetery, 4 depot, 5 edge farm
         public bool town, farm, church, square;
         public string model;
-        public bool old, cultivated, shed, logs, untended, roofChanged;
+        public bool old, core, cultivated, shed, logs, untended, roofChanged;
         public int shape, palette, boundary, identity, settlement;
         public float scale, pathWidth, driveWidth, roadWidth;
         public Vector2 House => front + outward * setback;
@@ -102,6 +103,7 @@ namespace DroneSandbox
 
                 bool church = false, square = false;
                 var localLanes = lanes.GetRange(firstLane, lanes.Count - firstLane).ToArray();
+                TownEdge(owner, s, roads, localLanes, anchor, reach);
                 foreach (var road in street)
                 {
                     Vector2 a = new Vector2(road.ax, road.az), b = new Vector2(road.bx, road.bz), dir = (b - a).normalized;

@@ -246,6 +246,20 @@ namespace DroneSandbox
                 if (b.frontage > 0f) Garden(b.root, b.plot, ref budget);
                 budgets[b.root] = budget;
             }
+            foreach (var p in occupiedPlots)
+            {
+                if (p.landUse != 1 && p.landUse != 4) continue;
+                var root = roots[p.owner]; int budget = budgets[root];
+                float yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg;
+                if (p.landUse == 1)
+                    for (int i = 0; i < 4; i++) VillageProp("Scenery_Hut", p.Point(-p.frontage*.5f+7f+i*16f,p.depth-4f),yaw,.65f,2.3f,root,ref budget,false);
+                else
+                {
+                    for (int i = 0; i < 3; i++) VillageProp("Scenery_FreightGroup",p.Point(-21f+i*21f,13f),yaw,1f,5f,root,ref budget,false);
+                    VillageProp("Scenery_MachineryShed",p.Point(21f,58f),yaw,1f,5.5f,root,ref budget,false);
+                }
+                budgets[root] = budget;
+            }
             Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
         }
 

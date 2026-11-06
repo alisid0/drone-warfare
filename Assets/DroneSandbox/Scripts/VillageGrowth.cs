@@ -76,7 +76,7 @@ namespace DroneSandbox
         }
 
         // Route stations let a property span several short road segments without duplicating or dropping frontages.
-        static bool OnRoute(List<FarDetailData.Segment> route, float station, out Vector2 point, out Vector2 along, out float width)
+        internal static bool OnRoute(List<FarDetailData.Segment> route, float station, out Vector2 point, out Vector2 along, out float width)
         {
             foreach (var r in route)
             {
@@ -99,16 +99,18 @@ namespace DroneSandbox
                 {
                     if (!OnRoute(street, next, out Vector2 at, out Vector2 dir, out float roadWidth)) { next += 8f; continue; }
                     float distance = (at - core).magnitude;
-                    bool old = oldStreet && distance < reach * .36f;
+                    bool old = oldStreet && distance < reach * .65f;
                     bool farm = distance > reach * .79f && rng.NextDouble() < .3;
-                    float width = farm ? 36f : old ? 15f + (float)rng.NextDouble() * 6f : 21f + (float)rng.NextDouble() * 11f;
+                    float width = farm ? 36f : old ? 12f + (float)rng.NextDouble() * 2.2f : 21f + (float)rng.NextDouble() * 11f;
+                    // Advance by full slots, then centre each roof in its slot; unequal widths cannot overlap.
+                    if (!OnRoute(street, next + width * .5f, out at, out dir, out roadWidth)) break;
                     Vector2 outward = new Vector2(-dir.y, dir.x) * side;
                     var p = new VillagePlot { front = at + outward * (roadWidth + 1.8f), along = dir, outward = outward,
                         frontage = width, depth = farm ? 62f : old ? 27f + (float)rng.NextDouble() * 12f : 38f + (float)rng.NextDouble() * 18f,
-                        setback = old ? 7f : 12f, roadWidth = roadWidth, owner = owner, old = oldStreet, farm = farm,
+                        setback = old ? 5f : 12f, roadWidth = roadWidth, owner = owner, old = old, core = old, farm = farm,
                         model = "Scenery_House_" + (old ? "D" : rng.Next(3) == 0 ? "B" : "A"), style = rng.Next(4) };
                     if (!Overlap(p) && !CrossesRoad(p, roads) && !CrossesRoad(p, local) && Dry(p)) Add(p);
-                    next += width + (old ? .5f : 2f) + (float)rng.NextDouble() * (old ? 2f : 11f);
+                    next += width + (old ? .15f : 2f) + (float)rng.NextDouble() * (old ? .25f : 11f);
                 }
             }
         }
