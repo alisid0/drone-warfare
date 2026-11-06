@@ -116,7 +116,7 @@ namespace DroneSandbox
             rts.LookAt(new Vector3(bridge.x, 0f, bridge.y), 40f * Scale.Camera, 135f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02c_bridge");
-            rts.LookAt(OpenRiverNear(Old(-100f, 0f)), 26f * Scale.Lens, 150f);
+            LookAtOpenRiver(rts, Old(-100f, 0f), 26f * Scale.Lens, 150f);
             yield return new WaitForSeconds(2f); // the camera settled, for the pair below
             yield return Shot("02f_river");
             // The same view a second later, to check that the water flows down the river (compare the two).
@@ -505,18 +505,25 @@ namespace DroneSandbox
             return from;
         }
 
-        // The nearest spot in the river (going out in rings) with no tree within clearance metres: hd160's river shot
-        // looked straight into a bankside crown.
-        static Vector3 OpenRiverNear(Vector3 from, float clearance = 18f)
+        // Points the camera at the nearest stretch of river (going out in rings) that it sees with no crown in the way,
+        // tested on lines to the middle and four points round it: hd160-162's river shot looked straight into a
+        // bankside tree (one the old near-tree list didn't hold).
+        static void LookAtOpenRiver(RtsController rts, Vector3 from, float distance, float yaw)
         {
+            var offsets = new[] { Vector3.zero, new Vector3(8f, 0f, 0f), new Vector3(-8f, 0f, 0f), new Vector3(0f, 0f, 8f), new Vector3(0f, 0f, -8f) };
             for (float reach = 0f; reach < 400f; reach += 10f)
                 for (float angle = 0f; angle < 360f; angle += reach > 0f ? 15f : 360f)
                 {
                     var p = new Vector2(from.x, from.z) + new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
-                    if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth * 0.5f && !Undergrowth.UnderTrees(p, clearance))
-                        return new Vector3(p.x, 0f, p.y);
+                    if (MapLayout.RiverField.Distance(p.x, p.y) >= MapLayout.RiverHalfWidth * 0.5f) continue;
+                    var target = Ground.OnGround(new Vector3(p.x, 0f, p.y));
+                    rts.LookAt(target, distance, yaw);
+                    Vector3 eye = Camera.main.transform.position;
+                    bool clear = true;
+                    foreach (var offset in offsets) clear &= !Canopy.Blocks(eye, Ground.OnGround(target + offset) + Vector3.up * 0.5f);
+                    if (clear) return;
                 }
-            return from;
+            rts.LookAt(from, distance, yaw);
         }
 
         // A tour of generated sectors: the theatre map, then a dozen kinds of sector, each built, photographed from
@@ -778,6 +785,7 @@ namespace DroneSandbox
                           $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
                           $"forest build {ForestHlod.BuildMs:F2} ms");
             yield return LandmarkViews(rts);
+            yield return ContinuousFlight(game, rts);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
@@ -2119,6 +2127,205 @@ namespace DroneSandbox
             }
             Destroy(card);
             Destroy(material);
+        }
+
+        // ChatGPT's continuous-world acceptance flight (critique 19): a Swift flies one unbroken route of up to 20 km from
+        // the base through a village, the largest forest, a works, a rail junction or airfield and a dam, never
+        // teleporting. The first half is at 1x and 220 m up, the second at 4x and the lowest transit height. At each stop
+        // the strategy camera looks from 50 m, 300 m and 2.5 km (the Swift's feed shows in the corner). Logged: frame p95
+        // and p99 at each speed, frames over 25 ms with where the Swift was, the worst streaming commit, texture memory,
+        // live tiles, missing forest blocks, the nearest streamed tile still missing, and whether the Swift took every leg,
+        // kept its battery reckoning and met no enemy this far from the battle.
+        IEnumerator ContinuousFlight(SandboxGame game, RtsController rts)
+        {
+            // Candidate stops in local coordinates, one kind per stop.
+            var stops = new List<(string kind, string name, Vector3 at)>();
+            void Add(string kind, string name, Vector2 world)
+            {
+                Vector2 local = world - FarTerrain.Origin;
+                if (local.magnitude < Ground.Size * 0.5f + 500f) return; // outside the sector, where the world streams
+                stops.Add((kind, name, new Vector3(local.x, 0f, local.y)));
+            }
+            foreach (var s in WorldPlan.Settlements) Add("village", s.name, s.center);
+            Add("forest", "largest forest", ForestHlod.LargestForest());
+            // Any wood within 10 km, at least 400 m across (hd165's route had no room for the largest forest).
+            for (float dz = -10000f; dz <= 10000f; dz += 1000f)
+                for (float dx = -10000f; dx <= 10000f; dx += 1000f)
+                {
+                    Vector2 w = FarTerrain.Origin + new Vector2(dx, dz);
+                    bool wood = WorldPlan.Inside(w.x, w.y) && WorldPlan.CoverAt(w.x, w.y) == Cover.Forest;
+                    foreach (var o in new[] { new Vector2(200f, 0f), new Vector2(-200f, 0f), new Vector2(0f, 200f), new Vector2(0f, -200f) })
+                        wood &= WorldPlan.Inside(w.x + o.x, w.y + o.y) && WorldPlan.CoverAt(w.x + o.x, w.y + o.y) == Cover.Forest;
+                    if (wood) Add("forest", "wood", w);
+                }
+            foreach (var f in WorldPlan.Features) if (f.valid) Add(f.kind == WorldFeatureKind.IndustrialZone ? "works" : "rail/airfield", f.kind.ToString(), f.center);
+            foreach (var d in WorldPlan.Dams) Add("dam", d.name, (d.a + d.b) * 0.5f);
+            // The route with the most kinds within 20 km, then the one nearest 17 km long (ChatGPT asked for 15-20), keeping
+            // every leg 1.5 km clear of the enemy HQ, or 80% of the base's own distance from it when that's closer (hd164
+            // asked for 1.5 km from a base nearer than that and found no route).
+            Vector3 home = Flat(game.basePosition), hq = Flat(game.enemyHqPosition);
+            float clearOfHq = Mathf.Min(1500f, 0.8f * Vector3.Distance(home, hq));
+            // Only the six of each kind nearest the base go into the search, which keeps it to well under a million routes.
+            stops.Sort((a, b) => Vector3.Distance(home, a.at).CompareTo(Vector3.Distance(home, b.at)));
+            var perKind = new Dictionary<string, int>();
+            var kept = new List<(string kind, string name, Vector3 at)>();
+            foreach (var s in stops)
+            {
+                perKind.TryGetValue(s.kind, out int n);
+                if (n >= 6) continue;
+                perKind[s.kind] = n + 1;
+                kept.Add(s);
+            }
+            stops.Clear();
+            stops.AddRange(kept);
+            var route = new List<int>();
+            var best = new List<int>();
+            float bestLength = 0f;
+            var used = new HashSet<string>();
+            void Search(Vector3 from, float length)
+            {
+                if (route.Count > best.Count || (route.Count == best.Count && Mathf.Abs(length - 17000f) < Mathf.Abs(bestLength - 17000f)))
+                {
+                    best.Clear(); best.AddRange(route); bestLength = length;
+                }
+                for (int i = 0; i < stops.Count; i++)
+                {
+                    if (used.Contains(stops[i].kind)) continue;
+                    Vector3 to = stops[i].at;
+                    float step = Vector3.Distance(from, to);
+                    if (length + step > 20000f) continue;
+                    Vector3 ab = to - from;
+                    float t = Mathf.Clamp01(Vector3.Dot(hq - from, ab) / Mathf.Max(1f, ab.sqrMagnitude));
+                    if (Vector3.Distance(hq, from + ab * t) < clearOfHq) continue;
+                    used.Add(stops[i].kind); route.Add(i);
+                    Search(to, length + step);
+                    route.RemoveAt(route.Count - 1); used.Remove(stops[i].kind);
+                }
+            }
+            Search(home, 0f);
+            var names = new System.Text.StringBuilder();
+            foreach (int i in best)
+            {
+                Vector2 w = new Vector2(stops[i].at.x, stops[i].at.z) + FarTerrain.Origin;
+                names.Append($" {stops[i].kind} ({stops[i].name}, {w.x:F0}, {w.y:F0})");
+            }
+            Vector2 homeWorld = new Vector2(home.x, home.z) + FarTerrain.Origin;
+            log.WriteLine($"Continuous flight route from the base at ({homeWorld.x:F0}, {homeWorld.y:F0}): {best.Count} stops, {bestLength / 1000f:F1} km:{names}");
+            var swift = game.SpawnDrone(DroneType.Recon);
+            if (swift == null || best.Count < 3)
+            {
+                log.WriteLine($"Continuous flight: Swift {swift != null}, {best.Count} stops chosen of {stops.Count} candidates, HQ clearance {clearOfHq:F0} m");
+                errors++;
+                yield break;
+            }
+            float cruise = swift.altitude;
+            foreach (int i in best) swift.MoveTo(stops[i].at, true);
+            rts.selected.Clear();
+            rts.selected.Add(swift);
+            int knownBefore = 0;
+            var known = new HashSet<EnemyUnit>();
+            foreach (var e in game.enemies) if (e != null && e.Known) { knownBefore++; known.Add(e); }
+            var contacts = new System.Text.StringBuilder();
+            var legs = new System.Text.StringBuilder();
+            var leg = new List<float>(8000);
+
+            FarDetail.ResetMetrics();
+            var slow = new List<float>(20000);
+            var fast = new List<float>(20000);
+            var spikes = new System.Text.StringBuilder();
+            int spikeCount = 0, reached = 0, ownTileMissing = 0, tileSamples = 0, worstMissingBlocks = 0, gcCount = System.GC.CollectionCount(0);
+            // The first second is left out: its first frame carried the route search and the Swift's launch (hd165's
+            // 196 ms "spike" at the base).
+            float nearestMissing = float.MaxValue, settleUntil = Time.realtimeSinceStartup + 1f, nextSample = 0f, flownBefore = swift.Flown, gameTime = 0f;
+            long peakTexture = 0;
+            float started = Time.realtimeSinceStartup;
+            while (reached < best.Count && swift != null && swift.IsAlive && Time.realtimeSinceStartup - started < 900f)
+            {
+                bool fastHalf = reached >= (best.Count + 1) / 2;
+                Time.timeScale = fastHalf ? 4f : 1f;
+                swift.altitude = fastHalf ? cruise : 220f;
+                rts.LookAt(swift.transform.position, 120f, 30f);
+                yield return null;
+                if (swift == null) break;
+                float ms = Time.unscaledDeltaTime * 1000f;
+                gameTime += Time.deltaTime;
+                Vector2 world = new Vector2(swift.transform.position.x, swift.transform.position.z) + FarTerrain.Origin;
+                if (Time.realtimeSinceStartup > settleUntil)
+                {
+                    (fastHalf ? fast : slow).Add(ms);
+                    leg.Add(ms);
+                    // With what the far world spent on the main thread that frame and whether the garbage collector ran.
+                    int gc = System.GC.CollectionCount(0);
+                    if (ms > 25f && spikeCount++ < 16)
+                        spikes.Append($" {ms:F0} ms at ({world.x:F0}, {world.y:F0}) {(fastHalf ? "4x" : "1x")} scatter {FarScatter.MainThreadMs:F1} ms{(gc != gcCount ? " GC" : "")};");
+                    gcCount = gc;
+                }
+                peakTexture = System.Math.Max(peakTexture, (long)Texture.currentTextureMemory);
+                worstMissingBlocks = Mathf.Max(worstMissingBlocks, ForestHlod.MissingBlocks);
+                // Once a second: the nearest streamed tile round the Swift that should be live and isn't.
+                if (Time.realtimeSinceStartup > nextSample)
+                {
+                    nextSample = Time.realtimeSinceStartup + 1f;
+                    tileSamples++;
+                    // Any enemy newly known, with where it stands and how far it was from the Swift.
+                    foreach (var e in game.enemies)
+                        if (e != null && e.Known && known.Add(e))
+                        {
+                            Vector2 at = new Vector2(e.transform.position.x, e.transform.position.z) + FarTerrain.Origin;
+                            contacts.Append($" {e.type} at ({at.x:F0}, {at.y:F0}), {Vector3.Distance(e.transform.position, swift.transform.position):F0} m from the Swift;");
+                        }
+                    int cx = Mathf.FloorToInt(world.x / 512f), cz = Mathf.FloorToInt(world.y / 512f);
+                    for (int z = cz - 2; z <= cz + 2; z++)
+                        for (int x = cx - 2; x <= cx + 2; x++)
+                        {
+                            if (!FarDetail.Eligible(x, z)) continue;
+                            Vector2 middle = new Vector2((x + 0.5f) * 512f, (z + 0.5f) * 512f) - FarTerrain.Origin;
+                            if (FarDetail.TryHeight(middle, out _)) continue;
+                            nearestMissing = Mathf.Min(nearestMissing, FarDetail.DistanceTo(x, z, world));
+                            if (x == cx && z == cz) ownTileMissing++;
+                        }
+                }
+                // A stop: everything paused while the camera looks from 50 m, 300 m and 2.5 km.
+                Vector3 stop = stops[best[reached]].at;
+                if (Vector3.Distance(Flat(swift.transform.position), stop) < 90f)
+                {
+                    string label = $"91_flight_{reached}_{stops[best[reached]].kind.Replace('/', '_')}";
+                    legs.Append($" to {stops[best[reached]].kind} {(fastHalf ? "4x" : "1x")} p95 {P(leg, 0.95f):F2} ms ({leg.Count});");
+                    leg.Clear();
+                    Time.timeScale = 0f;
+                    foreach (var (name, distance) in new[] { ("50m", 50f), ("300m", 300f), ("2500m", 2500f) })
+                    {
+                        rts.LookAt(swift.transform.position, distance, 30f);
+                        yield return new WaitForSecondsRealtime(distance > 1000f ? 2f : 1f);
+                        yield return Shot($"{label}_{name}");
+                    }
+                    reached++;
+                    settleUntil = Time.realtimeSinceStartup + 2f; // the camera's jumps reload the view; not flight frames
+                }
+            }
+            Time.timeScale = 1f;
+            float realSeconds = Time.realtimeSinceStartup - started;
+            if (swift != null) swift.altitude = cruise;
+            int knownAfter = 0;
+            foreach (var e in game.enemies) if (e != null && e.Known) knownAfter++;
+            float P(List<float> frames, float share)
+            {
+                if (frames.Count == 0) return 0f;
+                frames.Sort();
+                return frames[Mathf.Min(frames.Count - 1, Mathf.CeilToInt(frames.Count * share) - 1)];
+            }
+            float slow95 = P(slow, 0.95f), slow99 = P(slow, 0.99f), fast95 = P(fast, 0.95f), fast99 = P(fast, 0.99f);
+            float battery = swift != null ? swift.Flown - flownBefore - gameTime : 0f; // flying time charged against flying time
+            log.WriteLine($"Continuous flight: reached {reached}/{best.Count} stops in {realSeconds:F0} s, Swift alive {swift != null && swift.IsAlive}, " +
+                          $"battery {(swift != null ? swift.Battery * 100f : 0f):F0}% (charge drift {battery:F1} s), queued left {(swift != null ? swift.Waypoints.Count : 0)}, " +
+                          $"new contacts {knownAfter - knownBefore}:{contacts}");
+            log.WriteLine($"Continuous flight frames: 1x p95 {slow95:F2} p99 {slow99:F2} ms ({slow.Count}), 4x p95 {fast95:F2} p99 {fast99:F2} ms ({fast.Count}); " +
+                          $"legs:{legs} over 25 ms {spikeCount}:{spikes}");
+            log.WriteLine($"Continuous flight streaming: worst commit {FarDetail.WorstCommitMs:F3} ms, over 2 ms {FarDetail.BudgetOverruns}, live {FarDetail.Live}/{FarDetail.MaxTiles}, " +
+                          $"nearest missing tile {(nearestMissing == float.MaxValue ? "none" : nearestMissing.ToString("F0") + " m")}, own tile missing {ownTileMissing}/{tileSamples}, " +
+                          $"worst missing canopy blocks {worstMissingBlocks}, peak texture memory {peakTexture / 1048576} MB, {Screen.width}x{Screen.height}");
+            if (reached < best.Count || swift == null || !swift.IsAlive || Mathf.Max(slow95, fast95) > 16.7f || FarDetail.WorstCommitMs > 2.0 ||
+                knownAfter > knownBefore || Mathf.Abs(battery) > 2f) errors++;
         }
 
         // One permanent landmark of each kind as the world draws it outside a sector (streamed ground, far masses), from
