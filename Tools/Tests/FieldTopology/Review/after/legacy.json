@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "VarrowValley",
+    "fields": 229,
+    "boundaries": 407,
+    "geometryHash": "15CF62F97483B0C2"
+  },
+  {
+    "kind": "RollingFarmland",
+    "fields": 390,
+    "boundaries": 778,
+    "geometryHash": "8900F52CBBE636CA"
+  }
+]
