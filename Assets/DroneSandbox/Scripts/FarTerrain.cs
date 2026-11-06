@@ -405,6 +405,26 @@ namespace DroneSandbox
         // The world picture, for the near ring round the sector (Backdrop) to paint itself with.
         public static Texture2D WorldTexture => worldTexture;
 
+        // The canopy's zero-height fringe must meet the same world picture, including its displaced cover edge.
+        // Keep this hook separate from the independently streamed FarDetail ground textures.
+        public static Color CanopyGroundColour(float x, float z)
+        {
+            float pixel = WorldPlan.Size / TextureSize;
+            float wx = -WorldPlan.Half + (Mathf.Floor((x + WorldPlan.Half) / pixel) + 0.5f) * pixel;
+            float wz = -WorldPlan.Half + (Mathf.Floor((z + WorldPlan.Half) / pixel) + 0.5f) * pixel;
+            float mottle = Mathf.PerlinNoise(wx / 180f + 3f, wz / 180f + 7f) - 0.5f + 0.6f * (Mathf.PerlinNoise(wx / 45f + 11f, wz / 45f) - 0.5f);
+            float jx = 44f * (Mathf.PerlinNoise(wx / 70f, wz / 70f + 31f) - 0.5f), jz = 44f * (Mathf.PerlinNoise(wx / 70f + 57f, wz / 70f) - 0.5f);
+            Cover cover = WorldPlan.CoverAt(wx + jx, wz + jz);
+            if (cover == Cover.Farmland) return ((Color)Field(wx, wz, CanopyCrops)).linear;
+            if (cover == Cover.Forest) return ((Color)Shade(new Color32(54, 70, 42, 255), 0.95f + 0.45f * mottle + 0.35f * (Mathf.PerlinNoise(wx / 16f, wz / 16f + 9f) - 0.5f))).linear;
+            return ((Color)Shade(new Color32(96, 118, 72, 255), 1f + 0.16f * mottle + 0.08f * (Mathf.PerlinNoise(wx / 600f + 5f, wz / 600f) - 0.5f))).linear;
+        }
+
+        static readonly Color32[] CanopyCrops =
+        {
+            new Color32(170, 146, 90, 255), new Color32(156, 138, 84, 255), new Color32(98, 114, 62, 255),
+            new Color32(86, 104, 58, 255), new Color32(104, 82, 62, 255), new Color32(138, 132, 86, 255),
+        };
         // A field's colour, as farmland looks from the air: districts (the cells of a jittered 700 m grid) each
         // ploughed its own way and cut into strips 35-110 m wide that bend a little, every strip divided along its
         // length into fields of 150-400 m with their own crops. About half the strip edges carry a hedge; the rest,

@@ -10,21 +10,22 @@ Push-Location $repo
 try {
     & $Python -I Tools/ForestHlod/prepare.py
     if ($LASTEXITCODE -ne 0) { throw 'Unity assembly API check failed' }
-    & $Python -I Tools/ForestHlod/run.py
-    if ($LASTEXITCODE -ne 0) { throw 'Production-source harness failed' }
-    & $Dotnet Temp/forest-hlod/bin/Release/net8.0/harness.dll $repo Temp/forest-hlod/exports --checks
+    foreach ($phase in 'before','after') {
+        & $Python -I Tools/ForestHlod/run.py $phase
+        if ($LASTEXITCODE -ne 0) { throw 'Production-source harness failed' }
+    }
+    & $Dotnet Temp/forest-hlod/bin/Release/net8.0/harness.dll $repo Temp/forest-hlod/after --checks
     if ($LASTEXITCODE -ne 0) { throw 'Seed checks failed' }
     if (-not $SkipRender) {
         & $Python -I Tools/ForestHlod/textures.py
         if ($LASTEXITCODE -ne 0) { throw 'Texture export failed' }
-        $views = @('calibration_cards','calibration_canopy','forest_near_after')
-        foreach ($region in 'forest','town') {
-            foreach ($view in 'above','300m','2500m','9000m') {
-                foreach ($phase in 'before','after') { $views += "${region}_${view}_${phase}" }
-            }
+        foreach ($phase in 'before','after') {
+            $views = @("--$phase")
+            foreach ($view in '300m','2500m','9000m','edge') { $views += "forest_${view}_${phase}" }
+            if ($phase -eq 'after') { $views += @('calibration_cards','calibration_canopy','forest_near_after') }
+            & $Blender --background --factory-startup --python Tools/ForestHlod/render.py -- @views
+            if ($LASTEXITCODE -ne 0) { throw 'Offline renders failed' }
         }
-        & $Blender --background --factory-startup --python Tools/ForestHlod/render.py -- @views
-        if ($LASTEXITCODE -ne 0) { throw 'Offline renders failed' }
         & $Python -I Tools/ForestHlod/luminance.py
         if ($LASTEXITCODE -ne 0) { throw 'Luminance check failed' }
         & $Python -I Tools/ForestHlod/report.py

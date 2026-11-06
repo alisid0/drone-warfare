@@ -18,19 +18,15 @@ public static class Ground { public const float Size=2000f; public static float 
 public static class World { public static int WorldSeed=1; public static string Timings=""; }
 public class SectorPlan { public Vector2 damPoint; public static SectorPlan Varrow()=>new SectorPlan(); }
 public static class Art { public static Material NewMaterial(Color c)=>null; public static void Discard(Object o){} }
+public static class FarDetail { public static void Clear(){} public static void Initialise(Transform t){} public static bool TryHeight(Vector2 p,out float h){h=0;return false;} public static float ScatterHeight(Vector2 p,bool tree)=>FarTerrain.GroundAt(p); }
+public static class FarDetailChunks { public static void Register(Vector2 p,MeshFilter m,LODGroup g){} }
 public enum DroneType { Scout,Recon }
 public class Drone : MonoBehaviour { public bool IsAlive=true;public float Battery=1;public void MoveTo(Vector3 p){} }
 public class SandboxGame { public Vector3 basePosition,enemyHqPosition;public void StartSandbox(){} public Drone SpawnDrone(DroneType t)=>null; }
 public class RtsController { public void LookAt(Vector3 p,float d,float y){} }
 }
 ''')
-method=block((scripts/'AutoTest.cs').read_text(),'IEnumerator WorldCheck(')
-write(temp/'WorldCheck.cs','''using System.Collections;using UnityEngine;namespace DroneSandbox { class AutoTestProbe {
-int errors;System.IO.TextWriter log=System.IO.TextWriter.Null;
-IEnumerator Shot(string name)=>null;static Vector3 Flat(Vector3 p)=>new Vector3(p.x,0,p.z);
-IEnumerator WorldMapCheck(SandboxGame g,RtsController r,Drone d)=>null;
-'''+method+'}}')
-files=list(scripts.glob('WorldPlan*.cs'))+[scripts/(x+'.cs') for x in ['FarTerrain','FarScatter','ForestPattern','ForestPalette','ForestHlod','SettlementPattern','SettlementHlod']]+[temp/(x+'.cs') for x in ['SectorKind','ApiSupport','WorldCheck']]
+files=list(scripts.glob('WorldPlan*.cs'))+[scripts/(x+'.cs') for x in ['FarTerrain','FarScatter','ForestPattern','ForestPalette','ForestHlod','SettlementPattern','SettlementHlod']]+[temp/(x+'.cs') for x in ['SectorKind','ApiSupport']]
 refs=['CoreModule','PhysicsModule']
 includes=''.join('<Compile Include="'+str(p)+'" />' for p in files)
 references=''.join('<Reference Include="UnityEngine.'+n+'"><HintPath>'+str(unity/('Managed/UnityEngine/UnityEngine.'+n+'.dll'))+'</HintPath></Reference>' for n in refs)

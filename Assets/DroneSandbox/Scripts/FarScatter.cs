@@ -176,14 +176,15 @@ namespace DroneSandbox
         // A unique signed pair avoids collisions on either side of the world's origin.
         static long Key(int i, int j) => ((long)i << 32) ^ (uint)j;
 
-        // The globally aligned 12 m grid fits exactly in a 120 m cell, preventing duplicate boundary trees.
+        // The globally aligned candidate cells fit exactly in a 120 m cell, preventing duplicate boundary trees.
         Cell Build(int ci, int cj)
         {
             var trees = new List<Tree>();
             var center = new Vector2((ci + 0.5f) * CellSize, (cj + 0.5f) * CellSize) - FarTerrain.Origin;
             var bounds = new Bounds(new Vector3(center.x, GroundAt(center), center.y), new Vector3(CellSize + 40f, 240f, CellSize + 40f));
-            for (int j = cj * 10; j < (cj + 1) * 10; j++)
-                for (int i = ci * 10; i < (ci + 1) * 10; i++)
+            int count = Mathf.RoundToInt(CellSize / ForestPattern.TreeStep);
+            for (int j = cj * count; j < (cj + 1) * count; j++)
+                for (int i = ci * count; i < (ci + 1) * count; i++)
                 {
                     if (!ForestPattern.Tree(i, j, out Vector2 world, out ForestPattern.Stand stand)) continue;
                     Vector2 p = world - FarTerrain.Origin;

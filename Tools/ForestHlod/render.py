@@ -9,6 +9,8 @@ from mathutils import Vector
 root=Path(__file__).resolve().parents[2]
 exports=root/'Temp/forest-hlod/exports'; output=root/'Tools/ForestHlod/Review';output.mkdir(parents=True,exist_ok=True)
 args=sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else []
+if args and args[0] in ('--before','--after'):
+    phase=args[0][2:];exports=root/'Temp/forest-hlod'/phase;args=args[1:]
 if args and args[0]=='--calibration':
     exports=root/'Temp/forest-hlod/calibration';args=args[1:]
 requested=args or ['forest_2500m_before','forest_2500m_after']
