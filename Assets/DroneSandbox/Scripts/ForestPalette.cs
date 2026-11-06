@@ -87,7 +87,7 @@ namespace DroneSandbox
         // Density after Poisson rejection and clustering is measured by the production-source harness.
         public static Color Linear(ForestPattern.Stand stand)
         {
-            float coverage = 1f - Mathf.Exp(-Mathf.PI * stand.radius * stand.radius * 0.0057f);
+            float coverage = 1f - Mathf.Exp(-Mathf.PI * stand.radius * stand.radius * 0.0277f);
             return Color.Lerp(Ground, Crown(stand), coverage) * 1.10f;
         }
 

@@ -1,0 +1,52 @@
+Dense Forest handoff — codex/dense-forest, based on 8184f6e
+
+Status
+The logical forest and instanced renderer are implemented. This is ready for Claude's integration review, not a claim that the native GPU/frame/build budgets have passed. Unity was not opened or imported in this worktree, as AGENTS.md requires.
+
+REQUIRED integration change
+Apply canopy-integration.patch to Assets/DroneSandbox/Scripts/Canopy.cs before gameplay acceptance. Canopy.cs was outside the allowed file list; permission was requested and no reply had arrived when this handoff was prepared. The actual file remains untouched. The exact patched source was compiled against Unity and exercised in the managed harness. Without this patch, logical woods are absent from drone clearance and crown occlusion. No Ground.cs change is required.
+
+Implementation
+- SectorForest records deterministic logical stems and candidate-cell indices. ForestPattern owns the shared species, age, crown, glades and spacing recipe. No GameObject is created per logical stem. Deep Forest's former separately planted core now uses this recipe too.
+- Five-metre candidate cells use independent jitter and a 2.4 m priority exclusion, not planted rows. World edges use the existing interpolated mask (nominal transition about 21 m); local grove/core edges use 25 m. The outer sector strip matches the world recipe exactly rather than inheriting the old scenery's 15 m empty border.
+- Undergrowth's eight-metre occupancy grid contains all logical stems. UnderTrees avoids iterator allocation; TreesNear reads that grid. Ground.PaintForestFloor receives accepted logical positions through its existing woodland and tree arguments, before grass construction. Gardens, orchards and riverside decorations retain their existing placement path.
+- FarScatter submits per camera with Graphics.RenderMeshInstanced: nominal 0–45 m full meshes, 45–125 m reduced meshes, 125–350 m crown cards. Budget pressure moves boundaries inward and retains canopy coverage. The 350–700 m patches and >700 m HLOD share the same surface, so there is no mesh replacement at 700 m.
+- Full/reduced/card fades overlap over 10/20/35 m. Both submissions count against the caps. Canopy remains until prefetched cells are ready; refinement crossfades for 0.75 s. Individual tree shadows stop with the reduced tier at 125 m. HDRP raster passes share the same world-space dither function.
+- Four reduced FBXs are decimated from existing LOD1 geometry: oak 2,999 triangles, birch/spruce/pine 3,000 each. They share existing photo textures. The independent ForestLit adapter reuses the repository's licensed HDRP Lit source without changing Codex B's shader/files.
+- HLOD drops CPU mesh copies after upload. The individual tree cache is capped at 192 cells. Startup prepares coarse sector coverage; refinement is sliced during rendering.
+
+Measured offline evidence
+- Fixed world seed 1200, Deep Forest seed 1037: 108,777 logical stems, compared with 11,500 planted baseline tree objects in this harness crop.
+- Shared recipe, one 100 ha interior sample including glades: 276.82 stems/ha; projected crown coverage 74.3386%; glade interiors 9.2913%. These percentages are recipe measurements, not a native screenshot segmentation or a guarantee for every seed/edge.
+- Camera hard limits: 200 full, 1,000 reduced, 5,000 cards and 1,800,000 submitted individual-tree triangles.
+- 101 samples along a 400 m path at 40 m/s: independent peaks 132 full, 586 reduced, 5,000 cards, 1,799,824 tree triangles. Peaks need not occur together. This checks counts, not motion quality or frame time. The harness considers all nearby stems rather than using a favorable camera frustum.
+- Four baked fine canopy blocks intersecting the sector: 180,164 triangles. Tree peak plus these blocks is 1,979,988 triangles. This is NOT a whole-frame bound: other world blocks, refinement overlap, decorations and shadow passes require the native profiler. The requested budget is a delta against hd139.
+- Raw worst-case cached tree record payload is about 24 MiB (192 * 576 candidates * 228 bytes), before array/dictionary overhead. Actual occupancy is smaller. Logical records, occupancy grids, GPU meshes/textures, materials, staging arrays and canopy refinement also consume memory. The four added FBX files total about 0.75 MiB on disk and reuse textures. The 64 MB native vegetation delta remains unverified.
+- Managed stand-ins remove native GameObject/import/render costs. Their timings are in Review/metrics-*.json and are NOT comparable to hd139's 4.2 s/0.85 s. In particular, baseline mocked GameObjects are cheap, and candidate floor painting processes more logical stems. Native sector/woods timing is an acceptance gate.
+
+Gameplay findings
+Art.TryModel removes imported colliders; Art.Part also removes primitive colliders. There is no tree physics-collision path to reproduce. Drone.CruiseHeight reads Canopy.TopNear here/ahead and stays 2.5 m above it. The required patch builds the same four-metre height grid from logical tops and preserves decorative LODGroup scanning.
+Recon.cs uses distance-based detection, not tree-collider raycasts or Canopy.Blocks. Existing unit hiding is mission/Hide state, not collider-derived occlusion. Canopy.Blocks is a separate geometric crown test used by the Mimic/bird path. The patch supplies its existing ellipsoid/cone grid from the logical recipe; no new Recon behavior is introduced. Crown shape calibration against the rendered picture remains necessary.
+
+Verification performed
+C# 9 compile against the installed Unity 6000.6.7f1 assemblies: zero errors and warnings. Changed production consumers and real planning/Ground/Undergrowth code are compiled; unrelated services use explicit stubs. This is an API compatibility check, not a complete Unity player build or HLSL compilation.
+Managed production-source checks passed: repeat-build determinism, logical occupancy, render/logical stand identity, world-border stand identity, density/coverage/glades, 101 camera budgets, and proposed Canopy TopNear/Blocks integration over more than 300 sampled stems.
+
+Images
+Open Review/index.html for before/after pairs at 100 m, 300 m and 2.5 km, plus a supplementary 1 km view. These are matched Blender structural reviews made from production placements, exported canopy geometry/normals/textures and repository tree FBXs, at 1600x900. They are NOT native HDRP captures or an exact reconstruction of hd139's frame: the harness has an empty campaign roster, managed Perlin substitute and simplified terrain materials, and crops the scene to the 2 km sector. The square crop/background is intentional.
+The offline images show a continuous canopy with glades and species patches. They also expose the coarse surface at intermediate distance and faceted glade rims. Native visual acceptance must check that these do not read as a smooth sheet. Offline rendering uses a fixed midpoint cutoff between tiers and cannot prove the runtime dither is pop-free.
+
+Claude's build checklist
+1. Review/apply canopy-integration.patch, then import the four reduced FBXs and Forest materials/shader. Confirm bark/leaves/card materials and orientation. Compile HDRP raster/depth/shadow variants for the player graphics API; inspect shader stripping and instancing in a player build.
+2. Run the sector autotest tour and LandmarkCheck. Verify mission target placement in dense woods, clear roads/sites, forest litter/grass, drone clearance and the crown-occlusion calibration. Check both world crops and recipe-only previews, multiple cameras and sector reloads.
+3. Capture the actual Deep Forest sector at 100 m, 300 m, 1 km and 2.5 km with matched hd139 conditions. Fly at 40 m/s through glades and across the sector boundary, cold and warm caches; rotate the camera and vary altitude through 45/125/350/700 m. Check initial coarse coverage, refinement fades, tier silhouettes, crown/card lighting, glade rims and seams.
+4. RTX 3050 laptop, 1600x900 High: record p95 <=16.7 ms; GPU delta <=1 ms; visible triangle delta <=2 million; native vegetation memory delta <=64 MB. Include fade overlap, shadows, exterior world blocks and retained caches. Record woods <=0.85 s and Deep Forest sector <=4.2 s against the same hd139 baseline. None of these native gates was executable here.
+5. Counters: SectorForest.Stems.Count and BuildMilliseconds; FarScatter.FullTreesDrawn, ReducedTreesDrawn, CardTreesDrawn, TreeTrianglesDrawn, CachedTreeRecords, TierDistances; ForestHlod.BlocksDrawn, TrianglesDrawn, CachedBlocks, BuildMs. Render counters describe the latest eligible camera. World's old TreeCount still counts decorative GameObjects only, so its timing label is not the logical forest total.
+
+Reproduction (repository root; use Python 3.13 with -I)
+python -I Tools/DenseForest/run.py before
+python -I Tools/DenseForest/run.py after
+Convert Temp/dense-forest/after/canopy-*.ppm to PNG with Pillow, keeping names.
+blender --background --factory-startup --python Tools/Blender/render_dense_forest.py -- before 100 300 1000 2500
+blender --background --factory-startup --python Tools/Blender/render_dense_forest.py -- after 100 300 1000 2500
+prepare.py can run the API check alone; make_shader.py regenerates the shader/material copies; Tools/Blender/make_forest_reduced.py regenerates the reduced FBXs. All generated review exports/csproj/native stand-ins live under ignored Temp/dense-forest. Unity must remain closed in this worktree.
