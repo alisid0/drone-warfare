@@ -724,6 +724,17 @@ namespace DroneSandbox
             return RailLines != null && RailLines.Count > 0 && RailField.Distance(p.x, p.y) < RailHalfWidth + 2.5f + margin;
         }
 
+        // Works for fields: a world compound stops them at its worn margin (FarDetailData.CompoundMargin), not at its 64 m
+        // grading reserve, which stays farmed as the distant painters show it; recipe works keep their reserve.
+        static bool FieldWorks(Vector2 p, float margin)
+        {
+            if (Plan.world == null || Plan.world.features.Count == 0) return OnWorks(p, margin);
+            foreach (var f in Plan.world.features)
+                if (f.Area.Contains(p + Plan.world.center, DetailPlan.CompoundMargin(p.x + Plan.world.center.x, p.y + Plan.world.center.y) + margin)) return true;
+            if (Plan.Has(SectorFeature.Quarry) && Vector2.Distance(p, Plan.quarry) < Plan.quarryRadius + 6f + margin) return true;
+            return RailLines != null && RailLines.Count > 0 && RailField.Distance(p.x, p.y) < RailHalfWidth + 2.5f + margin;
+        }
+
         // The dominant land use owns its whole footprint before fields, village blocks, rocks or ordinary woods.
         public static bool ReservedFeature(Vector2 p, float margin)
         {
@@ -795,7 +806,7 @@ namespace DroneSandbox
                         || (Plan.world == null && (Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack))
                         || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
-                        || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
+                        || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || FieldWorks(p, 4f + slack)
                         || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p);
                     if (!blocked[j * blockCount + i])
                         foreach (var orchard in Plan.orchards)

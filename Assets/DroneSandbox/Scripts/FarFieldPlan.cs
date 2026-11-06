@@ -5,44 +5,39 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Immutable, lazily built farm districts. Point queries and sector meshes read the very same trapezoids.
+    // Immutable, lazily built farm blocks. Point queries and sector meshes read the very same trapezoids.
+    // Farmland is laid out the way consolidated land is: regions about 4 km across, each square to its main road, are
+    // cut into staggered rectangular blocks between straight farm tracks, and every block into strips of fields. Only
+    // where two regions meet does a block end on a slant; there no field keeps a corner under 60 degrees, and a sharp
+    // or narrow leftover joins the field beside it or stays grass.
     public sealed class FarFieldPlan
     {
         public const float DistrictSize = 700f, MinimumArea = 600f, MinimumWidth = 12f, MinimumEdge = 18f;
-        const int First = -42, Count = 84;
+        public const float RegionSize = 4000f, MaxSlope = .58f; // a field side's slope: every corner at least 60 degrees
+        const int First = -12, Count = 24, BlockSpan = 26, Slots = 2 * BlockSpan + 1; // a region reaches under 5 km from its site
         readonly int seed;
         readonly FarDetailCover cover;
         readonly Func<float, float, float> height;
-        readonly District[] districts = new District[Count * Count];
+        readonly Region[] regions = new Region[Count * Count];
         readonly Vector2[] sites = new Vector2[Count * Count];
         readonly object[] gates = new object[64];
-        readonly Dictionary<long, FarDetailData.Segment[]> roadCells = new Dictionary<long, FarDetailData.Segment[]>();
+        readonly FarDetailData.Segment[] roads; // through-roads only; tracks never square a region
+        static readonly Parcel[] Grass = new Parcel[0]; // a grazed slot, which no remnant may take
         long buildTicks;
         int builtDistricts;
         public double BuildMilliseconds => Interlocked.Read(ref buildTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         public int BuiltDistricts => Volatile.Read(ref builtDistricts);
 
-        // Index road directions once; no global polygon pass or native Unity call is needed on world setup.
+        // Keep the through-roads once; no global polygon pass or native Unity call is needed on world setup.
         public FarFieldPlan(int seed, FarDetailData.Segment[] roads, FarDetailCover cover = null, Func<float, float, float> height = null)
         {
             this.seed = seed; this.cover = cover; this.height = height;
             for (int i = 0; i < gates.Length; i++) gates[i] = new object();
-            // Every pasture texel now asks for its district, so the jittered sites are hashed once, not nine times a query.
+            // Every pasture texel asks for its block, so the jittered region sites are hashed once, not nine times a query.
             for (int j = 0; j < Count; j++) for (int i = 0; i < Count; i++) sites[j * Count + i] = SiteAt(First + i, First + j);
-            var index = new Dictionary<long, List<FarDetailData.Segment>>();
-            foreach (var s in roads)
-            {
-                if (s.kind == (int)RoadClass.Track) continue;
-                int x0 = Cell(Math.Min(s.ax, s.bx) - 500f), x1 = Cell(Math.Max(s.ax, s.bx) + 500f);
-                int z0 = Cell(Math.Min(s.az, s.bz) - 500f), z1 = Cell(Math.Max(s.az, s.bz) + 500f);
-                for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++)
-                {
-                    long key = Key(x, z);
-                    if (!index.TryGetValue(key, out var list)) { list = new List<FarDetailData.Segment>(); index.Add(key, list); }
-                    list.Add(s);
-                }
-            }
-            foreach (var pair in index) roadCells.Add(pair.Key, pair.Value.ToArray());
+            var through = new List<FarDetailData.Segment>();
+            foreach (var s in roads) if (s.kind != (int)RoadClass.Track) through.Add(s);
+            this.roads = through.ToArray();
         }
 
         // A district keeps its actual polygon for audit and an O(1) strip/cell index for painting.
@@ -50,11 +45,12 @@ namespace DroneSandbox
         {
             public int x, z;
             public Vector2 site, along;
-            public float angle, width, slope, settlement, hedgeDensity, fallow;
+            public float angle, width, slope, settlement, wet, hedgeDensity, fallow;
             public int hash;
+            public bool pasture; // a grassland block: grazed paddocks and the odd hay meadow, no crops
             public Vector2[] outline;
             public Parcel[] parcels;
-            internal int firstStrip;
+            internal float stripOrigin; // strips are laid from the block's own edge, so none is left as a sliver
             internal Strip[] strips;
 
             // Candidate slots partition local coordinates; rejected slots remain rough meadow.
@@ -62,10 +58,10 @@ namespace DroneSandbox
             {
                 float dx = x - site.x, dz = z - site.y;
                 float u = dx * along.x + dz * along.y, v = -dx * along.y + dz * along.x;
-                int row = (int)Math.Floor(v / width) - firstStrip;
+                int row = (int)Math.Floor((v - stripOrigin) / width);
                 if (row < 0 || row >= strips.Length) return new FarDetailData.FieldSample { layer = 4 };
                 var strip = strips[row];
-                int column = (int)Math.Floor((u - strip.offset) / strip.length) - strip.first;
+                int column = (int)Math.Floor((u - strip.offset) / strip.length);
                 if (column < 0 || column >= strip.parcels.Length) return new FarDetailData.FieldSample { layer = 4 };
                 var pieces = strip.parcels[column];
                 if (pieces == null) return new FarDetailData.FieldSample { layer = 4 };
@@ -101,14 +97,14 @@ namespace DroneSandbox
                 float dx = x - site.x, dz = z - site.y;
                 float u = dx * along.x + dz * along.y, v = -dx * along.y + dz * along.x;
                 boundary = 0f;
-                int row = (int)Math.Floor(v / width) - firstStrip;
+                int row = (int)Math.Floor((v - stripOrigin) / width);
                 if (row < 0 || row >= strips.Length) return -1f;
                 var strip = strips[row];
                 float length = strip.length > 240f ? strip.length * .5f : strip.length;
-                float w = (u - strip.offset) / length, r = v / width;
+                float w = (u - strip.offset) / length, r = (v - stripOrigin) / width;
                 int column = (int)Math.Floor(w);
                 boundary = Math.Min(Math.Min(w - column, column + 1 - w) * length, Math.Min(r - (float)Math.Floor(r), (float)Math.Floor(r) + 1 - r) * width);
-                return FieldAppearance.Shade(column, row + firstStrip, hash, 91);
+                return FieldAppearance.Shade(column, row, hash, 91);
             }
         }
 
@@ -155,14 +151,65 @@ namespace DroneSandbox
         internal sealed class Strip
         {
             public float length, offset;
-            public int first;
             public Parcel[][] parcels;
+        }
+
+        // A region shares one frame: its blocks' tracks run square to it, and so do all their strips.
+        sealed class Region
+        {
+            public int x, z, hash;
+            public Vector2 site, along, across;
+            public float angle, row, column, scale;
+            public Vector2[] outline; // in the region frame, already set back from the neighbouring regions' land
+            public readonly District[] blocks = new District[Slots * Slots];
         }
 
         // Nearest-site selection is identical for tiles, the picture, clipped sectors and the audit harness.
         public District At(float x, float z)
         {
-            int gx = Cell(x), gz = Cell(z), bx = gx, bz = gz;
+            var r = RegionAt(x, z);
+            float dx = x - r.site.x, dz = z - r.site.y;
+            float u = dx * r.along.x + dz * r.along.y, v = dx * r.across.x + dz * r.across.y;
+            int k = Row(r, v);
+            return Block(r, k, Column(r, k, u));
+        }
+
+        // The block in the middle of an old 700 m district cell, for older audit tools.
+        public District Get(int x, int z) => At((x + .5f) * DistrictSize, (z + .5f) * DistrictSize);
+
+        // Every block with fields whose ground may lie in the world rectangle, for the sector's clipping.
+        public List<District> Districts(Vector2 min, Vector2 max)
+        {
+            var list = new List<District>();
+            for (int z = RegionCell(min.y) - 2; z <= RegionCell(max.y) + 2; z++)
+                for (int x = RegionCell(min.x) - 2; x <= RegionCell(max.x) + 2; x++)
+                {
+                    var r = GetRegion(x, z);
+                    float lu = float.MaxValue, hu = float.MinValue, lv = float.MaxValue, hv = float.MinValue;
+                    for (int c = 0; c < 4; c++)
+                    {
+                        float dx = ((c & 1) == 0 ? min.x : max.x) - r.site.x, dz = ((c & 2) == 0 ? min.y : max.y) - r.site.y;
+                        float u = dx * r.along.x + dz * r.along.y, v = dx * r.across.x + dz * r.across.y;
+                        lu = Math.Min(lu, u); hu = Math.Max(hu, u); lv = Math.Min(lv, v); hv = Math.Max(hv, v);
+                    }
+                    float ou = float.MaxValue, oU = float.MinValue, ov = float.MaxValue, oV = float.MinValue;
+                    foreach (var q in r.outline) { ou = Math.Min(ou, q.x); oU = Math.Max(oU, q.x); ov = Math.Min(ov, q.y); oV = Math.Max(oV, q.y); }
+                    lu = Math.Max(lu, ou); hu = Math.Min(hu, oU); lv = Math.Max(lv, ov); hv = Math.Min(hv, oV);
+                    if (lu > hu || lv > hv) continue;
+                    for (int k = Row(r, lv), k1 = Row(r, hv); k <= k1; k++)
+                        for (int m = Column(r, k, lu), m1 = Column(r, k, hu); m <= m1; m++)
+                        {
+                            var d = Block(r, k, m);
+                            if (d.parcels.Length > 0) list.Add(d);
+                        }
+                }
+            return list;
+        }
+
+        // The region whose jittered site is nearest: plain Voronoi cells about 4 km across.
+        Region RegionAt(float x, float z)
+        {
+            int gx = RegionCell(x), gz = RegionCell(z), bx = gx, bz = gz;
             float best = float.MaxValue;
             for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
             {
@@ -170,68 +217,69 @@ namespace DroneSandbox
                 float dx = s.x - x, dz = s.y - z, d = dx * dx + dz * dz;
                 if (d < best) { best = d; bx = gx + i; bz = gz + j; }
             }
-            return Get(bx, bz);
+            return GetRegion(bx, bz);
         }
 
-        // Only touched districts are constructed; striped locks avoid repeating expensive cover clipping on competing workers.
-        public District Get(int x, int z)
+        // Only touched regions are constructed; striped locks keep competing workers from building one twice.
+        Region GetRegion(int x, int z)
         {
             int i = x - First, j = z - First;
-            if (i < 0 || j < 0 || i >= Count || j >= Count) return Build(x, z);
+            if (i < 0 || j < 0 || i >= Count || j >= Count) return BuildRegion(x, z);
             int k = j * Count + i;
-            var result = Volatile.Read(ref districts[k]);
+            var result = Volatile.Read(ref regions[k]);
             if (result != null) return result;
             lock (gates[k & 63])
             {
-                result = districts[k];
-                if (result == null) { result = Build(x, z); Volatile.Write(ref districts[k], result); }
+                result = regions[k];
+                if (result == null) { result = BuildRegion(x, z); Volatile.Write(ref regions[k], result); }
+                return result;
+            }
+        }
+
+        // Only touched blocks are constructed, each once; their parcels never change afterwards.
+        District Block(Region r, int k, int m)
+        {
+            if (k < -BlockSpan || k > BlockSpan || m < -BlockSpan || m > BlockSpan) return Build(r, k, m);
+            int index = (k + BlockSpan) * Slots + m + BlockSpan;
+            var result = Volatile.Read(ref r.blocks[index]);
+            if (result != null) return result;
+            lock (gates[(r.hash + index) & 63])
+            {
+                result = r.blocks[index];
+                if (result == null) { result = Build(r, k, m); Volatile.Write(ref r.blocks[index], result); }
                 return result;
             }
         }
 
         // Sum construction CPU time separately from painting wall time; concurrent workers can overlap.
-        District Build(int x, int z)
+        District Build(Region r, int k, int m)
         {
             long start = System.Diagnostics.Stopwatch.GetTimestamp();
-            var result = BuildDistrict(x, z);
+            var result = BuildBlock(r, k, m);
             Interlocked.Add(ref buildTicks, System.Diagnostics.Stopwatch.GetTimestamp() - start);
             Interlocked.Increment(ref builtDistricts);
             return result;
         }
 
-        // Four metre district tracks separate farms; the corner bevel keeps three farms from forming spokes.
-        District BuildDistrict(int x, int z)
+        // The region's frame and outline: four-metre tracks between regions, and a bevel where three regions meet so
+        // three blocks never form spokes. Bigger, emptier country has bigger blocks (200-700 m a side).
+        Region BuildRegion(int x, int z)
         {
-            int hash = Hash(x, z);
-            var d = new District { x = x, z = z, site = Site(x, z), hash = hash };
-            float sx = d.site.x, sz = d.site.y;
-            d.slope = height == null ? 0f : (float)Math.Sqrt(Math.Pow((height(sx + 96f, sz) - height(sx - 96f, sz)) / 192f, 2)
-                + Math.Pow((height(sx, sz + 96f) - height(sx, sz - 96f)) / 192f, 2));
-            if (cover != null) for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++)
-            {
-                var s = cover.At(sx + i * 160f, sz + j * 160f, false);
-                d.settlement = Math.Max(d.settlement, (s.Weight(Cover.Village) + s.Weight(Cover.Town)) / (1f + .3f * (i * i + j * j)));
-            }
-            float small = Math.Max(FarDetailData.Clamp(d.slope / .14f, 0f, 1f), d.settlement);
-            float regional = Value(sx / 2200f + 19f, sz / 2200f - 7f);
-            d.width = FarDetailData.Mix(80f + regional * 105f, 34f + regional * 25f, small);
-            bool estate = small < .22f && (hash & 15) < 3;
-            if (estate) d.width = 260f + (hash >> 8 & 63);
-            // Woody boundaries are a minority of field edges (about 5% of farmland in Europe): 5-15% in most districts,
-            // more around villages and in small-strip country.
-            d.hedgeDensity = Math.Min(.45f, .05f + .10f * Value(sx / 1800f - 81f, sz / 1800f + 9f) + .18f * d.settlement + .10f * small);
-            d.fallow = .1f + .1f * Value(sx / 1600f + 71f, sz / 1600f + 23f);
-            // Use the control texture's exact angle grid so mesh rows and shader rows cannot drift in world metres.
-            d.angle = (float)(Math.Round(Direction(d.site) / Math.PI * 65535) * Math.PI / 65535);
-            d.along = new Vector2((float)Math.Cos(d.angle), (float)Math.Sin(d.angle));
-            var polygon = new List<Vector2> { new Vector2(-1400, -1400), new Vector2(1400, -1400), new Vector2(1400, 1400), new Vector2(-1400, 1400) };
+            var r = new Region { x = x, z = z, site = Site(x, z), hash = Hash(x * 7 + 3, z * 11 + 5) };
+            r.angle = RegionAngle(r.site);
+            r.along = new Vector2((float)Math.Cos(r.angle), (float)Math.Sin(r.angle));
+            r.across = new Vector2(-r.along.y, r.along.x);
+            r.scale = .8f + .45f * Value(r.site.x / 9000f - 13f, r.site.y / 9000f + 29f);
+            r.row = (330f + 120f * Unit(r.hash, 0, 4)) * r.scale;
+            r.column = (400f + 160f * Unit(r.hash, 0, 5)) * r.scale;
+            float reach = 2.5f * RegionSize;
+            var polygon = new List<Vector2> { new Vector2(-reach, -reach), new Vector2(reach, -reach), new Vector2(reach, reach), new Vector2(-reach, reach) };
             for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++)
             {
                 if (i == 0 && j == 0) continue;
-                Vector2 delta = Site(x + i, z + j) - d.site;
+                Vector2 delta = Site(x + i, z + j) - r.site;
                 float length = (float)Math.Sqrt(delta.x * delta.x + delta.y * delta.y);
-                Vector2 n = new Vector2((delta.x * d.along.x + delta.y * d.along.y) / length, (-delta.x * d.along.y + delta.y * d.along.x) / length);
-                polygon = Clip(polygon, n.x, n.y, length * .5f - 2f);
+                polygon = Clip(polygon, Dot(delta, r.along) / length, Dot(delta, r.across) / length, length * .5f - 2f);
             }
             var original = polygon.ToArray();
             for (int k = 0; k < original.Length; k++)
@@ -240,68 +288,208 @@ namespace DroneSandbox
                 Vector2 normal = Unit(new Vector2(before.y + after.y, -before.x - after.x));
                 polygon = Clip(polygon, normal.x, normal.y, Dot(normal, p) - 12f);
             }
+            r.outline = polygon.ToArray();
+            return r;
+        }
+
+        // Block rows are 200-550 m bands across the region, their tracks straight and square to its frame.
+        float RowEdge(Region r, int k) => (k + .24f * (Unit(r.hash, k, 1) - .5f)) * r.row;
+
+        // Each row's blocks are offset from the next row's, so tracks meet in T-junctions rather than crossings.
+        float ColumnEdge(Region r, int k, int m) => (m + .5f * Unit(r.hash, k, 2) + .3f * (Unit(r.hash, k * 131 + m, 3) - .5f)) * r.column;
+
+        // The block row holding a region-frame offset; edges move under half a row, so one neighbour check suffices.
+        int Row(Region r, float v)
+        {
+            int k = (int)Math.Floor(v / r.row);
+            if (v < RowEdge(r, k)) return k - 1;
+            return v >= RowEdge(r, k + 1) ? k + 1 : k;
+        }
+
+        // The block within a row holding a region-frame offset along it.
+        int Column(Region r, int k, float u)
+        {
+            int m = (int)Math.Floor(u / r.column - .5f * Unit(r.hash, k, 2));
+            if (u < ColumnEdge(r, k, m)) return m - 1;
+            return u >= ColumnEdge(r, k, m + 1) ? m + 1 : m;
+        }
+
+        // One farm block between its tracks, cut into strips from its own edges so whole fields fill it: rectangles inside
+        // the region, fitted trapezoids where it meets the next region. Grassland blocks lie on slopes, by water and round
+        // villages; elsewhere one block in ten is grazed.
+        District BuildBlock(Region r, int k, int m)
+        {
+            float r0 = RowEdge(r, k), r1 = RowEdge(r, k + 1), c0 = ColumnEdge(r, k, m), c1 = ColumnEdge(r, k, m + 1);
+            var d = new District { x = r.x * 32 + k, z = r.z * 32 + m };
+            int hash = d.hash = Hash(d.x, d.z);
+            d.site = r.site + r.along * ((c0 + c1) * .5f) + r.across * ((r0 + r1) * .5f);
+            float sx = d.site.x, sz = d.site.y;
+            d.slope = height == null ? 0f : (float)Math.Sqrt(Math.Pow((height(sx + 96f, sz) - height(sx - 96f, sz)) / 192f, 2)
+                + Math.Pow((height(sx, sz + 96f) - height(sx, sz - 96f)) / 192f, 2));
+            if (cover != null) for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++)
+            {
+                var s = cover.At(sx + i * 160f, sz + j * 160f, false);
+                d.settlement = Math.Max(d.settlement, (s.Weight(Cover.Village) + s.Weight(Cover.Town)) / (1f + .3f * (i * i + j * j)));
+                d.wet = Math.Max(d.wet, (s.Weight(Cover.Water) + s.Weight(Cover.Wetland)) / (1f + .3f * (i * i + j * j)));
+            }
+            float small = Math.Max(FarDetailData.Clamp(d.slope / .14f, 0f, 1f), d.settlement);
+            float regional = Value(sx / 2200f + 19f, sz / 2200f - 7f);
+            float width = FarDetailData.Mix(80f + regional * 105f, 34f + regional * 25f, small) * r.scale;
+            bool estate = small < .22f && (hash & 15) < 3;
+            if (estate) width = 260f + (hash >> 8 & 63);
+            d.width = width;
+            // Woody boundaries are a minority of field edges (about 5% of farmland in Europe): 5-15% in most districts,
+            // more around villages and in small-strip country.
+            d.hedgeDensity = Math.Min(.45f, .05f + .10f * Value(sx / 1800f - 81f, sz / 1800f + 9f) + .18f * d.settlement + .10f * small);
+            d.fallow = .1f + .1f * Value(sx / 1600f + 71f, sz / 1600f + 23f);
+            float grassland = .07f + .45f * d.settlement + .4f * FarDetailData.Clamp(d.slope / .1f, 0f, 1f) + Math.Min(.45f, d.wet);
+            d.pasture = Unit(hash, 0, 6) < Math.Min(.8f, grassland);
+            var block = Clip(Clip(Clip(Clip(r.outline, -1, 0, -(c0 + 2f)), 1, 0, c1 - 2f), 0, -1, -(r0 + 2f)), 0, 1, r1 - 2f);
+            if (block.Count < 3) { d.outline = new Vector2[0]; d.strips = new Strip[0]; d.parcels = new Parcel[0]; return d; }
+            // Strips run along the block's longer side three times in five, otherwise across it.
+            bool longU = c1 - c0 >= r1 - r0, turned = (hash >> 3) % 5 < 3 ? !longU : longU;
+            Vector2 lo = new Vector2(c0 + 2f, r0 + 2f), hi = new Vector2(c1 - 2f, r1 - 2f);
+            var best = Lay(r, d, block, r.angle + (turned ? (float)(Math.PI * .5) : 0f), lo, hi, true, estate, small, width, out float most);
+            if (Area(block) > (hi.x - lo.x) * (hi.y - lo.y) * .995f) return best;
+            // A block cut by the next region's land tries its other grid direction and both directions of the longest
+            // cutting edge, keeping whichever fills it with the most field (the region's own grid wins near-ties).
+            most *= 1.04f;
+            float edge = 0f, longest = 0f;
+            for (int i = 0; i < block.Count; i++)
+            {
+                Vector2 e = block[(i + 1) % block.Count] - block[i];
+                float length = (float)Math.Sqrt(Dot(e, e));
+                if (length > longest && Math.Abs(e.x) > .05f * length && Math.Abs(e.y) > .05f * length) { longest = length; edge = (float)Math.Atan2(e.y, e.x); }
+            }
+            for (int option = 0; option < 3; option++)
+            {
+                if (option > 0 && longest <= 0f) break;
+                float angle = option == 0 ? r.angle + (turned ? 0f : (float)(Math.PI * .5)) : r.angle + edge + (option == 2 ? (float)(Math.PI * .5) : 0f);
+                var other = Lay(r, d, block, angle, lo, hi, option == 0, estate, small, width, out float laid);
+                if (laid * (option == 0 ? 1.04f : 1f) > most) { best = other; most = laid * (option == 0 ? 1.04f : 1f); }
+            }
+            return best;
+        }
+
+        // Lay one block's strips and fields in one direction: from the block's own edges (square to the region) or the
+        // cut polygon's (along a cutting edge), so whole fields fill it; returns the field area laid.
+        District Lay(Region r, District template, List<Vector2> block, float angle, Vector2 lo, Vector2 hi, bool square,
+            bool estate, float small, float width, out float laid)
+        {
+            var d = new District { x = template.x, z = template.z, hash = template.hash, site = template.site, slope = template.slope,
+                settlement = template.settlement, wet = template.wet, hedgeDensity = template.hedgeDensity, fallow = template.fallow,
+                pasture = template.pasture };
+            int hash = d.hash;
+            // Use the control texture's exact angle grid so mesh rows and shader rows cannot drift in world metres.
+            angle -= (float)Math.Floor(angle / Math.PI) * (float)Math.PI;
+            d.angle = (float)(Math.Round(angle / Math.PI * 65535) * Math.PI / 65535);
+            d.along = new Vector2((float)Math.Cos(d.angle), (float)Math.Sin(d.angle));
+            Vector2 across = new Vector2(-d.along.y, d.along.x);
+            var polygon = new List<Vector2>(block.Count);
+            foreach (var q in block) polygon.Add(Local(r, d, across, q));
             d.outline = polygon.ToArray();
             float loU = float.MaxValue, hiU = float.MinValue, loV = float.MaxValue, hiV = float.MinValue;
-            foreach (var p in polygon) { loU = Math.Min(loU, p.x); hiU = Math.Max(hiU, p.x); loV = Math.Min(loV, p.y); hiV = Math.Max(hiV, p.y); }
-            d.firstStrip = (int)Math.Floor(loV / d.width);
-            int last = (int)Math.Floor(hiV / d.width);
-            d.strips = new Strip[last - d.firstStrip + 1];
+            if (square)
+                for (int c = 0; c < 4; c++)
+                {
+                    var q = Local(r, d, across, new Vector2((c & 1) == 0 ? lo.x : hi.x, (c & 2) == 0 ? lo.y : hi.y));
+                    loU = Math.Min(loU, q.x); hiU = Math.Max(hiU, q.x); loV = Math.Min(loV, q.y); hiV = Math.Max(hiV, q.y);
+                }
+            else foreach (var q in polygon) { loU = Math.Min(loU, q.x); hiU = Math.Max(hiU, q.x); loV = Math.Min(loV, q.y); hiV = Math.Max(hiV, q.y); }
+            int rows = Math.Max(1, (int)Math.Round((hiV - loV) / width));
+            d.width = (hiV - loV) / rows; d.stripOrigin = loV;
+            d.strips = new Strip[rows];
             var parcels = new List<Parcel>();
-            for (int row = d.firstStrip; row <= last; row++)
+            for (int row = 0; row < rows; row++)
             {
                 int hs = Hash(row, hash);
-                var strip = new Strip { length = estate ? 420f + (hs & 127) : FarDetailData.Mix(260f + (hs & 255) * .8f, 95f + (hs & 127), small), offset = (hs >> 8 & 255) };
-                strip.first = (int)Math.Floor((loU - strip.offset) / strip.length);
-                int end = (int)Math.Floor((hiU - strip.offset) / strip.length);
-                strip.parcels = new Parcel[end - strip.first + 1][]; d.strips[row - d.firstStrip] = strip;
-                for (int col = strip.first; col <= end; col++)
+                float target = estate ? 420f + (hs & 127) : FarDetailData.Mix(260f + (hs & 255) * .8f, 95f + (hs & 127), small);
+                int columns = Math.Max(1, (int)Math.Round((hiU - loU) / target));
+                var strip = new Strip { length = (hiU - loU) / columns, offset = loU, parcels = new Parcel[columns][] };
+                d.strips[row] = strip;
+                float v = loV + row * d.width;
+                for (int col = 0; col < columns; col++)
                 {
-                    float u = col * strip.length + strip.offset, v = row * d.width;
+                    float u = loU + col * strip.length;
+                    int h = Hash(col, hs);
+                    // A grassland block is grazed paddocks (painted from the strip slots), with the odd hay meadow.
+                    if (d.pasture && (h >> 20 & 7) != 0) { strip.parcels[col] = Grass; continue; }
                     var crop = Clip(Clip(Clip(Clip(polygon, -1, 0, -u - .65f), 1, 0, u + strip.length - .65f), 0, -1, -v - .65f), 0, 1, v + d.width - .65f);
                     Parcel p = BestFit(crop);
-                    if (!p.valid) continue;
-                    int h = Hash(col, hs), kind = h % 6;
-                    p.crop = kind < 2 ? Crop.Wheat : kind == 2 ? Crop.YoungCrop : kind == 3 ? Crop.Sunflower : kind == 4 ? Crop.Ploughed : Crop.MownHay;
+                    if (!Usable(p)) continue; // a sharp or narrow leftover: offered to its neighbour below
+                    int kind = h % 25;
+                    p.crop = kind < 8 ? Crop.Wheat : kind < 14 ? Crop.YoungCrop : kind < 18 ? Crop.Sunflower : kind < 20 ? Crop.Ploughed : Crop.MownHay;
                     float idle = (h >> 8 & 65535) / 65536f;
-                    p.use = idle < d.fallow ? ((h & 1) == 0 ? 1 : 2) : d.settlement > .18f && (h >> 4 & 7) == 0 ? ((h & 1) == 0 ? 3 : 4) : 0;
+                    p.use = d.pasture ? 1 : idle < d.fallow ? ((h & 1) == 0 ? 1 : 2) : d.settlement > .18f && (h >> 4 & 7) == 0 ? ((h & 1) == 0 ? 3 : 4) : 0;
                     if (p.use == 1) p.crop = Crop.MownHay;
                     if (p.use == 2) p.crop = Crop.Ploughed;
                     if (p.use == 3 || p.use == 4) p.crop = Crop.YoungCrop;
                     p.edges = Edges(d.hedgeDensity, h, p.use);
                     p.hedge = HasHedge(p.edges);
-                    var pieces = new List<Parcel>();
                     // Land cover clips the surface, not the ownership fabric. Cutting here AND in the sector
                     // discarded whole workable edge strips twice. Meadow is an enclosed hay/stubble parcel.
-                    pieces.Add(p);
-                    strip.parcels[col - strip.first] = pieces.ToArray(); parcels.AddRange(pieces);
+                    strip.parcels[col] = new[] { p }; parcels.Add(p);
                 }
-                MergeRemnants(strip, row, d.width, polygon, parcels);
+                MergeRemnants(strip, v, v + d.width, polygon, parcels);
             }
             d.parcels = parcels.ToArray();
+            laid = 0f;
+            foreach (var p in d.parcels) laid += ParcelArea(p);
+            // Grazed slots count as laid too: a grassland block keeps its grid whatever its fields.
+            if (d.pasture) laid = Area(block);
             return d;
         }
 
-        // An undersized end slot belongs to its adjoining field. Refit their union inside the same district,
-        // preserving the neighbour's crop and updating both constant-time lookup slots to the merged parcel.
-        static void MergeRemnants(Strip strip,int row,float width,List<Vector2> district,List<Parcel> parcels)
+        // Shoelace area of a convex outline.
+        static float Area(List<Vector2> polygon)
         {
-            for(int cell=0;cell<strip.parcels.Length;cell++)
+            float sum = 0f;
+            for (int i = 0; i < polygon.Count; i++) { Vector2 a = polygon[i], b = polygon[(i + 1) % polygon.Count]; sum += a.x * b.y - b.x * a.y; }
+            return Math.Abs(sum) * .5f;
+        }
+
+        // A region-frame point in a block's own field frame.
+        static Vector2 Local(Region r, District d, Vector2 across, Vector2 q)
+        {
+            Vector2 delta = r.site + r.along * q.x + r.across * q.y - d.site;
+            return new Vector2(Dot(delta, d.along), Dot(delta, across));
+        }
+
+        // A field is kept only as a fair trapezoid: at least 20 m across its narrow end and two fifths of its wide end,
+        // so no wedge or sliver is drawn; its sides are already bounded to 60-degree corners (Fit). An awkward remnant
+        // that no neighbour can take stays meadow.
+        static bool Usable(Parcel p)
+        {
+            if (!p.valid) return false;
+            float a = p.a1 - p.a0, b = p.b1 - p.b0;
+            return Math.Min(a, b) >= 20f && Math.Min(a, b) >= .4f * Math.Max(a, b);
+        }
+
+        // Whether a strip slot holds a field (a grazed slot is empty but taken).
+        static bool Holds(Parcel[] slot) => slot != null && slot.Length > 0;
+
+        // An undersized or sharp end slot belongs to its adjoining field. Refit their union inside the same block,
+        // preserving the neighbour's crop and updating both constant-time lookup slots to the merged parcel; a union
+        // that would itself be a wedge stays apart, and the leftover stays grass.
+        static void MergeRemnants(Strip strip, float low, float high, List<Vector2> district, List<Parcel> parcels)
+        {
+            for (int cell = 0; cell < strip.parcels.Length; cell++)
             {
-                if(strip.parcels[cell]!=null)continue;
-                int neighbour=cell>0&&strip.parcels[cell-1]!=null?cell-1:cell+1;
-                if(neighbour>=strip.parcels.Length||strip.parcels[neighbour]==null)continue;
-                var shared=strip.parcels[neighbour]; var old=shared[0];
-                float low=old.cross?-Math.Max(old.a1,old.b1):old.u0,high=old.cross?-Math.Min(old.a0,old.b0):old.u1;
-                float u=(cell+strip.first)*strip.length+strip.offset;
-                low=Math.Min(low,u+.65f);high=Math.Max(high,u+strip.length-.65f);
-                var polygon=Clip(Clip(Clip(Clip(district,-1,0,-low),1,0,high),0,-1,-row*width-.65f),0,1,(row+1)*width-.65f);
-                var joined=BestFit(polygon);
-                if(ParcelArea(joined)<=ParcelArea(old)+1f)continue;
-                joined.crop=old.crop;joined.use=old.use;joined.hedge=old.hedge;joined.edges=old.edges;
-                int at=parcels.IndexOf(old);if(at<0)continue;parcels[at]=joined;
-                var replacement=new[]{joined};
-                for(int i=0;i<strip.parcels.Length;i++)if(ReferenceEquals(strip.parcels[i],shared))strip.parcels[i]=replacement;
-                strip.parcels[cell]=replacement;
+                if (strip.parcels[cell] != null) continue;
+                int neighbour = cell > 0 && Holds(strip.parcels[cell - 1]) ? cell - 1 : cell + 1;
+                if (neighbour >= strip.parcels.Length || !Holds(strip.parcels[neighbour])) continue;
+                var shared = strip.parcels[neighbour]; var old = shared[0];
+                float start = old.cross ? -Math.Max(old.a1, old.b1) : old.u0, end = old.cross ? -Math.Min(old.a0, old.b0) : old.u1;
+                float u = cell * strip.length + strip.offset;
+                start = Math.Min(start, u + .65f); end = Math.Max(end, u + strip.length - .65f);
+                var polygon = Clip(Clip(Clip(Clip(district, -1, 0, -start), 1, 0, end), 0, -1, -low - .65f), 0, 1, high - .65f);
+                var joined = BestFit(polygon);
+                if (!Usable(joined) || ParcelArea(joined) <= ParcelArea(old) + 1f) continue;
+                joined.crop = old.crop; joined.use = old.use; joined.hedge = old.hedge; joined.edges = old.edges;
+                int at = parcels.IndexOf(old); if (at < 0) continue; parcels[at] = joined;
+                var replacement = new[] { joined };
+                for (int i = 0; i < strip.parcels.Length; i++) if (ReferenceEquals(strip.parcels[i], shared)) strip.parcels[i] = replacement;
+                strip.parcels[cell] = replacement;
             }
         }
 
@@ -373,9 +561,10 @@ namespace DroneSandbox
             float length = right - left;
             if (length < MinimumEdge) return default;
             Span(polygon, left, out a0, out a1); Span(polygon, right, out b0, out b1);
-            // Bound both side slopes to 1: every corner is at least 45 degrees, comfortably above 35.
-            a0 = Math.Max(a0, b0 - length); b0 = Math.Max(b0, a0 - length);
-            a1 = Math.Min(a1, b1 + length); b1 = Math.Min(b1, a1 + length);
+            // Bound both side slopes: every corner is at least 60 degrees, so no field reads as a triangle.
+            float limit = length * MaxSlope;
+            a0 = Math.Max(a0, b0 - limit); b0 = Math.Max(b0, a0 - limit);
+            a1 = Math.Min(a1, b1 + limit); b1 = Math.Min(b1, a1 + limit);
             float width = Math.Min(a1 - a0, b1 - b0);
             if (width < 18f || length * (a1 - a0 + b1 - b0) * .5f < MinimumArea) return default;
             float lower = (b0 - a0) / length, upper = (b1 - a1) / length;
@@ -412,24 +601,29 @@ namespace DroneSandbox
             return result;
         }
 
-        // Broad, continuous angle changes correlate farms; a nearby through-road supplies its closest parallel axis.
-        float Direction(Vector2 site)
+        // Broad, continuous angle changes correlate regions; the through-roads within 1.6 km square a region's blocks to
+        // their main axis (length-weighted, nearer roads counting more), on whichever side lies nearer the broad angle.
+        float RegionAngle(Vector2 site)
         {
             float angle = .4f + Value(site.x / 2800f, site.y / 2800f) * 1.15f;
-            if (!roadCells.TryGetValue(Key(Cell(site.x), Cell(site.y)), out var nearby)) return angle;
-            float best = 500f * 500f, roadAngle = angle;
-            foreach (var s in nearby)
+            double c = 0, s = 0, total = 0;
+            foreach (var r in roads)
             {
-                float dx = s.bx - s.ax, dz = s.bz - s.az, length = dx * dx + dz * dz;
+                if (Math.Min(r.ax, r.bx) > site.x + 1600f || Math.Max(r.ax, r.bx) < site.x - 1600f
+                    || Math.Min(r.az, r.bz) > site.y + 1600f || Math.Max(r.az, r.bz) < site.y - 1600f) continue;
+                float dx = r.bx - r.ax, dz = r.bz - r.az, length = dx * dx + dz * dz;
                 if (length < 1f) continue;
-                float t = Math.Max(0f, Math.Min(1f, ((site.x - s.ax) * dx + (site.y - s.az) * dz) / length));
-                float ex = site.x - s.ax - dx * t, ez = site.y - s.az - dz * t, distance = ex * ex + ez * ez;
-                if (distance >= best) continue;
-                best = distance; roadAngle = (float)Math.Atan2(dz, dx);
+                float t = Math.Max(0f, Math.Min(1f, ((site.x - r.ax) * dx + (site.y - r.az) * dz) / length));
+                float ex = site.x - r.ax - dx * t, ez = site.y - r.az - dz * t, distance = (float)Math.Sqrt(ex * ex + ez * ez);
+                if (distance > 1600f) continue;
+                double w = Math.Sqrt(length) / (1.0 + distance / 400.0), phi = 4.0 * Math.Atan2(dz, dx);
+                c += w * Math.Cos(phi); s += w * Math.Sin(phi); total += w;
             }
-            if (best >= 500f * 500f) return angle;
-            roadAngle += (float)Math.Round((angle - roadAngle) / (Math.PI * .5)) * (float)(Math.PI * .5);
-            return roadAngle - (float)Math.Floor(roadAngle / Math.PI) * (float)Math.PI;
+            // A quarter-turn-symmetric mean: a crossroads keeps one grid, and a road too winding to give an axis keeps the drift.
+            if (total < 150.0 || c * c + s * s < .12 * total * total) return angle;
+            float road = (float)(Math.Atan2(s, c) / 4.0);
+            road += (float)Math.Round((angle - road) / (Math.PI * .5)) * (float)(Math.PI * .5);
+            return road - (float)Math.Floor(road / Math.PI) * (float)Math.PI;
         }
 
         // Bilinear value noise supplies smooth orientations without a Unity-native noise dependency.
@@ -442,8 +636,8 @@ namespace DroneSandbox
             return (a + (b - a) * u) * (1f - v) + (c + (d - c) * u) * v;
         }
 
-        // Preserve the old jittered sites so before/after topology audits compare the same 500 districts.
-        public Vector2 Site(int x, int z)
+        // A region's jittered site, cached for the regions any query can reach.
+        Vector2 Site(int x, int z)
         {
             int i = x - First, j = z - First;
             return i >= 0 && j >= 0 && i < Count && j < Count ? sites[j * Count + i] : SiteAt(x, z);
@@ -451,15 +645,16 @@ namespace DroneSandbox
 
         // The jittered site itself, from the stable hash.
         Vector2 SiteAt(int x, int z)
-        { int h = Hash(x, z); return new Vector2((x + .15f + .7f * (h & 1023) / 1023f) * DistrictSize, (z + .15f + .7f * (h >> 10 & 1023) / 1023f) * DistrictSize); }
+        { int h = Hash(x, z); return new Vector2((x + .15f + .7f * (h & 1023) / 1023f) * RegionSize, (z + .15f + .7f * (h >> 10 & 1023) / 1023f) * RegionSize); }
+
+        // One stable value in [0, 1) per region (or block), index and purpose.
+        float Unit(int hash, int index, int salt) => (Hash(index * 977 + salt * 7919, hash ^ salt * 104729) & 65535) / 65536f;
 
         // Stable integer hashing is independent of thread scheduling and sector-local RNG consumption.
         int Hash(int x, int z)
         { unchecked { int h = x * 73856093 ^ z * 19349663 ^ seed * 83492791; h ^= h >> 13; h *= 0x5bd1e995; return h & 0x7fffffff; } }
-        // Signed cells cover both halves of the theatre without truncation toward zero.
-        static int Cell(float p) => (int)Math.Floor(p / DistrictSize);
-        // Pair signed grid coordinates without collisions.
-        static long Key(int x, int z) => ((long)x << 32) ^ (uint)z;
+        // Signed region cells cover both halves of the theatre without truncation toward zero.
+        static int RegionCell(float p) => (int)Math.Floor(p / RegionSize);
         // Managed vector operations also run in the standalone harness.
         static float Dot(Vector2 a, Vector2 b) => a.x * b.x + a.y * b.y;
         // Normalize only district edges, which are constructed with nonzero length.

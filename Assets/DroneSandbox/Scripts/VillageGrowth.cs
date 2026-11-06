@@ -49,6 +49,7 @@ namespace DroneSandbox
                 }
             }
             var local = lanes.GetRange(firstLane, lanes.Count - firstLane).ToArray();
+            Church(owner, streets, station, roads, local);
             // Build close old frontage first; newer houses are spaced irregularly along the remaining road and lanes.
             Populate(streets, station - reach, station + reach, true, owner, anchor, reach, rng, roads, local);
             for (int branch = 0; branch < branches; branch++)
@@ -63,7 +64,7 @@ namespace DroneSandbox
             bool hasFarm = false; int edgePlot = -1; float outer = -1f;
             for (int i = 0; i < plots.Count; i++)
             {
-                var p = plots[i]; if (p.owner != owner) continue;
+                var p = plots[i]; if (p.owner != owner || p.church || p.square) continue;
                 hasFarm |= p.farm;
                 float distance = (p.front - anchor).sqrMagnitude;
                 if (p.depth >= 38f && distance > outer) { outer = distance; edgePlot = i; }
@@ -73,6 +74,22 @@ namespace DroneSandbox
                 var p = plots[edgePlot]; p.farm = true; p.cultivated = false; plots[edgePlot] = p;
             }
             VillageUse.Assign(plots, owner, seed, anchor);
+        }
+
+        // Every village has its church on the old street near the middle, set back in its churchyard: the first of a few
+        // stations either side of the centre where the plot is dry and clear of the lanes. It is reserved before the
+        // houses, from no random stream, so the rest of the village grows as before round it.
+        void Church(int owner, List<FarDetailData.Segment> streets, float station, FarDetailData.Segment[] roads, FarDetailData.Segment[] local)
+        {
+            foreach (float offset in new[] { 0f, 34f, -34f, 68f, -68f })
+                foreach (int side in new[] { (owner & 1) == 0 ? 1 : -1, (owner & 1) == 0 ? -1 : 1 })
+                {
+                    if (!OnRoute(streets, station + offset, out Vector2 at, out Vector2 dir, out float roadWidth)) continue;
+                    Vector2 outward = new Vector2(-dir.y, dir.x) * side;
+                    var p = new VillagePlot { front = at + outward * (roadWidth + 1.8f), along = dir, outward = outward, frontage = 30f,
+                        depth = 46f, setback = 16f, roadWidth = roadWidth, owner = owner, church = true, old = true, core = true, model = "Scenery_Church" };
+                    if (!Overlap(p) && !CrossesRoad(p, roads) && !CrossesRoad(p, local) && Dry(p)) { Add(p); return; }
+                }
         }
 
         // Route stations let a property span several short road segments without duplicating or dropping frontages.
@@ -88,7 +105,9 @@ namespace DroneSandbox
             point = along = default; width = 0f; return false;
         }
 
-        // Frontage grows narrower towards the old core; loose new plots and boundary farms keep their own gates.
+        // Frontage grows narrower towards the old core (15-18 m, nearly continuous), looser along newer lanes (20-32 m);
+        // boundary farms take 34 m and keep their own gates. About one newer slot in eight (one old one in twenty) stays
+        // an unbuilt lot, rough grass or a paddock, as a street's gaps do.
         void Populate(List<FarDetailData.Segment> street, float low, float high, bool oldStreet, int owner, Vector2 core,
             float reach, Random rng, FarDetailData.Segment[] roads, FarDetailData.Segment[] local)
         {
@@ -101,7 +120,7 @@ namespace DroneSandbox
                     float distance = (at - core).magnitude;
                     bool old = oldStreet && distance < reach * .65f;
                     bool farm = distance > reach * .79f && rng.NextDouble() < .3;
-                    float width = farm ? 36f : old ? 12f + (float)rng.NextDouble() * 2.2f : 21f + (float)rng.NextDouble() * 11f;
+                    float width = farm ? 34f : old ? 15f + (float)rng.NextDouble() * 2.5f : 20f + (float)rng.NextDouble() * 12f;
                     // Advance by full slots, then centre each roof in its slot; unequal widths cannot overlap.
                     if (!OnRoute(street, next + width * .5f, out at, out dir, out roadWidth)) break;
                     Vector2 outward = new Vector2(-dir.y, dir.x) * side;
@@ -109,6 +128,10 @@ namespace DroneSandbox
                         frontage = width, depth = farm ? 62f : old ? 27f + (float)rng.NextDouble() * 12f : 38f + (float)rng.NextDouble() * 18f,
                         setback = old ? 5f : 12f, roadWidth = roadWidth, owner = owner, old = old, core = old, farm = farm,
                         model = "Scenery_House_" + (old ? "D" : rng.Next(3) == 0 ? "B" : "A"), style = rng.Next(4) };
+                    if (!farm && rng.NextDouble() < (old ? .05 : .12))
+                    {
+                        p.landUse = rng.Next(2) == 0 ? 6 : 8; p.square = true; p.model = null; p.identity = rng.Next(); p.old = p.core = false;
+                    }
                     if (!Overlap(p) && !CrossesRoad(p, roads) && !CrossesRoad(p, local) && Dry(p)) Add(p);
                     next += width + (old ? .15f : 2f) + (float)rng.NextDouble() * (old ? .25f : 11f);
                 }

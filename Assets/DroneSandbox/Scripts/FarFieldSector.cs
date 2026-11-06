@@ -7,19 +7,16 @@ namespace DroneSandbox
     // Clips shared world parcels to the sector and its exclusions while retaining each parcel's crop and rows.
     internal static class FarFieldSector
     {
-        // Only districts touching the 2 km crop are requested. Legacy sectors continue through FieldParcels.Plan.
+        // Only farm blocks touching the 2 km crop are requested. Legacy sectors continue through FieldParcels.Plan.
         public static float Plan(Func<Vector2, bool> blocked)
         {
             FarFieldSurface.Clear();
             var source = MapLayout.Plan.world;
             var plan = MapLayout.DetailPlan.fields;
             const float half = Ground.Size * .5f;
-            int x0 = (int)Math.Floor((source.center.x - half) / 700f) - 1, x1 = (int)Math.Floor((source.center.x + half) / 700f) + 1;
-            int z0 = (int)Math.Floor((source.center.y - half) / 700f) - 1, z1 = (int)Math.Floor((source.center.y + half) / 700f) + 1;
             float available = 0f, accepted = 0f;
-            for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++)
+            foreach (var district in plan.Districts(source.center - Vector2.one * (half + 50f), source.center + Vector2.one * (half + 50f)))
             {
-                var district = plan.Get(x, z);
                 foreach (var parcel in district.parcels)
                 {
                     var plot = parcel.Plot(district, source.center);

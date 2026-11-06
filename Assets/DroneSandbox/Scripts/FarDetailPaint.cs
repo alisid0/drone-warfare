@@ -89,6 +89,8 @@ namespace DroneSandbox
                 }
             }
             if (layer < 0) layer = GroundLayer(cover == Cover.Farmland ? Cover.Pasture : cover, x, z);
+            float compound = features.Outside(x, z);
+            if (compound < MarginLimit && compound < CompoundMargin(x, z)) { layer = CompoundWear(x, z) > .5f ? 2 : 4; angle = 0f; } // a compound's worn margin
             // A garden painted over farmland must also suppress that field's procedural crop rows.
             if (villages.At(new Vector2(x, z), out var garden))
             {
@@ -122,7 +124,24 @@ namespace DroneSandbox
             float bank = Bank(x, z, streams, out float riverWidth);
             var land = cover.At(x, z);
             Vector3 c = CoverColour(x, z, pixel, land);
-            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Village, x, z, pixel));
+            if (villages.At(new Vector2(x,z), out var plot))
+            {
+                c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Village, x, z, pixel));
+                // Beyond the 2 m tiles a garden or orchard reads as it does from far off: lawn broken by shrubs, fruit
+                // trees, sheds and paving the scatter no longer draws one by one, so a village holds together round its roofs.
+                if (pixel > 2f && (plot.landUse < 6 && !plot.square || plot.landUse == 7)) c = Blend(c, GardenMass, Smooth((pixel - 2f) / 3f) * .55f);
+            }
+            // A town's ground between its plots is yards, paving and gardens too.
+            float town = land.Weight(Cover.Town);
+            if (pixel > 2f && town > 0f) c = Blend(c, GardenMass, town * Smooth((pixel - 2f) / 3f) * .45f);
+            // A compound's own grass, and a worn margin outside its fence-side footprint edge: the fields run to it.
+            float compound = features.Outside(x, z);
+            if (compound < MarginLimit + pixel)
+            {
+                float edge = CompoundMargin(x, z);
+                Vector3 worn = Blend(FarDetailPalette.Means[2], CompoundGravel, Smooth((cover.Noise(x, z, 9f, 134) - .5f) / .2f));
+                c = Blend(Blend(VergeColour, worn, CompoundWear(x, z) * .85f), c, Coverage(compound - edge, pixel));
+            }
             c = PaintRiver(c, bank, riverWidth, pixel);
             float lakeBank = LakeBank(x, z, pixel, out bool reservoir);
             Vector3 basin = PaintLake(c, lakeBank, reservoir, pixel);
@@ -135,6 +154,17 @@ namespace DroneSandbox
         }
 
         static readonly Vector3 WaterColour = WaterAppearance.Lake;
+        // A compound's margin: 5-15 m wide outside its footprint, wandering over 40 m, of the landmark surfaces' own verge
+        // grass (their soft edges fade into it) worn through in patches to soil and gravel by vehicles and storage.
+        public const float MarginLimit = 15f;
+        static readonly Vector3 VergeColour = FarDetailPalette.Decode(WorldLandmarkLayout.ToneColor(WorldLandmarkLayout.VergeTone));
+        static readonly Vector3 CompoundGravel = FarDetailPalette.Decode(new Color32(122, 116, 102, 255));
+
+        // The margin's width at a point, shared with the sector's field planner (MapLayout.FieldWorks).
+        public float CompoundMargin(float x, float z) => 5f + 10f * cover.Noise(x, z, 41f, 131);
+
+        // How worn the margin is at a point (0 grass, 1 bare): 6-17 m patches over about two fifths of it.
+        float CompoundWear(float x, float z) => Smooth((cover.Noise(x, z, 6f, 132) * .6f + cover.Noise(x, z, 17f, 133) * .4f - .48f) / .2f);
         // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
         static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
         // A grass strip along a field edge (and between an orchard's rows), and a rough uncut margin (FieldPalette, as the sector's meshes).
@@ -153,7 +183,8 @@ namespace DroneSandbox
             {
                 if (s.a == Cover.Farmland) return Blend(FarmColour(x, z, pixel), WoodFloor, wood);
                 if (s.a == Cover.Forest && wood == 1f) return WoodFloor;
-                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water) return GroundColour(s.a, x, z, pixel);
+                // A village's open ground is grazed and mown like the pasture round it, not one lawn (its gardens keep theirs).
+                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water && s.a != Cover.Village) return GroundColour(s.a, x, z, pixel);
             }
             Vector3 grass = GroundColour(Cover.Pasture, x, z, pixel);
             Vector3 farm = s.Weight(Cover.Farmland) > 0f ? FarmColour(x, z, pixel) : grass;
@@ -218,13 +249,14 @@ namespace DroneSandbox
         }
 
         // The pasture paddock at a point (0-1, below 0 for none) and how strongly its use shows: faded to a neutral
-        // fence line at its edge and away from open pasture and farmland. Shared with the sector splat.
+        // fence line at its edge and away from open pasture, farmland and a village's open ground. Shared with the sector splat.
         public float Paddock(float x, float z, float pixel, out float amount)
         {
             amount = 0f;
             var land = cover.At(x, z);
-            float pastoral = land.Weight(Cover.Pasture) + land.Weight(Cover.Farmland);
+            float village = land.Weight(Cover.Village), pastoral = land.Weight(Cover.Pasture) + land.Weight(Cover.Farmland) + village;
             if (pastoral <= 0f) return -1f;
+            if (village > 0f && villages.At(new Vector2(x, z), out var garden) && garden.landUse < 6) return -1f; // gardens keep their lawn
             float kind = fields.At(x, z).Paddock(x, z, out float boundary);
             if (kind >= 0f) amount = pastoral * Coverage(boundary - 1f, pixel);
             return kind;
@@ -279,6 +311,8 @@ namespace DroneSandbox
             return p.Colour(u, v, pixel, lawn);
         }
 
+        // Gardens as a far-off mass: about a third lawn, two fifths shrub and tree crowns, a fifth paving and sheds.
+        static readonly Vector3 GardenMass = new Vector3(.076f, .096f, .046f);
         static readonly Vector3 VillageGrass=FarDetailPalette.Decode(new Color(.24f,.29f,.13f));
         static readonly Vector3 VillageSoil=FarDetailPalette.Decode(new Color(.26f,.20f,.12f));
         static readonly Vector3 VillageGravel=FarDetailPalette.Decode(new Color(.43f,.41f,.35f));

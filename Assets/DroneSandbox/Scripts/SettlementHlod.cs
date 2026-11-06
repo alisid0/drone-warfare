@@ -28,6 +28,7 @@ namespace DroneSandbox
             public Bounds bounds;
         }
 
+        const int Colours = 10; // palette texels
         readonly Dictionary<int, Town> towns = new Dictionary<int, Town>();
         readonly List<int> indices = new List<int>();
         IEnumerator<SettlementPattern.Block> builder;
@@ -85,14 +86,16 @@ namespace DroneSandbox
             }
         }
 
-        // An opaque palette gives walls and roof planes distinct values without multiplying draw calls.
+        // An opaque palette gives walls and roof planes distinct values without multiplying draw calls: four plasters,
+        // four roofs, then a barn's weathered planks and dark sheet roof.
         void Material()
         {
             if (material != null) return;
-            palette = new Texture2D(8, 1, TextureFormat.RGBA32, false) { name = "Settlement colours", filterMode = FilterMode.Point };
+            palette = new Texture2D(Colours, 1, TextureFormat.RGBA32, false) { name = "Settlement colours", filterMode = FilterMode.Point };
             palette.SetPixels32(new[] { new Color32(178, 168, 146, 255), new Color32(148, 144, 134, 255),
                 new Color32(164, 154, 131, 255), new Color32(182, 174, 153, 255), new Color32(138, 79, 58, 255),
-                new Color32(83, 91, 94, 255), new Color32(117, 83, 66, 255), new Color32(124, 117, 103, 255) });
+                new Color32(83, 91, 94, 255), new Color32(117, 83, 66, 255), new Color32(124, 117, 103, 255),
+                new Color32(101, 86, 70, 255), new Color32(84, 82, 78, 255) });
             palette.Apply(false, true);
             material = Art.NewMaterial(Color.white); material.mainTexture = palette; material.SetFloat("_Smoothness", 0.08f);
         }
@@ -158,6 +161,7 @@ namespace DroneSandbox
                 Vector3 at = a + Vector3.up * h, bt = b + Vector3.up * h, ct = c + Vector3.up * h, et = e + Vector3.up * h;
                 Vector3 ridgeA = new Vector3(-w, h + r, 0f), ridgeB = new Vector3(w, h + r, 0f);
                 int wall = house.kind % 4, roof = 4 + (house.kind == 1 || house.kind == 5 ? 1 : house.kind % 3);
+                if (house.kind == SettlementPattern.Barn) { wall = 8; roof = 9; }
                 Face(data, matrix, a, at, bt, b, wall); Face(data, matrix, b, bt, ct, c, wall);
                 Face(data, matrix, c, ct, et, e, wall); Face(data, matrix, e, et, at, a, wall);
                 Face(data, matrix, at, ridgeA, ridgeB, bt, roof); Face(data, matrix, ridgeA, et, ct, ridgeB, roof);
@@ -177,7 +181,7 @@ namespace DroneSandbox
         {
             int start = data.vertices.Count;
             data.vertices.Add(matrix.MultiplyPoint3x4(a)); data.vertices.Add(matrix.MultiplyPoint3x4(b)); data.vertices.Add(matrix.MultiplyPoint3x4(c));
-            for (int i = 0; i < 3; i++) { data.uv.Add(new Vector2((colour + 0.5f) / 8f, 0.5f)); data.triangles.Add(start + i); }
+            for (int i = 0; i < 3; i++) { data.uv.Add(new Vector2((colour + 0.5f) / Colours, 0.5f)); data.triangles.Add(start + i); }
         }
     }
 }

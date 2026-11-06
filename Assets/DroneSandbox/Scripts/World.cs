@@ -210,7 +210,7 @@ namespace DroneSandbox
                 { plot.depth = Mathf.Max(25f, plot.depth - 5f); clear = VillagePlotClear(plot, occupiedPlots); }
                 if (!clear) continue;
                 if (plot.square) { squares.Add(plot); occupiedPlots.Add(plot); continue; }
-                if (!VillageBuildingAt(plot.model, plot.House, -plot.outward, plot.Scale, plot.front, plot.front, roots[plot.owner], plot.owner, buildings, plot)) continue;
+                if (!VillageBuildingAt(plot.model, plot.House, plot.gable ? plot.along : -plot.outward, plot.Scale, plot.front, plot.front, roots[plot.owner], plot.owner, buildings, plot)) continue;
                 var b = buildings[buildings.Count - 1]; b.plot = plot; b.along = plot.along; b.outward = plot.outward;
                 b.frontage = plot.frontage; b.back = plot.depth - plot.setback;
                 occupiedPlots.Add(plot);

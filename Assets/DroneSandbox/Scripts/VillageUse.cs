@@ -175,6 +175,14 @@ namespace DroneSandbox
         static readonly Vector3 hedge = FarDetailPalette.Decode(new Color(.16f, .22f, .10f));
         static readonly Vector3 stain = FarDetailPalette.Decode(new Color(.19f, .17f, .14f));
         static readonly Vector3 mud = FarDetailPalette.Decode(new Color(.21f, .16f, .10f));
+        // Worn ground is the sector's dirt layer laid at 85% over the lawn (Ground.Wear in Features.PaintUse); only dug
+        // beds, which the sector builds as soil meshes, and the town's surfaced uses are the darker soil.
+        static readonly Vector3 dirt = FarDetailPalette.Means[2];
+        const float Worn = .85f;
+
+        // Whether a soil sample is a dug bed (or a town use's surface) rather than worn yard, standing or path.
+        bool Dug(float u, float v) => landUse > 0 && landUse < 5
+            || landUse < 6 && cultivated && v > YardEnd + 1f && v < depth - 2f && u < -1f && u > -frontage * .5f + 2.5f && (v - YardEnd) % 2.7f < 1.7f;
 
         // Vertex access avoids allocating an outline for each pixel in the regional or world picture.
         Vector2 Corner(int i)
@@ -209,13 +217,13 @@ namespace DroneSandbox
         // Analytic strips retain narrow paths in coarse pixels; larger yard and bed uses are sampled at pixel scale.
         public Vector3 Colour(float u, float v, float pixel, Vector3? lawn = null)
         {
-            Vector3 sum = Vector3.zero;
+            Vector3 sum = Vector3.zero, green = lawn ?? grass, worn = green + (dirt - green) * Worn;
             float q = Math.Min(pixel, 14f) * .25f;
             for (int j = -1; j <= 1; j += 2) for (int i = -1; i <= 1; i += 2)
             {
                 int use = WorkAt(u + i * q, v + j * q);
-                sum += use == Soil ? soil : use == Gravel ? gravel : use == Rough ? rough : use == Stain ? stain : use == Mud ? mud
-                    : use == Meadow ? ((lawn ?? grass) + rough) * .5f : lawn ?? grass;
+                sum += use == Soil ? (Dug(u + i * q, v + j * q) ? soil : worn) : use == Gravel ? gravel : use == Rough ? rough : use == Stain ? stain
+                    : use == Mud ? mud : use == Meadow ? (green + rough) * .5f : green;
             }
             Vector3 colour = sum * .25f;
             float door = landUse < 6 ? FarDetailData.BandCoverage(pathWidth * .5f - Math.Abs(u), pathWidth * .5f, pixel)
@@ -289,6 +297,7 @@ namespace DroneSandbox
                 if (!p.farm && !p.town) p.setback = p.core ? 4.6f + (float)rng.NextDouble() * 1.5f
                     : p.old ? 5.8f + (float)rng.NextDouble() * 2.1f : 10f + (float)rng.NextDouble() * 6f;
                 if (p.core || p.landUse == 5) p.shed = true;
+                p.gable = !p.old && !p.farm && !p.town && p.landUse == 0 && (p.identity >> 17) % 5 == 0;
                 p.boundary = (p.identity >> 3) % 10 < 3 ? 0 : 1 + k % 3;
                 p.open = Openings(p);
                 plots[ids[k]] = p;
