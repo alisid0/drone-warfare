@@ -1,0 +1,359 @@
+{
+  "blocks": [
+    {
+      "block": 0,
+      "level": "bootstrap",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 3128,
+      "milliseconds": 30.2
+    },
+    {
+      "block": 0,
+      "level": "coarse128",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 1309,
+      "triangles": 1583,
+      "milliseconds": 10.5
+    },
+    {
+      "block": 0,
+      "level": "coarse64",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 3128,
+      "milliseconds": 16
+    },
+    {
+      "block": 0,
+      "level": "prepared32",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 35999,
+      "triangles": 61237,
+      "milliseconds": 89.6
+    },
+    {
+      "block": 0,
+      "level": "refined32-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 35999,
+      "triangles": 61237,
+      "milliseconds": 90.7
+    },
+    {
+      "block": 0,
+      "level": "refined32-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 35999,
+      "triangles": 61237,
+      "milliseconds": 88.8
+    },
+    {
+      "block": 0,
+      "level": "refined16-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 41255,
+      "triangles": 72259,
+      "milliseconds": 108.7
+    },
+    {
+      "block": 0,
+      "level": "refined16-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 38239,
+      "triangles": 65915,
+      "milliseconds": 98.4
+    },
+    {
+      "block": 1,
+      "level": "bootstrap",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 2619,
+      "milliseconds": 10.7
+    },
+    {
+      "block": 1,
+      "level": "coarse128",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 1309,
+      "triangles": 1430,
+      "milliseconds": 9.5
+    },
+    {
+      "block": 1,
+      "level": "coarse64",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 2619,
+      "milliseconds": 14.1
+    },
+    {
+      "block": 1,
+      "level": "prepared32",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 31104,
+      "triangles": 49485,
+      "milliseconds": 74.9
+    },
+    {
+      "block": 1,
+      "level": "refined32-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 31104,
+      "triangles": 49485,
+      "milliseconds": 76.2
+    },
+    {
+      "block": 1,
+      "level": "refined32-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 31104,
+      "triangles": 49485,
+      "milliseconds": 76.8
+    },
+    {
+      "block": 1,
+      "level": "refined16-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 31104,
+      "triangles": 49485,
+      "milliseconds": 77.7
+    },
+    {
+      "block": 1,
+      "level": "refined16-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 32352,
+      "triangles": 52105,
+      "milliseconds": 80
+    },
+    {
+      "block": 2,
+      "level": "bootstrap",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 2525,
+      "milliseconds": 10.4
+    },
+    {
+      "block": 2,
+      "level": "coarse128",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 1309,
+      "triangles": 1288,
+      "milliseconds": 9.5
+    },
+    {
+      "block": 2,
+      "level": "coarse64",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 2109,
+      "triangles": 2525,
+      "milliseconds": 13.8
+    },
+    {
+      "block": 2,
+      "level": "prepared32",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 30518,
+      "triangles": 49633,
+      "milliseconds": 73.9
+    },
+    {
+      "block": 2,
+      "level": "refined32-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 30518,
+      "triangles": 49633,
+      "milliseconds": 73.1
+    },
+    {
+      "block": 2,
+      "level": "refined32-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 30518,
+      "triangles": 49633,
+      "milliseconds": 75.1
+    },
+    {
+      "block": 2,
+      "level": "refined16-centre",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 30518,
+      "triangles": 49633,
+      "milliseconds": 74.5
+    },
+    {
+      "block": 2,
+      "level": "refined16-corner",
+      "gaps": 0,
+      "flipped": 0,
+      "degenerate": 0,
+      "vertical": 0,
+      "vertices": 31744,
+      "triangles": 52243,
+      "milliseconds": 78.2
+    }
+  ],
+  "internalGaps": 0,
+  "sharedGaps": 0,
+  "pairs": 128,
+  "segments": 62752,
+  "worstStep": 0,
+  "flipped": 0,
+  "degenerate": 0,
+  "vertical": 0,
+  "exposure": [
+    {
+      "level": "bootstrap",
+      "woods": 1048576,
+      "holes": 4024,
+      "farPoke": 3772,
+      "detailPoke": 3783,
+      "gladeHoles": 2943,
+      "denseExposed": 0.0009402780316259322,
+      "blobsPerKm2": 44.345855712890625
+    },
+    {
+      "level": "coarse64",
+      "woods": 1048576,
+      "holes": 4024,
+      "farPoke": 3772,
+      "detailPoke": 3783,
+      "gladeHoles": 2943,
+      "denseExposed": 0.0009402780316259322,
+      "blobsPerKm2": 44.345855712890625
+    },
+    {
+      "level": "prepared32",
+      "woods": 1048576,
+      "holes": 80254,
+      "farPoke": 8660,
+      "detailPoke": 8849,
+      "gladeHoles": 78718,
+      "denseExposed": 0,
+      "blobsPerKm2": 23.603439331054688
+    },
+    {
+      "level": "refined32-centre",
+      "woods": 1048576,
+      "holes": 80254,
+      "farPoke": 8660,
+      "detailPoke": 8849,
+      "gladeHoles": 78718,
+      "denseExposed": 0,
+      "blobsPerKm2": 23.603439331054688
+    },
+    {
+      "level": "refined16-centre",
+      "woods": 1048576,
+      "holes": 80270,
+      "farPoke": 8650,
+      "detailPoke": 8843,
+      "gladeHoles": 78739,
+      "denseExposed": 0,
+      "blobsPerKm2": 23.603439331054688
+    }
+  ],
+  "pattern": {
+    "gladeOpenOfWoodland": 0.0857,
+    "gladeOpeningOfWoodland": 0.1336,
+    "broadReliefHalfRange": 4.09,
+    "reliefRegularity": 0.153,
+    "reliefPeakLag": 736,
+    "glades": 99,
+    "gladeClarkEvans": 1.46,
+    "speciesRunMetres": 117.1,
+    "lightHalfRange": {
+      "16": 8,
+      "32": 5.22,
+      "64": 5.22
+    },
+    "denseGreenHalfRange": {
+      "16": 16.98,
+      "32": 15.65,
+      "64": 15.65
+    },
+    "gladeGreenMinusDense": {
+      "16": 33.9,
+      "32": 31.4,
+      "64": 23.1
+    },
+    "crownRatioStd": 0.123,
+    "crownRatioHalfRange": 0.195,
+    "crownNeighbourCorrelation": 0.034,
+    "trees": 6119,
+    "edgeMedianMetres": 16,
+    "edgeTransects": 79
+  }
+}
