@@ -6,13 +6,13 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Lit woodland tiles sample at 8/16 m, distant masses at 64/128 m, and batch into 2 km draw blocks.
+    // Lit woodland tiles sample at 16/32 m, distant masses at 64/128 m, and batch into 2 km draw blocks.
     // Generation is sliced between small sampling batches on the main thread, so changing WorldPlan cannot race a worker.
     public sealed class ForestHlod
     {
         public const int BlockSize = 2048, TileSize = 256;
         const int BlockCount = 28;
-        const double BuildMilliseconds = 0.30;
+        const double BuildMilliseconds = 0.85;
 
         // The same plain mesh data goes to Unity and the offline harness; no substitute forest recipe.
         public sealed class Data
@@ -60,6 +60,7 @@ namespace DroneSandbox
         public static bool Building { get; private set; }
         public static int MissingBlocks { get; private set; }
         public static int CoarseBlocks { get; private set; }
+        public static int NearCoarseBlocks { get; private set; }
 
         // Destroy all native allocations as well as a partially built block when the terrain origin changes.
         public void Clear()
@@ -98,13 +99,13 @@ namespace DroneSandbox
             float x = Mathf.Clamp(camera.x, corner.x, corner.x + BlockSize);
             float z = Mathf.Clamp(camera.z, corner.y, corner.y + BlockSize);
             float d = Vector3.Distance(camera, new Vector3(x, WorldPlan.Height(x, z) + 16f, z));
-            return d < 1800f ? 8 : d < 4000f ? 16 : d < 9000f ? 64 : 128;
+            return d < 1800f ? 16 : d < 4000f ? 32 : d < 9000f ? 64 : 128;
         }
 
         // Draw only camera-visible blocks and spend a bounded slice filling the nearest missing coverage first.
         public void Update(Camera camera, Plane[] planes)
         {
-            BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = 0; frame++;
+            BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = NearCoarseBlocks = 0; frame++;
             if (!FarTerrain.ForestCanopyHlod) return;
             if (!WorldPlan.Ready)
             {
@@ -138,8 +139,8 @@ namespace DroneSandbox
                     {
                         block.lastSeen = frame;
                         if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
-                        if (block.data.step == 256) CoarseBlocks++;
                         bool moved = block.data.adaptive && block.data.step <= 16 && (world - block.data.focus).sqrMagnitude > 256f * 256f;
+                        if (block.data.step > step || moved) { CoarseBlocks++; if (step <= 32) NearCoarseBlocks++; }
                         if (block.data.step <= step && !moved) continue;
                         // First give every visible block a coarse shape before refining any of them.
                         distance += 2e9f;
@@ -235,6 +236,7 @@ namespace DroneSandbox
             texture.Apply(true, true); yield return null;
             var material = ForestMaterials.Create("Canopy", null, 3);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
+            if (ForestMaterials.Fades(material)) material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
             block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
             block.triangles = data.triangles.Length / 3;
             data.vertices = data.normals = null; data.uv = null;
@@ -242,7 +244,7 @@ namespace DroneSandbox
             data.pixels = null;
         }
 
-        // Fine canopy patches cover 350-700 m and continue into HLOD with identical geometry at that boundary.
+        // Crown cards overlap a lower stand surface; completed projected selections open it conservatively.
         // The shader opens the camera's tree bubble smoothly; no vertex uploads or 16 m stepping during flight.
         void Draw(Block block, Camera camera)
         {
@@ -258,7 +260,7 @@ namespace DroneSandbox
         // Refinement shares complementary coverage for three quarters of a second instead of replacing a silhouette.
         void Submit(Block block, Camera camera, float fade)
         {
-            ForestMaterials.SetCamera(properties, camera.transform.position, FarScatter.TierDistances, fade);
+            FarScatter.SetForestView(properties, camera, fade);
             var rp = new RenderParams(block.material) { camera = camera, worldBounds = block.bounds,
                 matProps = properties, shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
             Graphics.RenderMesh(rp, block.mesh, 0, Matrix4x4.identity);
@@ -395,7 +397,7 @@ namespace DroneSandbox
                 }
         }
 
-        // Keep 8 m geometry around the tree/canopy hand-over, then spend fewer vertices across the rest of a large block.
+        // Keep 16 m geometry near visible crowns; shared detail supplies the smaller relief on every surface tier.
         static int TileStep(Data data, int x, int z)
         {
             if (!data.adaptive || data.step >= 64) return data.step;
@@ -403,11 +405,11 @@ namespace DroneSandbox
             float px = Mathf.Clamp(data.focus.x, corner.x, corner.x + TileSize);
             float pz = Mathf.Clamp(data.focus.z, corner.y, corner.y + TileSize);
             float distance = Vector3.Distance(data.focus, new Vector3(px, WorldPlan.Height(px, pz) + 16f, pz));
-            return Mathf.Max(data.step, distance < 900f ? 8 : distance < 2200f ? 16 : 64);
+            return Mathf.Max(data.step, distance < 900f ? 16 : distance < 2200f ? 32 : 64);
         }
 
-        // Eight-metre texels resolve crown-scale light variation without a 516-square upload for each nearby block.
-        static float TexelSize(Data data) => data.step <= 16 ? 8f : data.step * 0.25f;
+        // Small block textures carry soft species districts; the shared world detail resolves crowns at every tier.
+        static float TexelSize(Data data) => data.step <= 32 ? 32f : Mathf.Max(32f, data.step * 0.25f);
 
         // A regular low-cost mass arrives first; temporary skirts hide mixed edges until stitched refinement replaces it.
         static IEnumerator Coverage(Data data)

@@ -291,6 +291,17 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     #endif
 #endif
 
+    // Shared, mipmapped world detail gives even a 256 m bootstrap mesh individual crown light and normals.
+    if (_ForestTier >= 3.0 && _ForestEnabled > 0.5)
+    {
+        float2 forestUV = (GetAbsolutePositionWS(input.positionRWS).xz + _ForestOrigin.xy) / 128.0;
+        float4 detail = SAMPLE_TEXTURE2D(_ForestDetail, sampler_ForestDetail, forestUV);
+        float4 cluster = SAMPLE_TEXTURE2D(_ForestDetail, sampler_ForestDetail, forestUV * 0.381 + float2(0.173, 0.619));
+        surfaceData.baseColor *= (0.50 + detail.r) * (0.82 + cluster.r * 0.36);
+        float2 slope = (detail.gb * 2.0 - 1.0) * 0.50 + (cluster.gb * 2.0 - 1.0) * 0.22;
+        surfaceData.normalWS = normalize(surfaceData.normalWS + float3(slope.x, 0.0, slope.y));
+    }
+
     // Use bent normal to sample GI if available
 #ifdef _BENTNORMALMAP
     GetNormalWS(input, bentNormalTS, bentNormalWS, doubleSidedConstants);

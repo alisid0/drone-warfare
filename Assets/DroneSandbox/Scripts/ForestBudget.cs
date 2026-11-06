@@ -8,20 +8,20 @@ namespace DroneSandbox
     {
         public const int FullLimit = 200, ReducedLimit = 1000, CardLimit = 5000, TriangleLimit = 1800000;
 
-        // Sorted camera distances and measured mesh costs keep the policy independent of Unity render objects.
+        // Earlier offline comparisons retain this distance entry; production rendering uses projected buckets below.
         public struct Entry
         {
             public float distance;
             public int fullTriangles, reducedTriangles, cardTriangles;
         }
 
-        // One-metre bins bound selection cost without sorting or copying thousands of tree records each frame.
+        // Inverse-pixel bins bound selection cost without sorting or copying thousands of tree records each frame.
         public struct Bucket
         {
             public int full, reduced, cards, fullTriangles, reducedTriangles, cardTriangles;
         }
 
-        // Prefix sums include the movement guard and both sides of a fade in every instance and triangle allowance.
+        // Historical distance selector retained for earlier offline comparisons; runtime calls SelectProjected.
         public static Vector4 SelectBuckets(Bucket[] bins, float readyReach, int guard)
         {
             for (int i = 1; i < bins.Length; i++)
@@ -50,6 +50,41 @@ namespace DroneSandbox
             while (card > reduced)
             {
                 var a = Range(bins, Mathf.Max(0, reduced - 20 - guard), card + guard);
+                if (a.cards <= CardLimit && meshCost + a.cardTriangles <= TriangleLimit) break;
+                card--;
+            }
+            return new Vector4(full, reduced, card, 700f);
+        }
+
+        // Inverse projected pixels put large crowns first; 25/83/333 mean 40/12/3 px before budget pressure.
+        public static Vector4 SelectProjected(Bucket[] bins, int guard)
+        {
+            for (int i = 1; i < bins.Length; i++)
+            {
+                var a = bins[i - 1]; var b = bins[i];
+                b.full += a.full; b.reduced += a.reduced; b.cards += a.cards;
+                b.fullTriangles += a.fullTriangles; b.reducedTriangles += a.reducedTriangles; b.cardTriangles += a.cardTriangles;
+                bins[i] = b;
+            }
+            int card = 333;
+            int full = Mathf.Min(25, card), reduced = Mathf.Min(83, card);
+            while (full > 0)
+            {
+                var a = Range(bins, 0, full + guard);
+                if (a.full <= FullLimit && a.fullTriangles <= TriangleLimit / 2) break;
+                full--;
+            }
+            int fullCost = full > 0 ? Range(bins, 0, full + guard).fullTriangles : 0;
+            while (reduced > full)
+            {
+                var a = Range(bins, Mathf.Max(0, full - Mathf.CeilToInt(full * 0.1f) - guard), reduced + guard);
+                if (a.reduced <= ReducedLimit && fullCost + a.reducedTriangles <= TriangleLimit - CardLimit * 8) break;
+                reduced--;
+            }
+            int meshCost = fullCost + (reduced > 0 ? Range(bins, Mathf.Max(0, full - Mathf.CeilToInt(full * 0.1f) - guard), reduced + guard).reducedTriangles : 0);
+            while (card > reduced)
+            {
+                var a = Range(bins, Mathf.Max(0, reduced - Mathf.CeilToInt(reduced * 0.1f) - guard), card + guard);
                 if (a.cards <= CardLimit && meshCost + a.cardTriangles <= TriangleLimit) break;
                 card--;
             }

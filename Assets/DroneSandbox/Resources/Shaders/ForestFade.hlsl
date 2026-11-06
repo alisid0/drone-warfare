@@ -7,11 +7,26 @@ void ForestFade(float3 positionRWS)
     float3 world = GetAbsolutePositionWS(positionRWS);
     // HDRP applies camera translation to UNITY_MATRIX_M in ordinary, instanced AND DOTS variants.
     // Undo it exactly once, just as for positionRWS; _ForestCamera is an absolute Unity scene position.
-    float3 pivot = GetAbsolutePositionWS(GetObjectToWorldMatrix()._m03_m13_m23);
-    float d = distance(_ForestTier < 3.0 ? pivot : world, _ForestCamera.xyz);
-    float full = 1.0 - smoothstep(max(0.0, _ForestDistances.x - 10.0), max(0.01, _ForestDistances.x), d);
-    float mesh = 1.0 - smoothstep(max(0.0, _ForestDistances.y - 20.0), max(0.01, _ForestDistances.y), d);
-    float card = 1.0 - smoothstep(max(0.0, _ForestDistances.z - 35.0), max(0.01, _ForestDistances.z), d);
+    if (abs(_ForestProjection.w) < 0.01) return;
+    float3 center = _ForestTier < 3.0 ? GetAbsolutePositionWS(mul(GetObjectToWorldMatrix(), float4(_ForestCrown.xyz, 1.0)).xyz) : world;
+    float radius = _ForestTier < 3.0 ? length(mul((float3x3)GetObjectToWorldMatrix(), _ForestRadius.xyz)) : 2.0;
+    float depth = _ForestProjection.w < 0.0 ? 1.0 : max(1.0, dot(center - _ForestSelection.xyz, _ForestProjection.xyz) + (_ForestTier < 3.0 ? 0.0 : 32.0));
+    float d = 1000.0 * depth / max(0.01, 2.0 * radius * abs(_ForestProjection.w));
+    float full = _ForestDistances.x > 0.0 ? 1.0 - smoothstep(_ForestDistances.x * 0.9, _ForestDistances.x, d) : 0.0;
+    float mesh = _ForestDistances.y > 0.0 ? 1.0 - smoothstep(_ForestDistances.y * 0.9, _ForestDistances.y, d) : 0.0;
+    float card = _ForestDistances.z > 0.0 ? 1.0 - smoothstep(_ForestDistances.z * 0.9, _ForestDistances.z, d) : 0.0;
+    // Only completed cells may open the canopy. Crowns beyond them can arrive independently without shrinking the entire view.
+    if (_ForestTier >= 3.0)
+    {
+        card *= 1.0 - smoothstep(max(0.0, _ForestSelection.w - 32.0), max(0.01, _ForestSelection.w), distance(world.xz, _ForestSelection.xz));
+        float3 delta = world - _ForestSelection.xyz;
+        float3 right = cross(float3(0.0, 1.0, 0.0), _ForestProjection.xyz);
+        right = dot(right, right) > 0.001 ? normalize(right) : float3(1.0, 0.0, 0.0);
+        float3 up = cross(_ForestProjection.xyz, right);
+        float viewDepth = dot(delta, _ForestProjection.xyz);
+        float2 margin = (_ForestProjection.w < 0.0 ? 1.0 : viewDepth) * _ForestViewport.xy - abs(float2(dot(delta, right), dot(delta, up)));
+        card *= saturate(min(margin.x, margin.y) / 24.0) * step(0.0, viewDepth);
+    }
     float low = _ForestTier < 0.5 ? 0.0 : _ForestTier < 1.5 ? full : _ForestTier < 2.5 ? mesh : card;
     float high = _ForestTier < 0.5 ? full : _ForestTier < 1.5 ? mesh : _ForestTier < 2.5 ? card : 1.0;
     // Most foliage pixels are outside a transition; skip dither hashing in colour, depth and shadow passes there.

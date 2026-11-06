@@ -6,11 +6,11 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Streams a small tree bubble and batches photo models by species, tier and stand tint. Larger shapes belong
-    // to ForestHlod and SettlementHlod, so a high camera never submits thousands of sub-pixel tree cards.
+    // Streams visible crowns by projected size and batches photo models by species, tier and stand tint.
+    // ForestHlod supplies continuous coverage while the bounded tree cache and selections catch up.
     public class FarScatter : MonoBehaviour
     {
-        public const float FullReach = 45f, MeshReach = 125f, TreeReach = 350f, HouseReach = 1500f;
+        public const float TreeReach = 3600f, HouseReach = 1500f; // tree cache bound, not a render tier
         public const int FullLimit = ForestBudget.FullLimit, ReducedLimit = ForestBudget.ReducedLimit, CardLimit = ForestBudget.CardLimit, TriangleLimit = ForestBudget.TriangleLimit;
         const float CellSize = 120f;
         const int Batch = 511, CellLimit = 192, MovementGuard = 16; // non-uniform scales also need inverse matrices
@@ -91,7 +91,9 @@ namespace DroneSandbox
         {
             public readonly List<DrawBatch> draws = new List<DrawBatch>();
             public IEnumerator builder;
-            public Vector3 position, buildingFrom;
+            public Vector3 position, buildingFrom, forward;
+            public float focal, ready, reach;
+            public Vector2 viewport;
             public Vector4 distances;
             public float refreshed;
             public int version = -1, full, reduced, cards, triangles, slot, lastFrame;
@@ -121,6 +123,28 @@ namespace DroneSandbox
         public static int Samples { get; private set; }
         public static int RecordsVisited { get; private set; }
         public static int ReadyCells { get; private set; }
+        public static Vector4 TierPixels { get; private set; }
+        public static float CrownReach { get; private set; }
+        public static float ReadyRadius { get; private set; }
+        static View drawingView;
+
+        // Projection uses vertical render pixels, including zoom, viewport size and orthographic photo cameras.
+        public static float FocalPixels(Camera camera) => Mathf.Max(1f, Mathf.Abs(camera.projectionMatrix.m11) * camera.pixelHeight * 0.5f);
+
+        // Inverse crown pixels sort large crowns first without a camera-height-dependent distance cutoff.
+        public static float CrownScore(Vector3 crown, float radius, Vector3 eye, Vector3 forward, float focal)
+            => 1000f * (focal < 0f ? 1f : Mathf.Max(1f, Vector3.Dot(crown - eye, forward))) / (2f * radius * Mathf.Abs(focal));
+
+        // Canopy uses the same completed selection as the trees, never a stale hole after a jump or new camera.
+        public static void SetForestView(MaterialPropertyBlock block, Camera camera, float build = 1f)
+        {
+            var view = drawingView;
+            ForestMaterials.SetCamera(block, camera.transform.position, view != null ? view.distances : new Vector4(0f, 0f, 0f, 700f), build);
+            ForestMaterials.SetProjection(block, view != null ? view.position : camera.transform.position,
+                view != null ? view.forward : camera.transform.forward, view != null ? view.focal : FocalPixels(camera) * (camera.orthographic ? -1f : 1f),
+                view != null ? view.ready : 0f);
+            ForestMaterials.SetViewport(block, view != null ? view.viewport : Vector2.zero);
+        }
 
         // Explicit camera submission supports photo, scene and gameplay cameras without sharing their allowances.
         void OnEnable()
@@ -192,9 +216,10 @@ namespace DroneSandbox
             if (!views.TryGetValue(cam, out var view)) views.Add(cam, view = new View { slot = nextCameraSlot++ });
             view.lastFrame = Time.frameCount;
             // Never reuse a distant camera's tree hole or pending selection after a teleport.
-            if ((position - view.position).sqrMagnitude > MovementGuard * MovementGuard) view.draws.Clear();
-            if (view.builder != null && (position - view.buildingFrom).sqrMagnitude > MovementGuard * MovementGuard) view.builder = null;
-            if (position.y - GroundAt(local) < TreeReach + 150f && generatedFrame != Time.frameCount
+            if ((position - view.position).sqrMagnitude > 96f * 96f
+                || Vector3.Dot(view.forward, cam.transform.forward) < 0.98f) view.draws.Clear();
+            if (view.builder != null && (position - view.buildingFrom).sqrMagnitude > 96f * 96f) view.builder = null;
+            if (generatedFrame != Time.frameCount
                 && (cellBuilder != null || Time.frameCount % views.Count == view.slot % views.Count))
             {
                 generatedFrame = Time.frameCount;
@@ -204,12 +229,17 @@ namespace DroneSandbox
                 || view.draws.Count == 0 && (position - view.position).sqrMagnitude > 1f))
             {
                 view.buildingFrom = position;
-                view.builder = Select(view, position, ReadyReach(world));
+                view.builder = Select(view, position, cam);
             }
             workTimer.Restart();
-            while (view.builder != null && workTimer.Elapsed.TotalMilliseconds < 0.12)
+            while (view.builder != null && workTimer.Elapsed.TotalMilliseconds < 0.20)
                 if (!view.builder.MoveNext()) view.builder = null;
-            TierDistances = view.draws.Count > 0 ? view.distances : new Vector4(0f, 0f, 0f, 700f);
+            drawingView = view.draws.Count > 0 ? view : null;
+            CrownReach = drawingView != null ? view.reach : 0f;
+            ReadyRadius = drawingView != null ? view.ready : 0f;
+            TierPixels = drawingView != null ? new Vector4(view.distances.x > 0f ? 1000f / view.distances.x : 0f,
+                view.distances.y > 0f ? 1000f / view.distances.y : 0f, view.distances.z > 0f ? 1000f / view.distances.z : 0f, 0f) : Vector4.zero;
+            TierDistances = new Vector4(0f, 0f, CrownReach, 700f);
             // The guard bounds camera movement while cached matrices are in use; a missing bubble leaves canopy intact.
             if (view.draws.Count > 0)
             {
@@ -245,19 +275,26 @@ namespace DroneSandbox
             if (cellBuilder == null)
             {
                 int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
-                int reach = Mathf.CeilToInt((TreeReach + 120f) / CellSize);
-                for (int ring = 0; ring <= reach && cellBuilder == null; ring++)
-                    for (int dz = -ring; dz <= ring && cellBuilder == null; dz++)
+                float footprint = camera.orthographic ? Mathf.Sqrt(1f + camera.aspect * camera.aspect) / Mathf.Abs(camera.projectionMatrix.m11)
+                    : 9.2f * FocalPixels(camera) / 3f;
+                int reach = Mathf.CeilToInt(Mathf.Min(TreeReach, footprint + 240f) / CellSize);
+                int wanted = 0;
+                for (int ring = 0; ring <= reach && cellBuilder == null && wanted <= CellLimit / Mathf.Max(1, views.Count); ring++)
+                    for (int dz = -ring; dz <= ring && cellBuilder == null && wanted <= CellLimit / Mathf.Max(1, views.Count); dz++)
                         for (int dx = -ring; dx <= ring && cellBuilder == null; dx++)
                         {
                             if (Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dz)) != ring) continue;
+                            Vector2 center = new Vector2((ci + dx + 0.5f) * CellSize, (cj + dz + 0.5f) * CellSize) - FarTerrain.Origin;
+                            var area = new Bounds(new Vector3(center.x, position.y, center.y), new Vector3(CellSize + 64f, 4000f, CellSize + 64f));
+                            if (!GeometryUtility.TestPlanesAABB(planes, area)) continue;
+                            if (++wanted > CellLimit / Mathf.Max(1, views.Count)) break;
                             long key = Key(ci + dx, cj + dz);
                             if (cells.ContainsKey(key)) continue;
                             buildingKey = key; buildingFrom = world; buildingCamera = camera; cellBuilder = Build(ci + dx, cj + dz);
                         }
             }
             workTimer.Restart();
-            while (cellBuilder != null && workTimer.Elapsed.TotalMilliseconds < 0.12)
+            while (cellBuilder != null && workTimer.Elapsed.TotalMilliseconds < 0.20)
                 if (!cellBuilder.MoveNext())
                 {
                     cells.Add(buildingKey, buildingCell); CachedTreeRecords += buildingCell.trees.Length;
@@ -268,7 +305,7 @@ namespace DroneSandbox
                     {
                         bool keep = false;
                         foreach (var observer in views.Keys)
-                            if (observer != null && pair.Value.bounds.SqrDistance(observer.transform.position) <= 780f * 780f) { keep = true; break; }
+                            if (observer != null && pair.Value.bounds.SqrDistance(observer.transform.position) <= (TreeReach + 240f) * (TreeReach + 240f)) { keep = true; break; }
                         if (!keep) stale.Add(pair.Key);
                     }
                     foreach (long key in stale) { CachedTreeRecords -= cells[key].trees.Length; cells.Remove(key); }
@@ -289,22 +326,39 @@ namespace DroneSandbox
         }
 
         // Scan, budget and assemble a replacement over many frames; dictionary snapshots survive cell arrivals/evictions.
-        IEnumerator Select(View target, Vector3 position, float ready)
+        IEnumerator Select(View target, Vector3 position, Camera camera)
         {
             int version = cellVersion;
+            Vector3 forward = camera.transform.forward;
+            bool orthographic = camera.orthographic;
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            right = right.sqrMagnitude > 0.001f ? right.normalized : Vector3.right;
+            Vector3 up = Vector3.Cross(forward, right);
+            Vector2 viewport = new Vector2(camera.aspect / Mathf.Abs(camera.projectionMatrix.m11), 1f / Mathf.Abs(camera.projectionMatrix.m11));
+            float focal = FocalPixels(camera) * (orthographic ? -1f : 1f);
+            float ready = ReadyReach(new Vector2(position.x, position.z) + FarTerrain.Origin);
+            int guard = Mathf.Min(64, Mathf.CeilToInt(1000f * MovementGuard / (4f * Mathf.Max(1f, Mathf.Abs(focal)))));
+            var selectionPlanes = new Plane[6]; GeometryUtility.CalculateFrustumPlanes(camera, selectionPlanes);
             var snapshot = new List<Cell>(cells.Values);
             var visible = new List<Visible>();
             var bins = new ForestBudget.Bucket[400];
             int visited = 0;
             foreach (var cell in snapshot)
             {
-                if (cell.bounds.SqrDistance(position) > (TreeReach + MovementGuard) * (TreeReach + MovementGuard)) continue;
+                if (!GeometryUtility.TestPlanesAABB(selectionPlanes, cell.bounds)) continue;
                 for (int i = 0; i < cell.trees.Length; i++)
                 {
                     var tree = cell.trees[i];
-                    float distance = Vector3.Distance(position, tree.position);
+                    Vector3 crown = tree.position + Vector3.up * (tree.stand.height * 0.75f);
+                    Vector3 offset = crown - position;
+                    float depth = Vector3.Dot(offset, forward), pad = Mathf.Max(tree.stand.radius, tree.stand.height * 0.5f);
+                    // Charge only crowns intersecting the view, not all trees in a tall cell touching its frustum.
+                    float extent = orthographic ? 1f : Mathf.Max(0f, depth);
+                    if (depth < -pad || Mathf.Abs(Vector3.Dot(offset, right)) > viewport.x * extent + pad * (1f + viewport.x)
+                        || Mathf.Abs(Vector3.Dot(offset, up)) > viewport.y * extent + pad * (1f + viewport.y)) continue;
+                    float distance = CrownScore(crown, tree.stand.radius, position, forward, focal);
                     RecordsVisited++;
-                    if (distance <= TreeReach + MovementGuard)
+                    if (distance <= 333f + guard)
                     {
                         visible.Add(new Visible { cell = cell, index = i, distance = distance });
                         int kind = tree.stand.species * 3 + tree.stand.shade, at = Mathf.FloorToInt(distance);
@@ -318,7 +372,7 @@ namespace DroneSandbox
                     if ((++visited & 31) == 0) yield return null;
                 }
             }
-            Vector4 distances = ForestBudget.SelectBuckets(bins, ready, MovementGuard);
+            Vector4 distances = ForestBudget.SelectProjected(bins, guard);
             yield return null;
             var instances = new List<Matrix4x4>[36];
             var next = new View { position = position, distances = distances, version = version };
@@ -330,12 +384,12 @@ namespace DroneSandbox
                     int k = tier * 12 + kind; var model = models[k]; if (model == null) continue;
                     float upper = tier == 0 ? distances.x : tier == 1 ? distances.y : distances.z;
                     float lower = tier == 0 ? 0f : tier == 1 ? distances.x : distances.y;
-                    int pad = model.fades ? MovementGuard : 0;
-                    float overlap = model.fades ? (tier == 1 ? 10f : tier == 2 ? 20f : 0f) : 0f;
+                    int pad = model.fades ? guard : 0;
+                    float overlap = model.fades && tier > 0 ? lower * 0.1f : 0f;
                     if (upper <= 0f || v.distance > upper + pad || tier > 0 && v.distance < lower - overlap - pad) continue;
                     if (instances[k] == null) instances[k] = new List<Matrix4x4>();
                     instances[k].Add(tier == 0 ? tree.mesh : tier == 1 ? tree.reduced : tree.card);
-                    next.triangles += model.triangles;
+                    next.triangles += model.triangles; next.reach = Mathf.Max(next.reach, Vector3.Distance(position, tree.position));
                     if (tier == 0) next.full++; else if (tier == 1) next.reduced++; else next.cards++;
                 }
                 if ((++visited & 31) == 0) yield return null;
@@ -361,6 +415,8 @@ namespace DroneSandbox
             }
             // Selection can finish while the camera moves; publish only while its conservative guard remains valid.
             target.draws.Clear(); target.draws.AddRange(next.draws); target.position = position;
+            target.viewport = viewport;
+            target.forward = forward; target.focal = focal; target.ready = ready; target.reach = next.reach;
             target.distances = distances; target.version = version; target.refreshed = Time.unscaledTime;
             target.full = next.full; target.reduced = next.reduced; target.cards = next.cards; target.triangles = next.triangles;
         }
@@ -368,7 +424,7 @@ namespace DroneSandbox
         // Render cached arrays directly; native submission is the only per-instance upload left on ordinary frames.
         void DrawTrees(Camera camera, View view)
         {
-            ForestMaterials.SetCamera(properties, camera.transform.position, view.distances);
+            SetForestView(properties, camera);
             foreach (var draw in view.draws)
             {
                 if (!GeometryUtility.TestPlanesAABB(planes, draw.bounds)) continue;
@@ -377,20 +433,21 @@ namespace DroneSandbox
                     var material = draw.part.materials[Mathf.Min(sub, draw.part.materials.Length - 1)];
                     if (material == null) continue;
                     var rp = new RenderParams(material) { camera = camera, worldBounds = draw.bounds, matProps = properties,
-                        shadowCastingMode = draw.tier < 2 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
+                        shadowCastingMode = draw.tier == 0 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
                     Graphics.RenderMeshInstanced(rp, draw.part.mesh, sub, draw.matrices, draw.matrices.Length);
                     InstanceDrawCalls++;
                 }
             }
         }
 
-        // Retain canopy until the entire tree bubble is ready; prefetch gives a 40 m/s flight several seconds' lead.
+        // Only completed cells may open the canopy; individual crowns outside this radius can still be drawn.
         float ReadyReach(Vector2 world)
         {
             int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
             float reach = TreeReach + MovementGuard;
-            for (int j = cj - 4; j <= cj + 4; j++)
-                for (int i = ci - 4; i <= ci + 4; i++)
+            int ring = Mathf.CeilToInt(TreeReach / CellSize);
+            for (int j = cj - ring; j <= cj + ring; j++)
+                for (int i = ci - ring; i <= ci + ring; i++)
                 {
                     if (cells.ContainsKey(Key(i, j))) continue;
                     float x = Mathf.Max(i * CellSize - world.x, Mathf.Max(0f, world.x - (i + 1) * CellSize));
@@ -538,6 +595,11 @@ namespace DroneSandbox
                 parts.Add(new Part { mesh = filter.sharedMesh, materials = materials, local = local, center = box.center });
                 for (int sub = 0; sub < filter.sharedMesh.subMeshCount; sub++) triangles += (int)filter.sharedMesh.GetIndexCount(sub) / 3;
             }
+            if (species >= 0)
+                foreach (var part in parts)
+                    foreach (var material in part.materials)
+                        ForestMaterials.SetShape(material, part.local.inverse.MultiplyPoint3x4(Vector3.up * ((top - bottom) * 0.75f)),
+                            part.local.inverse.MultiplyVector(Vector3.right * ((top - bottom) * ForestPalette.RadiusPerHeight[species])));
             return parts.Count == 0 ? null : new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom), triangles = triangles, tier = tier, fades = fades };
         }
     }

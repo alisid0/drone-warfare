@@ -7,10 +7,10 @@ namespace DroneSandbox
     {
         public static readonly Color32[] Colours =
         {
-            new Color32(73, 99, 61, 255),
-            new Color32(78, 103, 64, 255),
-            new Color32(48, 77, 54, 255),
-            new Color32(53, 81, 55, 255),
+            new Color32(84, 108, 70, 255),
+            new Color32(89, 112, 73, 255),
+            new Color32(62, 88, 62, 255),
+            new Color32(66, 92, 63, 255),
         };
         public static readonly float[] RadiusPerHeight = { 0.39738891f, 0.17586441f, 0.21163066f, 0.21589965f };
         public static readonly Color Ground = new Color(49f / 255f, 70f / 255f, 45f / 255f).linear;
