@@ -7,11 +7,22 @@ namespace DroneSandbox
     public sealed class FarDetailCover
     {
         readonly Cover[] grid;
+        readonly byte[] interior;
         readonly int count, seed;
 
-        // The owning detail snapshot already cloned this grid; retain it without another theatre-sized allocation.
+        // Cache uniform neighbourhoods once per snapshot; their 6 m warp cannot change membership at any sampled point.
         public FarDetailCover(int seed, Cover[] grid, int count)
-        { this.seed = seed; this.grid = grid; this.count = count; }
+        {
+            this.seed = seed; this.grid = grid; this.count = count;
+            interior = new byte[grid.Length];
+            for (int j = 1; j < count - 2; j++) for (int i = 1; i < count - 2; i++)
+            {
+                Cover kind = grid[j * count + i]; bool same = true;
+                for (int z = -1; z <= 2 && same; z++) for (int x = -1; x <= 2; x++)
+                    if (grid[(j + z) * count + i + x] != kind) { same = false; break; }
+                if (same) interior[j * count + i] = (byte)((int)kind + 1);
+            }
+        }
 
         // Four categorical corners retain memberships rather than interpolating enum values.
         public struct Sample
@@ -22,6 +33,16 @@ namespace DroneSandbox
             // Bilinear membership is continuous across the original 32 m sampling lattice.
             public float Weight(Cover kind) => FarDetailData.Mix(FarDetailData.Mix(a == kind ? 1f : 0f, b == kind ? 1f : 0f, u),
                 FarDetailData.Mix(c == kind ? 1f : 0f, d == kind ? 1f : 0f, u), v);
+
+            // Discrete fine-texture IDs follow the strongest interpolated membership, not the old nearest grid node.
+            public Cover Dominant()
+            {
+                Cover best = a; float weight = Weight(a), next = Weight(b);
+                if (next > weight) { best = b; weight = next; }
+                next = Weight(c); if (next > weight) { best = c; weight = next; }
+                next = Weight(d); if (next > weight) best = d;
+                return best;
+            }
         }
 
         // A 6 m displacement over 37/53 m wavelengths softens every land-use outline without a large domain warp.
@@ -29,6 +50,12 @@ namespace DroneSandbox
         {
             if (ripple)
             {
+                int cx = (int)Math.Floor((x + WorldPlan.Half) / 32f), cz = (int)Math.Floor((z + WorldPlan.Half) / 32f);
+                if ((uint)cx < count && (uint)cz < count)
+                {
+                    int uniform = interior[cz * count + cx];
+                    if (uniform != 0) { Cover kind = (Cover)(uniform - 1); return new Sample { a = kind, b = kind, c = kind, d = kind }; }
+                }
                 float dx = (Noise(x, z, 37f, 73) - .5f) * 12f;
                 float dz = (Noise(x, z, 53f, 74) - .5f) * 12f;
                 x += dx; z += dz;

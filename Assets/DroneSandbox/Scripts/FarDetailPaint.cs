@@ -44,17 +44,21 @@ namespace DroneSandbox
         // Feature ownership is sampled separately from colour; IDs and angles are never interpolated as numbers.
         public Color32 Control(float x, float z, Vector2 coverPosition, Segment[] lanes = null, Segment[] streams = null)
         {
-            Cover cover = CoverAt(x, z);
+            var land = this.cover.At(x, z);
+            Cover cover = land.Dominant();
+            if (cover == Cover.Forest) cover = Cover.Pasture;
+            if (this.cover.Forest(x, z) > .5f) cover = Cover.Forest;
             float bank = Bank(x, z, streams ?? rivers, out _);
             if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
-            int layer = cover == Cover.Farmland ? 4 : GroundLayer(cover, x, z); float angle = 0f; byte strength = 255;
-            if (this.cover.At(x, z).Weight(Cover.Farmland) > 0f)
+            int layer = cover == Cover.Farmland ? 4 : GroundLayer(cover, x, z); float angle = 0f;
+            byte strength = (byte)Math.Round(255f * (1f - (bank < 64f ? 0f : land.Weight(Cover.Water))));
+            if (land.Weight(Cover.Farmland) > 0f)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
                 if (f.side < 0f || f.end < 0f || f.use != 0) layer = 4;
             }
             if (bank < 4f) layer = 2;
-            if (bank < 0f || cover == Cover.Water) strength = 0;
+            if (bank < 0f) strength = 0;
             Road(x, z, lanes ?? roads, out float edge, out int kind, out _);
             if (edge < 0f) { layer = 2; strength = kind == 0 ? (byte)50 : (byte)255; }
             int turn = (int)Math.Round(angle / Math.PI * 65535);
@@ -153,7 +157,7 @@ namespace DroneSandbox
             if (f.use == 3 || f.use == 4)
             {
                 float pitch = f.use == 3 ? 10f : 5f, width = f.use == 3 ? 2.8f : 1.5f;
-                float row = BandCoverage(width - Math.Abs(Repeat(f.across + pitch * .5f, pitch) - pitch * .5f), width, pixel);
+                float row = PeriodicBand(f.across + width, pitch, 2f * width, pixel * f.projection);
                 c = Blend(FarDetailPalette.Means[4], f.use == 3 ? FarDetailPalette.Means[1] * .8f : FarDetailPalette.Means[6], row);
             }
             float projection = f.projection;
@@ -224,6 +228,15 @@ namespace DroneSandbox
 
         // Subtract the opposite edge of a finite strip: a 1 m stream cannot cover half a 14 m pixel.
         public static float BandCoverage(float inside, float halfWidth, float pixel) => Coverage(inside, pixel) - Coverage(inside - 2f * halfWidth, pixel);
+
+        // Integrate every repeated garden row in a pixel, preserving its mean even when a coarse pixel spans several rows.
+        static float PeriodicBand(float at, float pitch, float width, float pixel)
+        {
+            float a = (at - pixel * .5f) / pitch, b = (at + pixel * .5f) / pitch, w = width / pitch;
+            float ia = (float)Math.Floor(a) * w + Math.Min(Repeat(a, 1f), w);
+            float ib = (float)Math.Floor(b) * w + Math.Min(Repeat(b, 1f), w);
+            return Clamp((ib - ia) * pitch / Math.Max(.001f, pixel), 0f, 1f);
+        }
 
         // Linear interpolation is essential to the colour agreement between near textures and distant mipmaps.
         static Vector3 Blend(Vector3 a, Vector3 b, float t) => a + (b - a) * t;

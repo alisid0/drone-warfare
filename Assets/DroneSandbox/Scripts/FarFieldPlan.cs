@@ -14,12 +14,14 @@ namespace DroneSandbox
         readonly FarDetailCover cover;
         readonly Func<float, float, float> height;
         readonly District[] districts = new District[Count * Count];
+        readonly object[] gates = new object[64];
         readonly Dictionary<long, FarDetailData.Segment[]> roadCells = new Dictionary<long, FarDetailData.Segment[]>();
 
         // Index road directions once; no global polygon pass or native Unity call is needed on world setup.
         public FarFieldPlan(int seed, FarDetailData.Segment[] roads, FarDetailCover cover = null, Func<float, float, float> height = null)
         {
             this.seed = seed; this.cover = cover; this.height = height;
+            for (int i = 0; i < gates.Length; i++) gates[i] = new object();
             var index = new Dictionary<long, List<FarDetailData.Segment>>();
             foreach (var s in roads)
             {
@@ -119,7 +121,7 @@ namespace DroneSandbox
             return Get(bx, bz);
         }
 
-        // Only touched districts are constructed; compare-exchange safely publishes one immutable result to workers.
+        // Only touched districts are constructed; striped locks avoid repeating expensive cover clipping on competing workers.
         public District Get(int x, int z)
         {
             int i = x - First, j = z - First;
@@ -127,8 +129,12 @@ namespace DroneSandbox
             int k = j * Count + i;
             var result = Volatile.Read(ref districts[k]);
             if (result != null) return result;
-            result = Build(x, z);
-            return Interlocked.CompareExchange(ref districts[k], result, null) ?? result;
+            lock (gates[k & 63])
+            {
+                result = districts[k];
+                if (result == null) { result = Build(x, z); Volatile.Write(ref districts[k], result); }
+                return result;
+            }
         }
 
         // Keep a 10 m district corridor, bevel corners by 8 m, then fit workable parcels into its interior.
