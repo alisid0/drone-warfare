@@ -1,0 +1,38 @@
+--- a/Assets/DroneSandbox/Scripts/FarTerrain.cs
++++ b/Assets/DroneSandbox/Scripts/FarTerrain.cs
+@@ -393,2 +393,11 @@
+             }
++            // Paint permanent runways, aprons, yards and siding ballast after the ordinary road strokes.
++            System.Threading.Tasks.Parallel.For(0, TextureSize, y =>
++            {
++                for (int x = 0; x < TextureSize; x++)
++                {
++                    float wx = -WorldPlan.Half + (x + 0.5f) * pixel, wz = -WorldPlan.Half + (y + 0.5f) * pixel;
++                    if (WorldPlan.FeatureSurfaceAt(wx, wz, out Color feature)) pixels[y * TextureSize + x] = feature;
++                }
++            });
+             worldTexture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, true)
+@@ -411,2 +420,3 @@
+         {
++            if (WorldPlan.FeatureSurfaceAt(x, z, out Color feature)) return feature.linear;
+             float pixel = WorldPlan.Size / TextureSize;
+--- a/Assets/DroneSandbox/Scripts/FarDetailData.cs
++++ b/Assets/DroneSandbox/Scripts/FarDetailData.cs
+@@ -14,2 +14,3 @@
+         readonly Cover[] covers;
++        readonly WorldFeatureMap features;
+         readonly int count;
+@@ -42,2 +43,3 @@
+             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
++            features = WorldPlan.CaptureFeatureMap(); // immutable worker-owned surfaces and grade reservations
+             this.roads = roads; this.rivers = rivers; this.coarse = coarse;
+@@ -93,3 +95,4 @@
+             float edge = Math.Min(Math.Min(u, Size - u), Math.Min(v, Size - v));
+-            return Mix(CoarseHeight(x, z), Height(x, z) + roughness, Smooth(edge / 128f));
++            float detail = Mix(CoarseHeight(x, z), Height(x, z) + roughness, Smooth(edge / 128f));
++            return Mix(Height(x, z), detail, features.DetailWeight(x, z));
+         }
+@@ -199,2 +202,3 @@
+         {
++            if (features.SurfaceAt(x, z, out Color feature)) return feature; // unwarped world metres, sRGB
+             var cover = CoverAt(coverPosition.x, coverPosition.y);
