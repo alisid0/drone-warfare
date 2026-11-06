@@ -338,6 +338,8 @@ namespace DroneSandbox
             readonly bool[] sampled;
             readonly bool[] samples;
             readonly float[] covers;
+            readonly Dictionary<int, Vector2> coarseHeights;
+            readonly Dictionary<int, int> coarseIndices;
             readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>(Coordinates);
             readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>(Coordinates);
             public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
@@ -350,6 +352,13 @@ namespace DroneSandbox
             {
                 data = target; samples = groundSamples;
                 if (samples != null) return;
+                // Bootstrap and distant blocks touch few nodes; avoid clearing a full four-metre cache during flight.
+                if (data.step == 256 || !data.local && data.step >= 64)
+                {
+                    coarseHeights = new Dictionary<int, Vector2>(4096);
+                    coarseIndices = new Dictionary<int, int>(2048);
+                    return;
+                }
                 indices = new int[SampleCount]; heights = new Vector2[SampleCount]; sampled = new bool[SampleCount];
                 if (!data.local && data.step <= 32) covers = new float[SampleCount];
             }
@@ -358,15 +367,18 @@ namespace DroneSandbox
             float Height(int x, int z)
             {
                 int key = SampleIndex(x, z);
-                if (sampled[key]) return heights[key].y;
+                if (coarseHeights != null)
+                {
+                    if (coarseHeights.TryGetValue(key, out var found)) return found.y;
+                }
+                else if (sampled[key]) return heights[key].y;
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
-                float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.wood) * 1.7f;
+                float relief = ForestPattern.Canopy(stand, world.x, world.y);
                 float floor = data.sampledGround != null ? data.sampledGround[key] : FarScatter.GroundAt(world - FarTerrain.Origin);
                 float height = floor + relief - 0.3f;
-                // Support a narrow wood's floor without raising opaque crown-shaped walls around every grove.
-                if (data.local) height = Mathf.Max(height, Mathf.Min(floor + 2.5f, SectorForest.CrownSupport(world - SectorForest.Origin)));
-                heights[key] = new Vector2(floor, height); sampled[key] = true;
+                if (coarseHeights != null) coarseHeights.Add(key, new Vector2(floor, height));
+                else { heights[key] = new Vector2(floor, height); sampled[key] = true; }
                 if (covers != null) covers[key] = stand.cover;
                 return height;
             }
@@ -427,11 +439,12 @@ namespace DroneSandbox
                     samples[SampleIndex(x, z + d)] = samples[SampleIndex(x, z - d)] = true;
                     return 0;
                 }
-                int index = indices[key] - 1;
+                int index = coarseIndices != null ? (coarseIndices.TryGetValue(key, out int found) ? found : -1) : indices[key] - 1;
                 if (index >= 0) return index;
                 Vector2 p = data.corner + new Vector2(x, z) - FarTerrain.Origin;
-                float top = Height(x, z), floor = heights[key].x;
-                index = vertices.Count; indices[key] = index + 1;
+                float top = Height(x, z), floor = coarseHeights != null ? coarseHeights[key].x : heights[key].x;
+                index = vertices.Count;
+                if (coarseIndices != null) coarseIndices.Add(key, index); else indices[key] = index + 1;
                 vertices.Add(new Vector3(p.x, top, p.y)); ground.Add(floor); crown.Add(top - floor);
                 float pixel = TexelSize(data), padding = pixel * 2f;
                 uv.Add(new Vector2((x + padding) / (BlockSize + padding * 2f), (z + padding) / (BlockSize + padding * 2f)));
@@ -488,7 +501,7 @@ namespace DroneSandbox
         // Construct in 256 m tiles, retaining one batched draw per 2 km district rather than a draw per tile.
         public static IEnumerator Build(Data data, byte[] unused)
         {
-            // Bootstrap carries stand silhouettes without fine rim stitching or the refined macro texture.
+            // Bootstrap uses the same surface and stitched perimeter; no vertical skirts around open ground.
             if (data.step == 256)
             {
                 var coverage = Coverage(data); while (coverage.MoveNext()) yield return null;
@@ -576,6 +589,7 @@ namespace DroneSandbox
         // Small recipe groves need 4 m geometry; streamed world tiles retain their bounded 16/32 m refinement.
         static int TileStep(Data data, int x, int z)
         {
+            if (data.step == 256) return 64;
             if (data.local)
             {
                 Vector2 p = data.corner + new Vector2(x, z) - SectorForest.Origin;
@@ -591,59 +605,16 @@ namespace DroneSandbox
         }
 
         // The macro map carries stand colour and glade coverage; stochastic world detail resolves individual crowns.
-        static float TexelSize(Data data) => data.local || data.step <= 32 ? 16f : 32f;
+        static float TexelSize(Data data) => data.step == 256 ? 64f : data.local || data.step <= 32 ? 16f : 32f;
 
-        // A regular low-cost mass arrives first; temporary skirts hide mixed edges until stitched refinement replaces it.
+        // Coarse interiors share exact perimeter heights with refined blocks, removing the old 32 m vertical skirts.
         static IEnumerator Coverage(Data data)
         {
-            const int stride = 64, n = BlockSize / stride + 1;
-            var vertices = new List<Vector3>(n * n + n * 4);
-            var normals = new List<Vector3>(n * n + n * 4);
-            var uv = new List<Vector2>(n * n + n * 4);
-            var ground = new List<float>(n * n + n * 4);
-            var crown = new List<float>(n * n + n * 4);
-            var triangles = new List<int>();
-            const int core = n - 1, size = core + 4;
-            for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
-            {
-                Vector2 world = data.corner + new Vector2(x * stride, z * stride), p = world - FarTerrain.Origin;
-                var stand = SectorForest.At(world.x, world.y);
-                float floor = FarScatter.GroundAt(p), height = ForestPattern.Canopy(stand, world.x, world.y);
-                vertices.Add(new Vector3(p.x, floor + height - 0.3f, p.y));
-                normals.Add(Vector3.up); ground.Add(floor); crown.Add(height);
-                uv.Add(new Vector2((x + 2f) / size, (z + 2f) / size));
-                yield return null;
-            }
-            // Reuse sampled heights for stand normals; bootstrap must not resample five recipes per vertex.
-            for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
-            {
-                int left = Mathf.Max(0, x - 1), right = Mathf.Min(n - 1, x + 1);
-                int south = Mathf.Max(0, z - 1), north = Mathf.Min(n - 1, z + 1);
-                float dx = (vertices[z * n + right].y - vertices[z * n + left].y) / ((right - left) * stride);
-                float dz = (vertices[north * n + x].y - vertices[south * n + x].y) / ((north - south) * stride);
-                normals[z * n + x] = new Vector3(-dx, 1f, -dz).normalized;
-            }
-            for (int z = 0; z < n - 1; z++) for (int x = 0; x < n - 1; x++)
-            {
-                int a = z * n + x, b = a + 1, c = a + n, d = c + 1;
-                if (Mathf.Max(crown[a], Mathf.Max(crown[b], Mathf.Max(crown[c], crown[d]))) < 0.25f) continue;
-                triangles.Add(a); triangles.Add(c); triangles.Add(b);
-                triangles.Add(b); triangles.Add(c); triangles.Add(d);
-            }
-            for (int side = 0; side < 4; side++) for (int k = 0; k < n - 1; k++)
-            {
-                int a = side == 0 ? k * n : side == 1 ? (n - 1) * n + k : side == 2 ? (n - 1 - k) * n + n - 1 : n - 1 - k;
-                int b = side == 0 ? a + n : side == 1 ? a + 1 : side == 2 ? a - n : a - 1;
-                if (Mathf.Max(crown[a], crown[b]) < 0.25f) continue;
-                int c = vertices.Count;
-                vertices.Add(vertices[a] - Vector3.up * 32f); vertices.Add(vertices[b] - Vector3.up * 32f);
-                normals.Add(normals[a]); normals.Add(normals[b]); uv.Add(uv[a]); uv.Add(uv[b]);
-                ground.Add(ground[a]); ground.Add(ground[b]); crown.Add(crown[a]); crown.Add(crown[b]);
-                triangles.Add(a); triangles.Add(c); triangles.Add(b); triangles.Add(b); triangles.Add(c); triangles.Add(c + 1);
-            }
-            data.vertices = vertices.ToArray(); data.normals = normals.ToArray(); data.uv = uv.ToArray();
-            data.ground = ground.ToArray(); data.crown = crown.ToArray(); data.triangles = triangles.ToArray();
-            if (triangles.Count == 0) yield break;
+            var surface = new Surface(data);
+            var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
+            var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
+            if (data.triangles.Length == 0) yield break;
+            const int stride = 64, size = BlockSize / stride + 4;
             data.textureSize = size; data.pixels = new Color32[size * size];
             for (int z = 0; z < size; z++) for (int x = 0; x < size; x++)
             {

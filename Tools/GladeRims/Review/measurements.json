@@ -1,0 +1,304 @@
+{
+  "before-glade": {
+    "metrics": {
+      "logical": 104860,
+      "managedP95Ms": 0.52,
+      "peakTree": 367352,
+      "peakCanopy": 185762,
+      "BuildMilliseconds": 370.7228,
+      "BuildMeanMs": 0.0024644444,
+      "BuildWorstMs": 0.2015,
+      "checks": 361,
+      "nativeGpuMeasured": false
+    },
+    "geometry": [
+      {
+        "step": 256,
+        "verticalFaces": 256,
+        "steepestRelief": 0.26476124,
+        "triangles": 2304
+      },
+      {
+        "step": 64,
+        "verticalFaces": 0,
+        "steepestRelief": 1.532959,
+        "triangles": 3192
+      },
+      {
+        "step": 32,
+        "verticalFaces": 0,
+        "steepestRelief": 2.5093288,
+        "triangles": 68150
+      },
+      {
+        "step": 16,
+        "verticalFaces": 0,
+        "steepestRelief": 2.5142498,
+        "triangles": 74512
+      }
+    ],
+    "poses": {
+      "140": {
+        "eye": [
+          -114.924805,
+          334.29898,
+          -130.2461
+        ],
+        "target": [
+          -114.924805,
+          194.29898,
+          9.753906
+        ],
+        "origin": [
+          -2500,
+          21500
+        ]
+      },
+      "300": {
+        "eye": [
+          -114.924805,
+          494.29898,
+          -290.2461
+        ],
+        "target": [
+          -114.924805,
+          194.29898,
+          9.753906
+        ],
+        "origin": [
+          -2500,
+          21500
+        ]
+      }
+    }
+  },
+  "after-glade": {
+    "metrics": {
+      "logical": 107465,
+      "managedP95Ms": 0.6605,
+      "peakTree": 371416,
+      "peakCanopy": 177448,
+      "BuildMilliseconds": 621.5469,
+      "BuildMeanMs": 0.010726111,
+      "BuildWorstMs": 0.2339,
+      "checks": 483954,
+      "nativeGpuMeasured": false
+    },
+    "geometry": [
+      {
+        "step": 256,
+        "verticalFaces": 0,
+        "steepestRelief": 1.7280235,
+        "triangles": 3151
+      },
+      {
+        "step": 64,
+        "verticalFaces": 0,
+        "steepestRelief": 1.7280235,
+        "triangles": 3151
+      },
+      {
+        "step": 32,
+        "verticalFaces": 0,
+        "steepestRelief": 2.0811405,
+        "triangles": 69710
+      },
+      {
+        "step": 16,
+        "verticalFaces": 0,
+        "steepestRelief": 2.0811405,
+        "triangles": 78218
+      }
+    ],
+    "recipe": {
+      "emptyFraction": 0.08761597,
+      "young": 2970,
+      "leaning": 11904
+    },
+    "poses": {
+      "140": {
+        "eye": [
+          -114.924805,
+          334.29898,
+          -130.2461
+        ],
+        "target": [
+          -114.924805,
+          194.29898,
+          9.753906
+        ],
+        "origin": [
+          -2500,
+          21500
+        ]
+      },
+      "300": {
+        "eye": [
+          -114.924805,
+          494.29898,
+          -290.2461
+        ],
+        "target": [
+          -114.924805,
+          194.29898,
+          9.753906
+        ],
+        "origin": [
+          -2500,
+          21500
+        ]
+      }
+    }
+  },
+  "before-edge": {
+    "metrics": {
+      "logical": 8606,
+      "managedP95Ms": 0.3791,
+      "peakTree": 409424,
+      "peakCanopy": 41667,
+      "BuildMilliseconds": 158.835,
+      "BuildMeanMs": 0,
+      "BuildWorstMs": 0,
+      "checks": 661,
+      "nativeGpuMeasured": false
+    },
+    "geometry": [
+      {
+        "step": 256,
+        "verticalFaces": 46,
+        "steepestRelief": 0.27589944,
+        "triangles": 228
+      },
+      {
+        "step": 64,
+        "verticalFaces": 0,
+        "steepestRelief": 4.9765415,
+        "triangles": 17498
+      },
+      {
+        "step": 32,
+        "verticalFaces": 0,
+        "steepestRelief": 4.9765415,
+        "triangles": 17498
+      },
+      {
+        "step": 16,
+        "verticalFaces": 0,
+        "steepestRelief": 4.9765415,
+        "triangles": 17498
+      }
+    ],
+    "poses": {
+      "140": {
+        "eye": [
+          -280,
+          147.06972,
+          -116
+        ],
+        "target": [
+          -280,
+          7.0697174,
+          24
+        ],
+        "origin": [
+          0,
+          0
+        ]
+      },
+      "300": {
+        "eye": [
+          -280,
+          307.0697,
+          -276
+        ],
+        "target": [
+          -280,
+          7.0697174,
+          24
+        ],
+        "origin": [
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "after-edge": {
+    "metrics": {
+      "logical": 8150,
+      "managedP95Ms": 0.333,
+      "peakTree": 415168,
+      "peakCanopy": 39566,
+      "BuildMilliseconds": 240.404,
+      "BuildMeanMs": 0,
+      "BuildWorstMs": 0,
+      "checks": 54463,
+      "nativeGpuMeasured": false
+    },
+    "geometry": [
+      {
+        "step": 256,
+        "verticalFaces": 0,
+        "steepestRelief": 1.3778992,
+        "triangles": 351
+      },
+      {
+        "step": 64,
+        "verticalFaces": 0,
+        "steepestRelief": 1.8275614,
+        "triangles": 15022
+      },
+      {
+        "step": 32,
+        "verticalFaces": 0,
+        "steepestRelief": 1.8275614,
+        "triangles": 15022
+      },
+      {
+        "step": 16,
+        "verticalFaces": 0,
+        "steepestRelief": 1.8275614,
+        "triangles": 15022
+      }
+    ],
+    "recipe": {
+      "emptyFraction": 0.08605194,
+      "young": 1058,
+      "leaning": 2611
+    },
+    "poses": {
+      "140": {
+        "eye": [
+          -280,
+          147.06972,
+          -116
+        ],
+        "target": [
+          -280,
+          7.0697174,
+          24
+        ],
+        "origin": [
+          0,
+          0
+        ]
+      },
+      "300": {
+        "eye": [
+          -280,
+          307.0697,
+          -276
+        ],
+        "target": [
+          -280,
+          7.0697174,
+          24
+        ],
+        "origin": [
+          0,
+          0
+        ]
+      }
+    }
+  }
+}

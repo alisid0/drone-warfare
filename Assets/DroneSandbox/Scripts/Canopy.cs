@@ -51,13 +51,14 @@ namespace DroneSandbox
             {
                 float radius = stem.stand.radius, height = stem.stand.height;
                 Vector3 p = stem.position;
+                Vector3 tip = p + ForestPattern.Rotation(stem.i, stem.j, stem.stand) * Vector3.up * height;
                 float roof = p.y + height;
-                int x0 = Index(p.x - radius * 0.8f), x1 = Index(p.x + radius * 0.8f);
-                int z0 = Index(p.z - radius * 0.8f), z1 = Index(p.z + radius * 0.8f);
+                int x0 = Index(Mathf.Min(p.x, tip.x) - radius * 0.8f), x1 = Index(Mathf.Max(p.x, tip.x) + radius * 0.8f);
+                int z0 = Index(Mathf.Min(p.z, tip.z) - radius * 0.8f), z1 = Index(Mathf.Max(p.z, tip.z) + radius * 0.8f);
                 for (int z = z0; z <= z1; z++)
                     for (int x = x0; x <= x1; x++) top[x, z] = Mathf.Max(top[x, z], roof);
                 bool conifer = stem.stand.species >= 2;
-                var crown = new Crown { centre = p + Vector3.up * height * 0.675f,
+                var crown = new Crown { centre = Vector3.Lerp(p, tip, 0.675f),
                     radius = radius * (conifer ? 0.75f : 0.65f), halfHeight = height * 0.325f, cone = conifer };
                 Note(crown);
             }
