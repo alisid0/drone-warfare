@@ -15,6 +15,7 @@ namespace DroneSandbox
         public bool town, farm, church, square;
         public string model;
         public bool old, core, cultivated, shed, logs, untended, roofChanged;
+        public bool gable; // the house stands gable-end to the street, as about one newer house in five does
         public int shape, palette, boundary, identity, settlement;
         public int open; // boundary runs left out: 1 front, 2 right side, 4 rear, 8 left side
         public float scale, pathWidth, driveWidth, roadWidth;
@@ -82,12 +83,15 @@ namespace DroneSandbox
                 }
 
                 int firstLane = lanes.Count;
-                // One perpendicular village lane, or a town street grid with lanes behind the gardens.
+                // One perpendicular village lane, or a town street grid with lanes behind the gardens. Town streets keep
+                // their 120 m rhythm but each is set up to 18 m off it, so blocks run 84-156 m and the grid is not a lattice.
                 Vector2 across = new Vector2(-along.y, along.x);
                 int crossCount = s.town ? 2 * (int)(reach / 120f) + 1 : 1;
                 for (int i = 0; i < crossCount; i++)
                 {
-                    float offset = (i - (crossCount - 1) * .5f) * 120f;
+                    uint shift = unchecked((uint)(seed * 73856093 ^ owner * 19349663 ^ i * 83492791));
+                    shift = unchecked((shift ^ (shift >> 13)) * 1274126177u);
+                    float offset = (i - (crossCount - 1) * .5f) * 120f + (s.town && i != (crossCount - 1) / 2 ? ((shift >> 8 & 255) / 255f - .5f) * 36f : 0f);
                     Vector2 at = anchor + along * offset;
                     float length = s.town ? (float)Math.Sqrt(Math.Max(0f, reach * reach - offset * offset)) : 105f;
                     AddLane(street, at - across * length, at + across * length, owner * 128 + i, 2f);
