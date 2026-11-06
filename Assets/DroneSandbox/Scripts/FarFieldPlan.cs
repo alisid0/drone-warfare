@@ -11,13 +11,15 @@ namespace DroneSandbox
         public const float DistrictSize = 700f, MinimumArea = 600f, MinimumWidth = 12f, MinimumEdge = 18f;
         const int First = -42, Count = 84;
         readonly int seed;
+        readonly FarDetailCover cover;
+        readonly Func<float, float, float> height;
         readonly District[] districts = new District[Count * Count];
         readonly Dictionary<long, FarDetailData.Segment[]> roadCells = new Dictionary<long, FarDetailData.Segment[]>();
 
         // Index road directions once; no global polygon pass or native Unity call is needed on world setup.
-        public FarFieldPlan(int seed, FarDetailData.Segment[] roads)
+        public FarFieldPlan(int seed, FarDetailData.Segment[] roads, FarDetailCover cover = null, Func<float, float, float> height = null)
         {
-            this.seed = seed;
+            this.seed = seed; this.cover = cover; this.height = height;
             var index = new Dictionary<long, List<FarDetailData.Segment>>();
             foreach (var s in roads)
             {
@@ -39,7 +41,7 @@ namespace DroneSandbox
         {
             public int x, z;
             public Vector2 site, along;
-            public float angle, width;
+            public float angle, width, slope, settlement, hedgeDensity, fallow;
             public Vector2[] outline;
             public Parcel[] parcels;
             internal int firstStrip;
@@ -55,13 +57,24 @@ namespace DroneSandbox
                 var strip = strips[row];
                 int column = (int)Math.Floor((u - strip.offset) / strip.length) - strip.first;
                 if (column < 0 || column >= strip.parcels.Length) return new FarDetailData.FieldSample { layer = 4 };
-                var p = strip.parcels[column];
-                if (!p.valid) return new FarDetailData.FieldSample { layer = 4 };
-                float t = (u - p.u0) / (p.u1 - p.u0);
-                float lo = p.a0 + (p.b0 - p.a0) * t, hi = p.a1 + (p.b1 - p.a1) * t;
-                float side = Math.Min((v - lo) * p.lowerNormal, (hi - v) * p.upperNormal), end = Math.Min(u - p.u0, p.u1 - u);
-                return new FarDetailData.FieldSample { layer = 5 + (int)p.crop, angle = angle, projection = Math.Abs(along.x) + Math.Abs(along.y), width = hi - lo, length = p.u1 - p.u0,
-                    across = v - lo, along = u - p.u0, side = side, end = end, districtEdge = Math.Min(side, end) + 4f, hedge = p.hedge };
+                var pieces = strip.parcels[column];
+                if (pieces == null) return new FarDetailData.FieldSample { layer = 4 };
+                var best = new FarDetailData.FieldSample { layer = 4 };
+                float nearest = -3f;
+                foreach (var p in pieces)
+                {
+                    if (u < p.u0 - 3f || u > p.u1 + 3f) continue;
+                    float t = (u - p.u0) / (p.u1 - p.u0);
+                    float lo = p.a0 + (p.b0 - p.a0) * t, hi = p.a1 + (p.b1 - p.a1) * t;
+                    float side = Math.Min((v - lo) * p.lowerNormal, (hi - v) * p.upperNormal), end = Math.Min(u - p.u0, p.u1 - u);
+                    float score = Math.Min(side, end);
+                    if (score < nearest) continue;
+                    nearest = score;
+                    best = new FarDetailData.FieldSample { use = p.use, layer = p.use == 1 ? 4 : 5 + (int)p.crop, angle = angle, projection = Math.Abs(along.x) + Math.Abs(along.y), width = hi - lo, length = p.u1 - p.u0,
+                        across = v - lo, along = u - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = p.hedge };
+                    if (score >= 0f) return best;
+                }
+                return best;
             }
         }
 
@@ -70,6 +83,7 @@ namespace DroneSandbox
         {
             public float u0, u1, a0, a1, b0, b1, lowerNormal, upperNormal;
             public Crop crop;
+            public int use; // 0 crop, 1 meadow, 2 fallow, 3 orchard, 4 market garden
             public bool valid, hedge;
 
             // Translate the shared world geometry into the existing Farmland mesh input without re-planning it.
@@ -88,7 +102,7 @@ namespace DroneSandbox
         {
             public float length, offset;
             public int first;
-            public Parcel[] parcels;
+            public Parcel[][] parcels;
         }
 
         // Nearest-site selection is identical for tiles, the picture, clipped sectors and the audit harness.
@@ -121,7 +135,22 @@ namespace DroneSandbox
         District Build(int x, int z)
         {
             int hash = Hash(x, z);
-            var d = new District { x = x, z = z, site = Site(x, z), width = 58f + (hash >> 13 & 63) * .7f };
+            var d = new District { x = x, z = z, site = Site(x, z) };
+            float sx = d.site.x, sz = d.site.y;
+            d.slope = height == null ? 0f : (float)Math.Sqrt(Math.Pow((height(sx + 96f, sz) - height(sx - 96f, sz)) / 192f, 2)
+                + Math.Pow((height(sx, sz + 96f) - height(sx, sz - 96f)) / 192f, 2));
+            if (cover != null) for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++)
+            {
+                var s = cover.At(sx + i * 160f, sz + j * 160f, false);
+                d.settlement = Math.Max(d.settlement, (s.Weight(Cover.Village) + s.Weight(Cover.Town)) / (1f + .3f * (i * i + j * j)));
+            }
+            float small = Math.Max(FarDetailData.Clamp(d.slope / .14f, 0f, 1f), d.settlement);
+            float regional = Value(sx / 2200f + 19f, sz / 2200f - 7f);
+            d.width = FarDetailData.Mix(80f + regional * 105f, 34f + regional * 25f, small);
+            bool estate = small < .22f && (hash & 15) < 3;
+            if (estate) d.width = 260f + (hash >> 8 & 63);
+            d.hedgeDensity = .12f + .7f * Value(sx / 1800f - 81f, sz / 1800f + 9f);
+            d.fallow = .1f + .1f * Value(sx / 1600f + 71f, sz / 1600f + 23f);
             // Use the control texture's exact angle grid so mesh rows and shader rows cannot drift in world metres.
             d.angle = (float)(Math.Round(Direction(d.site) / Math.PI * 65535) * Math.PI / 65535);
             d.along = new Vector2((float)Math.Cos(d.angle), (float)Math.Sin(d.angle));
@@ -151,10 +180,10 @@ namespace DroneSandbox
             for (int row = d.firstStrip; row <= last; row++)
             {
                 int hs = Hash(row, hash);
-                var strip = new Strip { length = 170f + (hs & 255) * .45f, offset = (hs >> 8 & 255) };
+                var strip = new Strip { length = estate ? 420f + (hs & 127) : FarDetailData.Mix(260f + (hs & 255) * .8f, 95f + (hs & 127), small), offset = (hs >> 8 & 255) };
                 strip.first = (int)Math.Floor((loU - strip.offset) / strip.length);
                 int end = (int)Math.Floor((hiU - strip.offset) / strip.length);
-                strip.parcels = new Parcel[end - strip.first + 1]; d.strips[row - d.firstStrip] = strip;
+                strip.parcels = new Parcel[end - strip.first + 1][]; d.strips[row - d.firstStrip] = strip;
                 for (int col = strip.first; col <= end; col++)
                 {
                     float u = col * strip.length + strip.offset, v = row * d.width;
@@ -163,12 +192,57 @@ namespace DroneSandbox
                     if (!p.valid) continue;
                     int h = Hash(col, hs), kind = h % 6;
                     p.crop = kind < 2 ? Crop.Wheat : kind == 2 ? Crop.YoungCrop : kind == 3 ? Crop.Sunflower : kind == 4 ? Crop.Ploughed : Crop.MownHay;
-                    p.hedge = (hs >> 20 & 1) == 0;
-                    strip.parcels[col - strip.first] = p; parcels.Add(p);
+                    float idle = (h >> 8 & 65535) / 65536f;
+                    p.use = idle < d.fallow ? ((h & 1) == 0 ? 1 : 2) : d.settlement > .18f && (h >> 4 & 7) == 0 ? ((h & 1) == 0 ? 3 : 4) : 0;
+                    if (p.use == 2) p.crop = Crop.Ploughed;
+                    if (p.use == 3 || p.use == 4) p.crop = Crop.YoungCrop;
+                    p.hedge = (hs >> 16 & 1023) / 1024f < d.hedgeDensity;
+                    var pieces = new List<Parcel>();
+                    ClipCover(d, p, pieces, 0);
+                    strip.parcels[col - strip.first] = pieces.ToArray(); parcels.AddRange(pieces);
                 }
             }
             d.parcels = parcels.ToArray();
             return d;
+        }
+
+        // Boundary parcels are subdivided only during planning; every accepted remnant is a complete workable trapezoid.
+        void ClipCover(District d, Parcel p, List<Parcel> result, int depth)
+        {
+            if (cover == null) { result.Add(p); return; }
+            Vector2 World(float u, float v) => d.site + d.along * u + new Vector2(-d.along.y, d.along.x) * v;
+            var a = World(p.u0, p.a0); var b = World(p.u0, p.a1); var c = World(p.u1, p.b0); var e = World(p.u1, p.b1);
+            float x0 = Math.Min(Math.Min(a.x, b.x), Math.Min(c.x, e.x)), x1 = Math.Max(Math.Max(a.x, b.x), Math.Max(c.x, e.x));
+            float z0 = Math.Min(Math.Min(a.y, b.y), Math.Min(c.y, e.y)), z1 = Math.Max(Math.Max(a.y, b.y), Math.Max(c.y, e.y));
+            if (cover.Uniform(x0, z0, x1, z1, Cover.Farmland)) { result.Add(p); return; }
+            int nu = (int)Math.Ceiling((p.u1 - p.u0) / 8f), nv = (int)Math.Ceiling(Math.Max(p.a1 - p.a0, p.b1 - p.b0) / 8f);
+            int clear = 0;
+            for (int j = 0; j <= nv; j++) for (int i = 0; i <= nu; i++)
+            {
+                float t = i / (float)nu;
+                Vector2 w = World(FarDetailData.Mix(p.u0, p.u1, t), FarDetailData.Mix(FarDetailData.Mix(p.a0, p.b0, t), FarDetailData.Mix(p.a1, p.b1, t), j / (float)nv));
+                if (cover.Farm(w.x, w.y)) clear++;
+            }
+            if (clear == 0) return;
+            if (clear == (nu + 1) * (nv + 1)) { result.Add(p); return; }
+            if (depth >= 8) return;
+            bool along = p.u1 - p.u0 > Math.Max(p.a1 - p.a0, p.b1 - p.b0);
+            for (int side = 0; side < 2; side++)
+            {
+                var q = p;
+                if (along)
+                {
+                    float mid = (p.u0 + p.u1) * .5f, lo = (p.a0 + p.b0) * .5f, hi = (p.a1 + p.b1) * .5f;
+                    if (side == 0) { q.u1 = mid; q.b0 = lo; q.b1 = hi; } else { q.u0 = mid; q.a0 = lo; q.a1 = hi; }
+                }
+                else if (side == 0) { q.a1 = (p.a0 + p.a1) * .5f; q.b1 = (p.b0 + p.b1) * .5f; }
+                else { q.a0 = (p.a0 + p.a1) * .5f; q.b0 = (p.b0 + p.b1) * .5f; }
+                float length = q.u1 - q.u0;
+                if (length < MinimumEdge || Math.Min(q.a1 - q.a0, q.b1 - q.b0) < 24f || length * (q.a1 - q.a0 + q.b1 - q.b0) * .5f < MinimumArea) continue;
+                q.lowerNormal = 1f / (float)Math.Sqrt(1f + Math.Pow((q.b0 - q.a0) / length, 2));
+                q.upperNormal = 1f / (float)Math.Sqrt(1f + Math.Pow((q.b1 - q.a1) / length, 2));
+                ClipCover(d, q, result, depth + 1);
+            }
         }
 
         // Chords of a convex intersection lie inside it: tip removal never grows crops across a neighbour's land.

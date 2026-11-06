@@ -12,10 +12,7 @@ namespace DroneSandbox
         {
             FarFieldSurface.Clear();
             var source = MapLayout.Plan.world;
-            var roads = new List<FarDetailData.Segment>();
-            foreach (var road in WorldPlan.Roads) for (int k = 1; k < road.points.Count; k++)
-                roads.Add(new FarDetailData.Segment { ax = road.points[k - 1].x, az = road.points[k - 1].y, bx = road.points[k].x, bz = road.points[k].y, kind = (int)road.kind });
-            var plan = new FarFieldPlan(source.seed, roads.ToArray());
+            var plan = WorldPlan.CaptureDetail(null).fields;
             const float half = Ground.Size * .5f;
             int x0 = (int)Math.Floor((source.center.x - half) / 700f) - 1, x1 = (int)Math.Floor((source.center.x + half) / 700f) + 1;
             int z0 = (int)Math.Floor((source.center.y - half) / 700f) - 1, z1 = (int)Math.Floor((source.center.y + half) / 700f) + 1;
@@ -25,6 +22,7 @@ namespace DroneSandbox
                 var district = plan.Get(x, z);
                 foreach (var parcel in district.parcels)
                 {
+                    if (parcel.use == 1) continue;
                     var plot = parcel.Plot(district, source.center);
                     var polygon = Corners(plot);
                     polygon = FarFieldPlan.Clip(FarFieldPlan.Clip(FarFieldPlan.Clip(FarFieldPlan.Clip(polygon, -1, 0, half), 1, 0, half), 0, -1, half), 0, 1, half);
@@ -32,7 +30,7 @@ namespace DroneSandbox
                     foreach (var fragment in Trapezoids(polygon, plot))
                     {
                         available += 4f * fragment.halfLength * fragment.halfWidth;
-                        Cut(fragment, plot, blocked, 0);
+                        Cut(fragment, plot, blocked, parcel.hedge, 0);
                     }
                 }
             }
@@ -86,23 +84,22 @@ namespace DroneSandbox
         }
 
         // Obstacle subdivisions keep the parent's crop. The existing 2 m exclusion map includes works and reserved land.
-        static void Cut(FieldPlot f, FieldPlot original, Func<Vector2, bool> blocked, int depth)
+        static void Cut(FieldPlot f, FieldPlot original, Func<Vector2, bool> blocked, bool hedge, int depth)
         {
             int nu = Math.Max(1, (int)Math.Ceiling(2f * f.halfLength / 2f)), nv = Math.Max(1, (int)Math.Ceiling(2f * f.halfWidth * (1f + Math.Abs(f.taper)) / 2f));
             int clear = 0, total = (nu + 1) * (nv + 1);
-            var source = MapLayout.Plan.world;
             for (int j = 0; j <= nv; j++) for (int i = 0; i <= nu; i++)
             {
                 Vector2 p = f.Point(f.halfLength * (2f * i / nu - 1f), f.halfWidth * (2f * j / nv - 1f));
-                if (!blocked(p) && source.CoverAt(p.x, p.y) == Cover.Farmland) clear++;
+                if (!blocked(p)) clear++;
             }
             if (clear == 0) return;
-            if (clear == total) { MapLayout.Fields.Add(f); FarFieldSurface.Register(f, original); AddEdges(f, original); return; }
+            if (clear == total) { MapLayout.Fields.Add(f); FarFieldSurface.Register(f, original); if (hedge) AddEdges(f, original); return; }
             if (depth >= 10 || f.halfLength * f.halfWidth < FarFieldPlan.MinimumArea * .5f) return;
             bool along = f.halfLength > f.halfWidth;
             var a = Slice(f, along, false); var b = Slice(f, along, true);
-            if (Usable(a)) Cut(a, original, blocked, depth + 1);
-            if (Usable(b)) Cut(b, original, blocked, depth + 1);
+            if (Usable(a)) Cut(a, original, blocked, hedge, depth + 1);
+            if (Usable(b)) Cut(b, original, blocked, hedge, depth + 1);
         }
 
         // Remnants created by an obstacle stay meadow below the same workability limits as the world parcels.

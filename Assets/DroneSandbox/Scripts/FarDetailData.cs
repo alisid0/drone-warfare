@@ -16,6 +16,7 @@ namespace DroneSandbox
         readonly Segment[] roads, rivers;
         readonly Dictionary<long, Segment[]> riverCells = new Dictionary<long, Segment[]>();
         public readonly FarFieldPlan fields;
+        public readonly FarDetailCover cover;
         public readonly float[][] coarse;
 
         // A vector segment carries real widths, avoiding the world's deliberately exaggerated road pixels.
@@ -42,7 +43,8 @@ namespace DroneSandbox
         {
             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
             this.roads = roads; this.rivers = rivers; this.coarse = coarse;
-            fields = new FarFieldPlan(seed, roads);
+            cover = new FarDetailCover(seed, covers, count);
+            fields = new FarFieldPlan(seed, roads, cover, Height);
             var cells = new Dictionary<long, List<Segment>>();
             foreach (var s in rivers)
             {
@@ -158,8 +160,8 @@ namespace DroneSandbox
                 {
                     float wx = x0 + (i - 0.5f) * 2f, wz = z0 + (j - 0.5f) * 2f;
                     int k = j * TextureSize + i;
-                    tile.pixels[k] = Paint(wx, wz, coverPositions[k], localRoads, localRivers);
-                    tile.controls[k] = Control(wx, wz, coverPositions[k], localRoads, localRivers);
+                    tile.pixels[k] = Paint(wx, wz, new Vector2(wx, wz), localRoads, localRivers);
+                    tile.controls[k] = Control(wx, wz, new Vector2(wx, wz), localRoads, localRivers);
                 }
             tile.generationMs = timer.Elapsed.TotalMilliseconds;
             return tile;
