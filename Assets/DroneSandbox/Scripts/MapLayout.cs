@@ -180,6 +180,7 @@ namespace DroneSandbox
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var times = new System.Text.StringBuilder();
             void Lap(string what) { times.Append($"{what} {clock.ElapsedMilliseconds} ms, "); clock.Restart(); }
+            VillageLayout.PrepareRecipe(p);
             DetailPlan = p.world == null ? null : WorldPlan.CaptureDetail(null);
             Lap("shared plan");
 
@@ -352,12 +353,20 @@ namespace DroneSandbox
         public static readonly List<List<Vector2>> VillageStreets = new List<List<Vector2>>();
         public static readonly List<int> VillageOfStreet = new List<int>(); // which village each street belongs to
         public static PathField VillageField { get; private set; }
+        public static readonly List<VillagePlot> VillagePlots = new List<VillagePlot>();
 
         static void PlanVillages()
         {
             VillageStreets.Clear();
             VillageOfStreet.Clear();
             VillageField = null;
+            VillagePlots.Clear();
+            if (Plan.world != null)
+            {
+                VillageLayout.Project(DetailPlan.villages);
+                VillageField = new PathField(VillageStreets, VillageReach + 120f, Ground.Size);
+                return;
+            }
             var villages = Plan.villages;
             var lanes = new List<List<Vector2>>();
             for (int v = 0; v < villages.Count; v++)
@@ -427,6 +436,7 @@ namespace DroneSandbox
             RoadLines.AddRange(lanes); // after the sector's own roads, whose numbers the missions use
             // Reaches far enough for the widest question asked of it (FieldParcels: smaller fields within 110 m).
             VillageField = new PathField(VillageStreets, VillageReach + 120f, Ground.Size);
+            VillageLayout.Legacy();
         }
 
         // The last point a street reaches walking from `from` along the road (step +1 or -1), up to `length` metres.
@@ -493,13 +503,6 @@ namespace DroneSandbox
             return land > 0 ? farmed / (float)land : 0f;
         }
 
-        public static bool NearFlatSite(Vector2 p, float margin)
-        {
-            foreach (var s in FlatSites)
-                if (Vector2.Distance(p, new Vector2(s.center.x, s.center.z)) < s.radius + margin) return true;
-            return false;
-        }
-
         // Survey all eligible farmland, including land where parcel fitting failed; exclusions never shrink to
         // the accepted crops. The eight metre grid uses the field index already needed by scenery placement.
         public static float FarmlandCoverage()
@@ -517,11 +520,24 @@ namespace DroneSandbox
             return land > 0 ? filled / (float)land : 0f;
         }
 
+        public static bool NearFlatSite(Vector2 p, float margin)
+        {
+            foreach (var s in FlatSites)
+                if (Vector2.Distance(p, new Vector2(s.center.x, s.center.z)) < s.radius + margin) return true;
+            return false;
+        }
 
         // Within margin of a village's houses and gardens: the strip either side of its streets once they're planned
         // (fields, woods and scrub keep out of it), the old circle round its centre before.
         public static bool NearVillage(Vector2 p, float margin)
         {
+            if (Plan.world != null && DetailPlan != null)
+            {
+                if (DetailPlan.villages.Near(p + Plan.world.center, margin)) return true;
+                for (int i = 0; i < Plan.villages.Count; i++)
+                    if (Plan.farmsteads[i] && Vector2.Distance(p, Plan.villages[i]) < VillageRadius + margin) return true;
+                return false;
+            }
             if (VillageField != null) return VillageField.Distance(p.x, p.y) < VillageReach + margin;
             foreach (var v in Plan.villages)
                 if (Vector2.Distance(p, v) < VillageRadius + margin) return true;

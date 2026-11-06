@@ -138,6 +138,7 @@ namespace DroneSandbox
             public Transform root;
             public Vector2 at, center, facing, pathEnd;
             public string model;
+            public VillagePlot plot;
             // A house on a street plot: the street's direction, away from the street, the plot's frontage, and how
             // far its garden runs behind the house (zero for the church and farmsteads).
             public Vector2 along, outward;
@@ -148,6 +149,8 @@ namespace DroneSandbox
 
         // How many houses the last Build put in villages, for the test log.
         public static int VillageHouses { get; private set; }
+        public static int VillagePropRenderers { get; private set; }
+        static int gardenTrees;
 
         // Villages the way aerial photos show them: houses on plots down both sides of each street (MapLayout's
         // VillageStreets, a 250-450 m stretch of road and a lane or two off it), a garden behind each. The first
@@ -156,6 +159,8 @@ namespace DroneSandbox
         {
             var plan = MapLayout.Plan;
             villagePlots.Clear();
+            Features.ClearVillagePlots();
+            VillagePropRenderers = gardenTrees = 0;
             var buildings = new List<VillageBuilding>();
             var roots = new Transform[plan.villages.Count];
             bool needsChurch = true;
@@ -173,16 +178,33 @@ namespace DroneSandbox
                     continue;
                 }
                 // Reserve the church first and try both verges if water or a junction blocks its first plot.
-                if (needsChurch)
+                if (needsChurch && plan.world == null)
                     foreach (float side in new[] { -1f, 1f })
                         foreach (float s in new[] { 0f, -15f, 15f })
                             if (needsChurch && VillageBuildingAt("Scenery_Church", center + along * s + across * side * 16f,
                                 -across * side, 1f, center + along * s, center, roots[v], v, buildings)) needsChurch = false;
             }
-            for (int s = 0; s < MapLayout.VillageStreets.Count; s++)
+            foreach (var b in buildings)
+                if(b.model=="Scenery_Church")
+                {
+                    b.along=new Vector2(-b.facing.y,b.facing.x); b.outward=-b.facing; b.frontage=30f; b.back=30f;
+                    b.plot=new VillagePlot {front=b.at+b.facing*16f,along=b.along,outward=b.outward,frontage=30f,depth=46f,setback=16f,church=true,model=b.model};
+                }
+            var occupiedPlots = new List<VillagePlot>();
+            var squares = new List<VillagePlot>();
+            foreach (var b in buildings) if (b.frontage > 0f) occupiedPlots.Add(b.plot);
+            foreach (var proposed in MapLayout.VillagePlots)
             {
-                int v = MapLayout.VillageOfStreet[s];
-                if (!plan.farmsteads[v]) BuildStreet(MapLayout.VillageStreets[s], s, v, roots[v], buildings);
+                var plot = proposed;
+                bool clear = VillagePlotClear(plot, occupiedPlots);
+                while (!clear && plan.world == null && plot.depth > 25f)
+                { plot.depth = Mathf.Max(25f, plot.depth - 5f); clear = VillagePlotClear(plot, occupiedPlots); }
+                if (!clear) continue;
+                if (plot.square) { squares.Add(plot); occupiedPlots.Add(plot); continue; }
+                if (!VillageBuildingAt(plot.model, plot.House, -plot.outward, 1f, plot.front, plot.front, roots[plot.owner], plot.owner, buildings)) continue;
+                var b = buildings[buildings.Count - 1]; b.plot = plot; b.along = plot.along; b.outward = plot.outward;
+                b.frontage = plot.frontage; b.back = plot.depth - plot.setback;
+                occupiedPlots.Add(plot);
             }
 
             // Check paths after every settlement's buildings are reserved: a driveway to about half the houses, a
@@ -191,17 +213,42 @@ namespace DroneSandbox
             var houses = new Dictionary<Transform, int>();
             foreach (var b in buildings)
             {
-                bool house = b.model == "Scenery_House_A" || b.model == "Scenery_House_B";
+                bool house = b.model.StartsWith("Scenery_House_") || b.model == "Scenery_Townhouse_Row";
                 VillagePath(b.at, b.pathEnd, b.model == "Scenery_Church" ? 3f : house && rng.NextDouble() < 0.45 ? 3f : 1.6f, b.at);
                 if (house) houses[b.root] = houses.TryGetValue(b.root, out int n) ? n + 1 : 1;
             }
             VillageHouses = 0;
             foreach (var n in houses.Values) VillageHouses += n;
             var budgets = new Dictionary<Transform, int>();
+            // Two batched LOD renderers per settlement replace individual fence panels; pay from the same cap.
+            for (int v = 0; v < roots.Length; v++)
+            {
+                int housesHere = houses.TryGetValue(roots[v], out int n) ? n : 0;
+                int budget = Mathf.Min(220, 8 + 4 * housesHere);
+                var plots = new List<VillagePlot>();
+                foreach (var b in buildings) if (b.root == roots[v] && b.frontage > 0f) plots.Add(b.plot);
+                foreach (var plot in squares) if (plot.owner == v) plots.Add(plot);
+                int used = Features.VillagePlots(roots[v], plots, budget);
+                VillagePropRenderers += used; budgets[roots[v]] = budget - used;
+            }
             foreach (var b in buildings)
             {
-                if (b.model != "Scenery_House_A" && b.model != "Scenery_House_B") continue;
-                if (!budgets.TryGetValue(b.root, out int budget)) budget = Mathf.Min(220, 8 + 4 * houses[b.root]);
+                if (b.model == "Scenery_Church")
+                {
+                    int allowance = budgets[b.root];
+                    Vector2 along = b.frontage > 0f ? b.along : new Vector2(-b.facing.y,b.facing.x), outward = -b.facing;
+                    foreach(float side in new[]{-1f,1f})
+                        if(gardenTrees<128 && VillageProp("Scenery_Tree",b.at+outward*19f+along*(side*9f),side*45f,.45f,3f,b.root,ref allowance)) gardenTrees++;
+                    budgets[b.root]=allowance; continue;
+                }
+                if (!b.model.StartsWith("Scenery_House_") && b.model != "Scenery_Townhouse_Row") continue;
+                int budget = budgets[b.root];
+                if (b.plot.farm)
+                {
+                    float yaw = Mathf.Atan2(-b.outward.x, -b.outward.y) * Mathf.Rad2Deg;
+                    VillageProp("Scenery_Barn", b.plot.front + b.outward * 41f - b.along * 4f, yaw, .8f, 7.3f, b.root, ref budget);
+                    VillageProp("Scenery_MachineryShed", b.plot.front + b.outward * 25f + b.along * 8f, yaw, 1f, 5f, b.root, ref budget);
+                }
                 if (b.frontage > 0f) Garden(b.root, b.at, b.along, b.outward, b.frontage, b.back, rng, ref budget);
                 else Garden(b.root, b.at, new Vector2(-b.facing.y, b.facing.x), -b.facing, 12f, 12f, rng, ref budget);
                 budgets[b.root] = budget;
@@ -209,55 +256,17 @@ namespace DroneSandbox
             Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
         }
 
-        // Plots down both sides of one street, each side on its own rhythm so the houses don't pair off: 18-35 m of
-        // frontage and 30-65 m deep, the house 4-10 m back from the street, most facing it and one in five gable end
-        // on, and about one plot in ten left empty (a paddock, or a house long gone). Its own random numbers.
-        static void BuildStreet(List<Vector2> street, int index, int village, Transform root, List<VillageBuilding> buildings)
+        // Test entire gardens before building: otherwise a clear roof can leave a hedge crossing a lane or a yard.
+        static bool VillagePlotClear(VillagePlot p,List<VillagePlot> occupied)
         {
-            var lengths = new float[street.Count];
-            for (int i = 1; i < street.Count; i++) lengths[i] = lengths[i - 1] + Vector2.Distance(street[i - 1], street[i]);
-            float total = lengths[street.Count - 1];
-            var rng = new System.Random(MapLayout.Plan.fieldSeed * 31 + index * 977 + village);
-            foreach (float side in new[] { -1f, 1f })
+            foreach(var q in occupied) if(VillagePlan.Intersects(p,q))return false;
+            int nu=Mathf.CeilToInt(p.frontage/3f),nv=Mathf.CeilToInt(p.depth/3f);
+            for(int j=0;j<=nv;j++)for(int i=0;i<=nu;i++)
             {
-                float s = Range(rng, 2f, 12f);
-                while (true)
-                {
-                    float frontage = Range(rng, 18f, 35f), depth = Range(rng, 30f, 65f);
-                    float mid = s + frontage / 2f;
-                    if (mid > total - 4f) break;
-                    Vector2 at = PointAlong(street, lengths, mid, out Vector2 dir);
-                    Vector2 outward = new Vector2(-dir.y, dir.x) * side;
-                    // A hedge down one side of most plots, from the front garden to the back, painted dark into the
-                    // grass: the lines that show a village's plots from the air.
-                    if (rng.NextDouble() < 0.6)
-                    {
-                        Vector2 corner = PointAlong(street, lengths, s, out _);
-                        Ground.Paint(corner + outward * (MapLayout.RoadHalfWidth + 3f), corner + outward * depth, 1.6f, 1f, 1);
-                    }
-                    s += frontage;
-                    if (rng.NextDouble() < 0.1) continue;
-                    Vector2 facing = rng.NextDouble() < 0.2 ? (rng.NextDouble() < 0.5 ? dir : -dir) : -outward;
-                    string model = rng.NextDouble() < 0.65 ? "Scenery_House_A" : "Scenery_House_B";
-                    float scale = Range(rng, 0.9f, 1.05f), offset = MapLayout.RoadHalfWidth + Range(rng, 4f, 10f) + 5f;
-                    if (!VillageBuildingAt(model, at + outward * offset, facing, scale, at + outward * MapLayout.RoadHalfWidth,
-                        at, root, village, buildings)) continue;
-                    var b = buildings[buildings.Count - 1];
-                    b.along = dir;
-                    b.outward = outward;
-                    b.frontage = frontage;
-                    b.back = Mathf.Max(8f, depth - offset);
-                }
+                Vector2 q=p.front+p.along*(p.frontage*(i/(float)nu-.5f))+p.outward*(p.depth*j/nv);
+                if(!VillageGround(q)||MapLayout.RoadField.Distance(q.x,q.y)<MapLayout.RoadWidthAt(q.x,q.y)+.7f||MapLayout.TrackField.Distance(q.x,q.y)<2.5f)return false;
             }
-        }
-
-        // The point `distance` metres along a line whose running lengths are given, and the line's direction there.
-        static Vector2 PointAlong(List<Vector2> line, float[] lengths, float distance, out Vector2 dir)
-        {
-            int i = 1;
-            while (i < line.Count - 1 && lengths[i] < distance) i++;
-            dir = (line[i] - line[i - 1]).normalized;
-            return Vector2.Lerp(line[i - 1], line[i], Mathf.InverseLerp(lengths[i - 1], lengths[i], distance));
+            return true;
         }
 
         // Conservative pivot-centred radii include roofs, porches and the barn's lean-to, not only wall centres.
@@ -269,6 +278,10 @@ namespace DroneSandbox
                 case "Scenery_Barn": return 9f;
                 case "Scenery_Hut": return 3.5f;
                 case "Scenery_Silo": return 7.3f;
+                case "Scenery_Townhouse_Row": return 13.3f;
+                case "Scenery_OfficeBlock": return 17f;
+                case "Scenery_Warehouse": return 18f;
+                case "Scenery_MachineryShed": return 5.5f;
                 default: return 6.5f;
             }
         }
@@ -278,7 +291,10 @@ namespace DroneSandbox
             Vector2 center, Transform root, int village, List<VillageBuilding> buildings)
         {
             float radius = VillageRadius(model) * scale;
-            if (!VillageRoom(p, radius, false)) return false;
+            bool fits = model == "Scenery_Townhouse_Row" ? VillageFootprint(p, facing, 12.4f, 5.4f)
+                : model == "Scenery_OfficeBlock" ? VillageFootprint(p, facing, 12.2f, 8.6f)
+                : model == "Scenery_Warehouse" ? VillageFootprint(p, facing, 9.4f, 15.4f) : VillageRoom(p, radius, false);
+            if (!fits) return false;
             float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg;
             var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, scale, 0.35f, root);
             if (model != "Scenery_Church") Repaint(house, village, p);
@@ -288,11 +304,23 @@ namespace DroneSandbox
             return true;
         }
 
+        // Long terraced rows need a rectangular roof test: a bounding circle wrongly pushes them off their street.
+        static bool VillageFootprint(Vector2 p, Vector2 facing, float width, float depth)
+        {
+            // These buildings occupy already separated planned rectangles. A second circle overlap test would
+            // remove the opposite frontage: two 24 m terraces can face across a street without touching roofs.
+            Vector2 side = new Vector2(-facing.y, facing.x);
+            int nx = Mathf.CeilToInt(width), nz = Mathf.CeilToInt(depth);
+            for (int z = -nz; z <= nz; z++) for (int x = -nx; x <= nx; x++)
+                if (!Buildable(p + side * (width * x / nx) + facing * (depth * z / nz))) return false;
+            return true;
+        }
+
         // A barn, farmhouse, shed and silo face a shared yard on the less obstructed side of the road.
         static void BuildFarmstead(Transform root, Vector2 center, Vector2 along, Vector2 across, int village,
             List<VillageBuilding> buildings)
         {
-            string[] models = { "Scenery_Barn", "Scenery_House_A", "Scenery_Hut", "Scenery_Silo" };
+            string[] models = { "Scenery_Barn", "Scenery_House_A", "Scenery_MachineryShed", "Scenery_Silo" };
             Vector2[] offsets = { new Vector2(-12f, 0f), new Vector2(12f, 0f), new Vector2(0f, -10f), new Vector2(0f, 12.5f) };
             float side = -1f;
             int best = -1;
@@ -311,7 +339,7 @@ namespace DroneSandbox
                 Vector2 p = yard + along * offsets[i].x + across * side * offsets[i].y;
                 VillageBuildingAt(models[i], p, (yard - p).normalized, 1f, yard, center, root, village, buildings);
             }
-            VillagePath(yard - across * 2f, yard + across * 2f, 5f, yard);
+            VillagePath(yard - along * 6f, yard + along * 6f, 12f, yard);
             // The drive goes through the gap beside the front shed.
             Vector2 turn = yard - across * side * 4f, gate = yard + along * 6f - across * side * 8f;
             VillagePath(yard, turn, 2.5f, yard);
@@ -384,8 +412,8 @@ namespace DroneSandbox
         static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, float frontage, float back,
             System.Random rng, ref int budget)
         {
-            float half = Mathf.Max(4f, frontage / 2f - 3f), deep = Mathf.Max(10.5f, back - 3f);
-            if (rng.NextDouble() < 0.35)
+            float half = Mathf.Max(4f, frontage / 2f - 4f), deep = Mathf.Max(10.5f, back - 4f);
+            if (rng.NextDouble() < 0.8)
             {
                 Vector2 patch = house + outward * Range(rng, 10.5f, Mathf.Max(11f, back * 0.6f)) + along * Range(rng, -half, half);
                 if (VillageRoom(patch, 4f, true))
@@ -394,12 +422,12 @@ namespace DroneSandbox
                     villagePlots.Add((patch, 4f));
                 }
             }
-            if (rng.NextDouble() < 0.35)
+            if (rng.NextDouble() < 0.45)
             {
                 Vector2 shed = house + outward * Range(rng, 10f, deep) + along * ((rng.NextDouble() < 0.5 ? -1f : 1f) * Range(rng, 4f, Mathf.Max(6f, half)));
                 float shedYaw = Mathf.Atan2(outward.x, outward.y) * Mathf.Rad2Deg + 180f + Range(rng, -10f, 10f);
                 float shedScale = Range(rng, 0.7f, 0.95f);
-                if (VillageProp("Scenery_Hut", shed, shedYaw, shedScale, 3.5f * shedScale, root, ref budget))
+                if (VillageProp(rng.NextDouble() < .4 ? "Scenery_Greenhouse" : "Scenery_Hut", shed, shedYaw, shedScale, 3.5f * shedScale, root, ref budget))
                 {
                     Vector2 logs = shed + along * 6.5f;
                     if (rng.NextDouble() < 0.45)
@@ -408,24 +436,14 @@ namespace DroneSandbox
             }
             // Give fruit trees first choice of the remaining garden, before the back fence fills it. A long garden
             // is half orchard.
-            int trees = rng.Next(0, back > 25f ? 5 : 3);
+            int trees = rng.Next(1, back > 25f ? 4 : 2);
             for (int k = 0; k < trees; k++)
             {
                 Vector2 p = house + outward * Range(rng, 10.5f, deep) + along * Range(rng, -half, half);
-                VillageProp(rng.NextDouble() < 0.7 ? "Scenery_Tree" : "Scenery_Birch", p,
-                    Range(rng, 0f, 360f), Range(rng, 0.5f, 0.7f), 3.5f, root, ref budget);
+                if (gardenTrees < 128 && VillageProp("Scenery_Tree", p,
+                    Range(rng, 0f, 360f), Range(rng, 0.35f, 0.45f), 2.8f, root, ref budget)) gardenTrees++;
             }
-            if (rng.NextDouble() < 0.6)
-            {
-                Vector2 line = house + outward * Mathf.Max(10.5f, back);
-                float yaw = Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg + 90f;
-                int panels = Mathf.Max(3, Mathf.RoundToInt(frontage / 4f));
-                for (int k = 0; k < panels; k++)
-                {
-                    if (rng.NextDouble() < 0.15) continue;
-                    VillageProp("Scenery_Fence", line + along * ((k - (panels - 1) / 2f) * 4f), yaw, 1f, 1.65f, root, ref budget);
-                }
-            }
+
         }
 
         // Counts all renderers, including hidden LODs, before adding a garden prop and reserving its footprint.
@@ -437,6 +455,7 @@ namespace DroneSandbox
             int cost = Art.ModelRendererCount(model, pos);
             if (cost > budget || Place(model, pos, yaw, scale, 0.1f, root) == null) return false;
             budget -= cost;
+            VillagePropRenderers += cost;
             villagePlots.Add((p, radius));
             return true;
         }

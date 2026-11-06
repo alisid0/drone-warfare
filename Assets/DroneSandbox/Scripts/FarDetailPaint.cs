@@ -56,7 +56,15 @@ namespace DroneSandbox
             if (land.Weight(Cover.Farmland) > 0f)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
-                if (f.side < 0f || f.end < 0f || f.use != 0) layer = 4;
+                if (f.side < 0f || f.end < 0f || f.use > 2) layer = 4;
+            }
+            // A garden painted over farmland must also suppress that field's procedural crop rows.
+            if (villages.At(new Vector2(x, z), out var garden))
+            {
+                garden.Coordinates(new Vector2(x, z), out float u, out float v);
+                int ground = garden.GroundMaterial(u, v);
+                layer = ground == 0 ? 4 : 2; angle = 0f;
+                strength = ground == 2 ? (byte)50 : (byte)255;
             }
             if (bank < 4f) layer = 2;
             if (bank < 0f) strength = 0;
@@ -74,8 +82,7 @@ namespace DroneSandbox
             float bank = Bank(x, z, streams, out float riverWidth);
             var land = cover.At(x, z);
             Vector3 c = CoverColour(x, z, pixel, land, bank < 64f);
-            float village = land.Weight(Cover.Village), town = land.Weight(Cover.Town);
-            if (village + town > 0f) c = Blend(c, VillageColour(c, x, z, lanes, pixel, town > village), village + town);
+            if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel);
             c = Blend(c, FarDetailPalette.Means[2], BandCoverage(3f - bank, riverWidth + 3f, pixel));
             c = Blend(c, WaterColour, BandCoverage(-bank, riverWidth, pixel));
             Road(x, z, lanes, out float edge, out int kind, out float roadWidth);
@@ -164,7 +171,6 @@ namespace DroneSandbox
         {
             if (f.layer < 5) return FarDetailPalette.Means[4];
             Vector3 c = FarDetailPalette.Means[f.layer];
-            if (f.use == 2) c = Blend(c, FarDetailPalette.Means[4], .35f);
             if (f.use == 3 || f.use == 4)
             {
                 float pitch = f.use == 3 ? 10f : 5f, width = f.use == 3 ? 2.8f : 1.5f;
@@ -173,40 +179,35 @@ namespace DroneSandbox
             }
             float projection = f.projection;
             float crop = Coverage(f.side, pixel * projection) * Coverage(f.end, pixel * projection);
-            float side = BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection);
+            float side = Math.Max(BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection), BandCoverage(-f.end - 1.5f, 1.5f, pixel * projection));
             Vector3 hedge = HedgeColour;
             Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f : 0f);
             return Blend(margin, c, crop);
         }
 
-        // Plots follow the nearest street's chainage and side. Staggered frontages and garden depths remove the lattice.
-        Vector3 VillageColour(Vector3 grass, float x, float z, Segment[] lanes, float pixel, bool town)
+        // The exact scenery parcel supplies front lawn, rear yard, vegetable beds and its boundary lines.
+        Vector3 VillageColour(float x, float z, VillagePlot p, float pixel)
         {
-            float best = 80f * 80f, along = 0f, across = 0f, roadWidth = 0f; int route = 0;
-            foreach (var s in lanes)
+            p.Coordinates(new Vector2(x,z),out float u,out float v);
+            if(p.square) return VillageGravel;
+            float half=p.frontage*.5f;
+            Vector3 c=VillageGrass;
+            float yard=Coverage(v-p.setback-4f,pixel)*Coverage(Math.Min(p.depth-2f,p.setback+(p.farm?25f:12f))-v,pixel)*Coverage(half-2f-Math.Abs(u),pixel);
+            c=Blend(c,p.farm?VillageGravel:VillageSoil,yard);
+            if(!p.church&&!p.farm)
             {
-                float dx = s.bx - s.ax, dz = s.bz - s.az, length2 = dx * dx + dz * dz;
-                if (length2 < .01f) continue;
-                float t = Clamp(((x - s.ax) * dx + (z - s.az) * dz) / length2, 0f, 1f);
-                float ex = x - s.ax - t * dx, ez = z - s.az - t * dz, distance = ex * ex + ez * ez;
-                if (distance >= best) continue;
-                float length = (float)Math.Sqrt(length2);
-                best = distance; along = s.walked + t * length; across = (dx * ez - dz * ex) / length;
-                roadWidth = s.widthA + (s.widthB - s.widthA) * t; route = s.route;
+                float beds=Coverage(-1f-u,pixel)*Coverage(u+half-2f,pixel)*Coverage(v-p.setback-15f,pixel)*Coverage(p.depth-3f-v,pixel);
+                c=Blend(c,VillageSoil,beds*PeriodicBand(v-p.setback-15f,2.8f,1.6f,pixel));
             }
-            if (best >= 80f * 80f) return grass;
-            int side = across < 0f ? -1 : 1, h = Hash(route, side);
-            float pitch = 24f + (h & 15), station = along + (h >> 4 & 31);
-            int plot = (int)Math.Floor(station / pitch), hp = Hash(plot, h);
-            float frontage = Repeat(station, pitch), back = 30f + (hp & 31), depth = Math.Abs(across) - roadWidth - 3f;
-            float occupied = Coverage(depth, pixel) * Coverage(back - depth, pixel);
-            float garden = Coverage(depth - 14f, pixel) * occupied;
-            float yard = Coverage(14f - depth, pixel) * occupied * Coverage(frontage - 2f, pixel) * Coverage(pitch - 2f - frontage, pixel);
-            Vector3 c = Blend(grass, FarDetailPalette.Means[(hp & 1) == 0 ? 1 : 4], garden * .45f);
-            c = Blend(c, FarDetailPalette.Means[2], yard * (town ? .8f : .5f));
-            float hedge = Math.Max(BandCoverage(.7f - Math.Min(frontage, pitch - frontage), .7f, pixel), BandCoverage(.7f - Math.Abs(depth - back), .7f, pixel));
-            return Blend(c, HedgeColour, hedge * occupied * .6f);
+            float drive=BandCoverage(1.2f-Math.Abs(u),1.2f,pixel)*Coverage(p.setback+8f-v,pixel);
+            c=Blend(c,VillageGravel,drive);
+            float edge=Math.Min(half-Math.Abs(u),Math.Min(p.depth-v,Math.Abs(u)>2f?v:100f));
+            return Blend(c,p.church||p.style==1?VillageGravel:HedgeColour,Coverage(.65f-edge,pixel));
         }
+
+        static readonly Vector3 VillageGrass=FarDetailPalette.Decode(new Color(.24f,.29f,.13f));
+        static readonly Vector3 VillageSoil=FarDetailPalette.Decode(new Color(.26f,.20f,.12f));
+        static readonly Vector3 VillageGravel=FarDetailPalette.Decode(new Color(.43f,.41f,.35f));
 
         // Exposed for the deterministic field/mask harness.
         public Color32 Field(float x, float z) => FarDetailPalette.Encode(FieldColour(FieldAt(x, z), 2f));
