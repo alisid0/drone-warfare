@@ -78,7 +78,6 @@ namespace DroneSandbox
                 int j = Mathf.RoundToInt((data.corner.y + WorldPlan.Half) / BlockSize);
                 blocks[j * BlockCount + i] = Upload(data);
             }
-            prepared.Clear();
         }
 
         // Each cached block owns exactly these three Unity resources.
@@ -180,7 +179,11 @@ namespace DroneSandbox
         // Sector loading can finish synchronously before play; flight uses the same upload in small slices.
         Block Upload(Data data)
         {
-            var block = new Block { data = data, lastSeen = frame };
+            // Upload releases its own CPU references; sector data remains reusable after Clear or renderer replacement.
+            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize,
+                vertices = data.vertices, normals = data.normals, uv = data.uv, ground = data.ground,
+                crown = data.crown, triangles = data.triangles, pixels = data.pixels };
+            var block = new Block { data = copy, lastSeen = frame };
             var upload = UploadSteps(block); while (upload.MoveNext()) { }
             return block;
         }
@@ -216,9 +219,7 @@ namespace DroneSandbox
             block.texture = texture;
             texture.SetPixels32(data.pixels); yield return null;
             texture.Apply(true, true); yield return null;
-            var source = Resources.Load<Material>("Materials/Forest/Canopy");
-            var material = source != null ? new Material(source) : Art.NewMaterial(Color.white);
-            material.shader = Shader.Find("DroneSandbox/ForestLit"); material.SetFloat("_ForestTier", 3f);
+            var material = ForestMaterials.Create("Canopy", null, 3);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
             block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
             block.triangles = data.triangles.Length / 3;
@@ -243,9 +244,7 @@ namespace DroneSandbox
         // Refinement shares complementary coverage for three quarters of a second instead of replacing a silhouette.
         void Submit(Block block, Camera camera, float fade)
         {
-            properties.SetVector("_ForestCamera", camera.transform.position);
-            properties.SetVector("_ForestDistances", FarScatter.TierDistances);
-            properties.SetFloat("_ForestBuild", fade);
+            ForestMaterials.SetCamera(properties, camera.transform.position, FarScatter.TierDistances, fade);
             var rp = new RenderParams(block.material) { camera = camera, worldBounds = block.bounds,
                 matProps = properties, shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
             Graphics.RenderMesh(rp, block.mesh, 0, Matrix4x4.identity);

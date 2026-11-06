@@ -6,7 +6,7 @@ import sys
 exec(compile((Path(__file__).parent / 'prepare.py').read_text(), str(Path(__file__).parent / 'prepare.py'), 'exec'))
 phase = sys.argv[1] if len(sys.argv) > 1 else 'after'
 runtime = list(files)
-excluded = {'FarScatter', 'ForestHlod', 'SettlementPattern', 'SettlementHlod', 'LandmarkHlod', 'Scans'}
+excluded = {'FarScatter', 'ForestHlod', 'ForestMaterials', 'SettlementPattern', 'SettlementHlod', 'LandmarkHlod', 'Scans'}
 runtime = [p for p in runtime if p.stem not in excluded]
 stub = services + '''
 namespace DroneSandbox { public class FarScatter {

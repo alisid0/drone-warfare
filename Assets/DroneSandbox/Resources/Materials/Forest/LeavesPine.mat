@@ -149,6 +149,9 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _ForestEnabled: 0
+    - _ForestBuild: 1
+    - _ForestTier: 0
     - _AORemapMax: 1
     - _AORemapMin: 0
     - _ATDistance: 1

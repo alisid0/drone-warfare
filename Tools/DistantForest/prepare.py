@@ -33,7 +33,7 @@ public static float HeightAt(Vector2 p)=>WorldPlan.Height(p.x,p.y);
 public static float ScatterHeight(Vector2 p,bool tree)=>WorldPlan.Height(p.x+FarTerrain.Origin.x,p.y+FarTerrain.Origin.y);
 public static bool TryHeight(Vector2 p,out float h){h=0;return false;}
 public static bool Raycast(Ray r,out Vector3 p){p=default;return false;} } }''')
-added = ['SectorForest', 'ForestBudget', 'Undergrowth', 'FarScatter', 'ForestHlod', 'SettlementPattern', 'SettlementHlod', 'LandmarkHlod']
+added = ['SectorForest', 'ForestBudget', 'ForestMaterials', 'Undergrowth', 'FarScatter', 'ForestHlod', 'SettlementPattern', 'SettlementHlod', 'LandmarkHlod']
 files += [scripts / (name + '.cs') for name in added]
 # Scans' placement is an unrelated service; retain all of its public identifiers for Undergrowth's API check.
 services = remove_class(services, 'public static class Scans')

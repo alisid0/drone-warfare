@@ -56,7 +56,6 @@ namespace DroneSandbox
         readonly Plane[] planes = new Plane[6];
         readonly List<Visible> visible = new List<Visible>();
         readonly List<ForestBudget.Entry> costs = new List<ForestBudget.Entry>();
-        readonly Dictionary<Camera, float> readyByCamera = new Dictionary<Camera, float>();
         readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
         readonly ForestHlod forest = new ForestHlod();
         readonly SettlementHlod settlements = new SettlementHlod();
@@ -64,6 +63,7 @@ namespace DroneSandbox
         Vector2 builtOrigin;
         int builtSeed = -1;
         int builtVersion = -1, generatedFrame = -1;
+        bool sectorOnly;
 
         // Sort by distance with a stable tie-break so budget pressure lowers detail rather than deleting trees.
         struct Visible : System.IComparable<Visible>
@@ -91,7 +91,11 @@ namespace DroneSandbox
         public static Vector4 TierDistances { get; private set; } = new Vector4(45f, 125f, 350f, 700f);
 
         // Explicit camera submission supports photo, scene and gameplay cameras without sharing their allowances.
-        void OnEnable() => RenderPipelineManager.beginCameraRendering += Render;
+        void OnEnable()
+        {
+            sectorOnly = transform.parent != null;
+            RenderPipelineManager.beginCameraRendering += Render;
+        }
 
         // Unsubscribe even when the persistent far terrain is temporarily disabled.
         void OnDisable() => RenderPipelineManager.beginCameraRendering -= Render;
@@ -100,7 +104,7 @@ namespace DroneSandbox
         public void Clear()
         {
             cells.Clear(); forest.Clear(); settlements.Clear(); landmarks.Clear();
-            readyByCamera.Clear();
+            builtVersion = -1; generatedFrame = -1;
             MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
             FullTreesDrawn = ReducedTreesDrawn = TreeTrianglesDrawn = CachedTreeRecords = 0;
         }
@@ -122,10 +126,12 @@ namespace DroneSandbox
         // 3D distance includes camera altitude, so the 2.5/9 km views submit no individual trees or houses.
         void Render(ScriptableRenderContext context, Camera cam)
         {
+            // The first World.Build can create a local preview renderer before FarTerrain creates its persistent one.
+            if (sectorOnly && FarTerrain.Active) return;
+            if (cam == null || (cam.cameraType != CameraType.Game && cam.cameraType != CameraType.SceneView)) return;
             MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
             FullTreesDrawn = ReducedTreesDrawn = TreeTrianglesDrawn = 0;
-            if (cam == null || (cam.cameraType != CameraType.Game && cam.cameraType != CameraType.SceneView)) return;
-            if (!FarTerrain.Active && !SectorForest.Ready) return;
+            if (!SectorForest.Ready) return;
             if (models == null) LoadModels();
             if (builtSeed != WorldPlan.Seed || builtOrigin != FarTerrain.Origin || builtVersion != SectorForest.Version)
             {
@@ -179,7 +185,7 @@ namespace DroneSandbox
             }
             CachedTreeRecords = 0;
             foreach (var cell in cells.Values) CachedTreeRecords += cell.trees.Length;
-            SelectTiers(ReadyReach(cam, world));
+            SelectTiers(ReadyReach(world));
             forest.Update(cam, planes);
             if (FarTerrain.Active) { landmarks.Update(cam, planes); settlements.Update(cam, planes, this); }
             Draw(cam);
@@ -211,7 +217,7 @@ namespace DroneSandbox
         }
 
         // Retain canopy until the entire tree bubble is ready; prefetch gives a 40 m/s flight several seconds' lead.
-        float ReadyReach(Camera camera, Vector2 world)
+        float ReadyReach(Vector2 world)
         {
             int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
             float reach = TreeReach;
@@ -223,9 +229,6 @@ namespace DroneSandbox
                     float z = Mathf.Max(j * CellSize - world.y, Mathf.Max(0f, world.y - (j + 1) * CellSize));
                     reach = Mathf.Min(reach, Mathf.Sqrt(x * x + z * z));
                 }
-            readyByCamera.TryGetValue(camera, out float previous);
-            reach = Mathf.Min(reach, previous + Mathf.Min(Time.unscaledDeltaTime, 0.05f) * 120f);
-            readyByCamera[camera] = reach;
             return reach;
         }
 
@@ -253,8 +256,7 @@ namespace DroneSandbox
         void Draw(Camera cam)
         {
             var bounds = new Bounds(cam.transform.position, Vector3.one * 3600f);
-            properties.SetVector("_ForestCamera", cam.transform.position);
-            properties.SetVector("_ForestDistances", TierDistances);
+            ForestMaterials.SetCamera(properties, cam.transform.position, TierDistances);
             foreach (var model in models)
             {
                 if (model == null || model.instances.Count == 0) continue;
@@ -354,13 +356,9 @@ namespace DroneSandbox
                 for (int i = 0; i < materials.Length; i++)
                 {
                     if (materials[i] == null) continue;
-                    var photo = Resources.Load<Material>((tier < 3 ? "Materials/Forest/" : "Materials/PBR/") + materials[i].name);
-                    var material = new Material(photo != null ? photo : materials[i]) { enableInstancing = true };
-                    if (tier < 3)
-                    {
-                        material.shader = Shader.Find("DroneSandbox/ForestLit");
-                        material.SetFloat("_ForestTier", tier); material.SetFloat("_ForestBuild", 1f);
-                    }
+                    var photo = Resources.Load<Material>("Materials/PBR/" + materials[i].name);
+                    var material = tier < 3 ? ForestMaterials.Create(materials[i].name, photo != null ? photo : materials[i], tier)
+                        : new Material(photo != null ? photo : materials[i]) { enableInstancing = true };
                     var colour = material.color; colour.r *= tint; colour.g *= tint; colour.b *= tint;
                     if (species >= 0 && (materials[i].name.StartsWith("Leaves") || materials[i].name.StartsWith("Impostor")))
                     {

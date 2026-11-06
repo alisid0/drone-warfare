@@ -29,14 +29,14 @@ namespace DroneSandbox
         public static IReadOnlyList<Stem> Stems => stems;
         public static Vector2 Origin { get; private set; }
         public static int Version { get; private set; }
-        public static bool Ready => indices != null;
+        public static bool Ready { get; private set; }
         public static double BuildMilliseconds { get; private set; }
         public static List<ForestHlod.Data> PreparedCanopy { get; private set; }
 
         // Drop sector ownership before planting gardens, so stale logical trees cannot exclude the next sector.
         public static void Reset()
         {
-            indices = null; stems.Clear(); groves.Clear(); PreparedCanopy = null; Version++;
+            Ready = false; indices = null; stems.Clear(); groves.Clear(); PreparedCanopy = null; Version++;
         }
 
         // Populate every accepted stem, without a render budget or a GameObject; reuse the floor's existing input.
@@ -76,6 +76,8 @@ namespace DroneSandbox
                 stems.Add(stem); indices[k] = stems.Count; woodland.Add(p);
             }
             foreach (var stem in stems) Undergrowth.NoteTree(new Vector2(stem.position.x, stem.position.z));
+            // Publish occupancy only after all indices and stems exist; renderers invalidate any pre-build cache.
+            Ready = true; Version++;
             PreparedCanopy = PrepareCanopy();
             BuildMilliseconds = timer.Elapsed.TotalMilliseconds;
         }
