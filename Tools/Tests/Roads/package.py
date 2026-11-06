@@ -37,8 +37,9 @@ paths+=list(scripts.glob('Road*'))+[scripts/(n+'.cs') for n in ('FarDetailData',
 for folder in ('Materials','Textures','Models'):
     paths+=list((ROOT/'Assets/DroneSandbox/Resources'/folder).glob('Road*' if folder!='Models' else 'Scenery_TelegraphPole*'))
 for p in paths:
-    if not p.is_file() or p.suffix not in ('.cs','.py','.meta','.mat','.md','.txt','.patch','.html','.json'):continue
+    if not p.is_file() or (p.suffix not in ('.cs','.py','.meta','.mat','.md','.txt','.patch','.html','.json') and p.name not in ('.gitignore','.gitattributes')):continue
     raw=p.read_bytes()
     text=raw.decode('utf-16' if raw.startswith((b'\xff\xfe',b'\xfe\xff')) else 'utf-8').replace('\r\n','\n')
+    if p.suffix in ('.mat','.meta'):text='\n'.join(line.rstrip() for line in text.split('\n'))
     p.write_bytes(text.replace('\n','\r\n').encode('utf-8'))
 print('Packaged 16 fixed-camera views, audits, scene budgets and scoped CRLF text.')

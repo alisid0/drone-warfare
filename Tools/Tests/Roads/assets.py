@@ -16,7 +16,8 @@ def guid(path):
 
 def write(path, text):
     """Match the repository's CRLF convention in all generated text assets."""
-    path.write_bytes(text.replace('\r\n','\n').replace('\n','\r\n').encode())
+    text='\n'.join(line.rstrip() for line in text.replace('\r\n','\n').split('\n'))
+    path.write_bytes(text.replace('\n','\r\n').encode())
 
 
 colors = {'RoadHighway':(1,1,1), 'RoadLane':(1,1,1), 'RoadTrack':(1,1,1), 'RoadJunction':(92/255,91/255,87/255),
