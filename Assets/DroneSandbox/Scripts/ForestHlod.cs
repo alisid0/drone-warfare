@@ -19,6 +19,8 @@ namespace DroneSandbox
         {
             public Vector2 corner;
             public int step, textureSize;
+            public bool adaptive;
+            public Vector3 focus;
             public Vector3[] vertices, normals;
             public Vector2[] uv;
             public float[] ground, crown;
@@ -65,8 +67,8 @@ namespace DroneSandbox
             foreach (var block in blocks.Values) Discard(block);
             if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
             blocks.Clear(); builder = null; pending = null; builtFrame = -1;
-            BlocksDrawn = TrianglesDrawn = CachedBlocks = 0;
-            CompletedBuilds = 0; Building = false;
+            BlocksDrawn = TrianglesDrawn = CachedBlocks = MissingBlocks = CoarseBlocks = 0;
+            CompletedBuilds = 0; BuildMs = 0f; Building = false;
         }
 
         // Sector construction has already sampled these coarse blocks; uploading does not re-run the recipe.
@@ -80,6 +82,7 @@ namespace DroneSandbox
                 int j = Mathf.RoundToInt((data.corner.y + WorldPlan.Half) / BlockSize);
                 blocks[j * BlockCount + i] = Upload(data);
             }
+            CachedBlocks = blocks.Count;
         }
 
         // Each cached block owns exactly these three Unity resources.
@@ -136,7 +139,8 @@ namespace DroneSandbox
                         block.lastSeen = frame;
                         if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
                         if (block.data.step == 256) CoarseBlocks++;
-                        if (block.data.step <= step) continue;
+                        bool moved = block.data.adaptive && block.data.step <= 16 && (world - block.data.focus).sqrMagnitude > 256f * 256f;
+                        if (block.data.step <= step && !moved) continue;
                         // First give every visible block a coarse shape before refining any of them.
                         distance += 2e9f;
                     }
@@ -157,7 +161,7 @@ namespace DroneSandbox
             {
                 pendingKey = wantedKey; buildingFrom = world; buildingCamera = camera;
                 pending = new Data { corner = new Vector2(-WorldPlan.Half + wantedKey % BlockCount * BlockSize,
-                    -WorldPlan.Half + wantedKey / BlockCount * BlockSize), step = wantedStep };
+                    -WorldPlan.Half + wantedKey / BlockCount * BlockSize), step = wantedStep, adaptive = true, focus = world };
                 builder = Prepare(pending);
             }
             timer.Restart();
@@ -190,7 +194,7 @@ namespace DroneSandbox
         Block Upload(Data data)
         {
             // Upload releases its own CPU references; sector data remains reusable after Clear or renderer replacement.
-            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize,
+            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize, adaptive = data.adaptive, focus = data.focus,
                 vertices = data.vertices, normals = data.normals, uv = data.uv, ground = data.ground,
                 crown = data.crown, triangles = data.triangles, pixels = data.pixels };
             var block = new Block { data = copy, lastSeen = frame };
@@ -297,7 +301,7 @@ namespace DroneSandbox
                 float top = Height(x, z), floor = FarScatter.GroundAt(p);
                 index = vertices.Count; indices.Add(key, index);
                 vertices.Add(new Vector3(p.x, top, p.y)); ground.Add(floor); crown.Add(top - floor);
-                float pixel = data.step <= 16 ? data.step * 0.5f : data.step * 0.25f, padding = pixel * 2f;
+                float pixel = TexelSize(data), padding = pixel * 2f;
                 uv.Add(new Vector2((x + padding) / (BlockSize + padding * 2f), (z + padding) / (BlockSize + padding * 2f)));
                 const int d = 8;
                 float dx = Height(x + d, z) - Height(x - d, z), dz = Height(x, z + d) - Height(x, z - d);
@@ -357,20 +361,26 @@ namespace DroneSandbox
                 var coverage = Coverage(data); while (coverage.MoveNext()) yield return null;
                 yield break;
             }
-            int step = data.step;
             var surface = new Surface(data);
             for (int tz = 0; tz < BlockSize; tz += TileSize)
                 for (int tx = 0; tx < BlockSize; tx += TileSize)
+                {
+                    int step = TileStep(data, tx, tz);
+                    int south = tz == 0 ? 8 : TileStep(data, tx, tz - TileSize);
+                    int north = tz + TileSize == BlockSize ? 8 : TileStep(data, tx, tz + TileSize);
+                    int west = tx == 0 ? 8 : TileStep(data, tx - TileSize, tz);
+                    int east = tx + TileSize == BlockSize ? 8 : TileStep(data, tx + TileSize, tz);
                     for (int z = tz; z < tz + TileSize; z += step)
                         for (int x = tx; x < tx + TileSize; x += step)
                         {
-                            Quad(surface, x, z, step, z == 0 ? 8 : step, z + step == BlockSize ? 8 : step,
-                                x == 0 ? 8 : step, x + step == BlockSize ? 8 : step);
+                            Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
+                                x == tx ? west : step, x + step == tx + TileSize ? east : step);
                             yield return null;
                         }
+                }
             var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
             if (data.triangles.Length == 0) yield break;
-            int core = data.step <= 16 ? BlockSize / data.step * 2 : BlockSize / data.step * 4;
+            int core = Mathf.RoundToInt(BlockSize / TexelSize(data));
             int size = data.textureSize = core + 4;
             float pixel = BlockSize / (float)core;
             data.pixels = new Color32[size * size];
@@ -384,6 +394,20 @@ namespace DroneSandbox
                     if ((i & 7) == 7) yield return null;
                 }
         }
+
+        // Keep 8 m geometry around the tree/canopy hand-over, then spend fewer vertices across the rest of a large block.
+        static int TileStep(Data data, int x, int z)
+        {
+            if (!data.adaptive || data.step >= 64) return data.step;
+            Vector2 corner = data.corner + new Vector2(x, z);
+            float px = Mathf.Clamp(data.focus.x, corner.x, corner.x + TileSize);
+            float pz = Mathf.Clamp(data.focus.z, corner.y, corner.y + TileSize);
+            float distance = Vector3.Distance(data.focus, new Vector3(px, WorldPlan.Height(px, pz) + 16f, pz));
+            return Mathf.Max(data.step, distance < 900f ? 8 : distance < 2200f ? 16 : 64);
+        }
+
+        // Eight-metre texels resolve crown-scale light variation without a 516-square upload for each nearby block.
+        static float TexelSize(Data data) => data.step <= 16 ? 8f : data.step * 0.25f;
 
         // A regular low-cost mass arrives first; temporary skirts hide mixed edges until stitched refinement replaces it.
         static IEnumerator Coverage(Data data)

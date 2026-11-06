@@ -46,9 +46,11 @@ def report():
             rows.append(row)
     (OUT/'luminance.json').write_text(json.dumps(rows,indent=2)+'\n')
     for phase in ['before','after']:
-        for name in ['metrics','canopy-budget','close-budget','distant-budget','checks']:
+        for name in ['metrics','canopy-budget','close-budget','distant-budget','checks','crown-queries']:
             src=ROOT/'Temp/distant-forest'/phase/(name+'.json')
             if src.exists(): shutil.copyfile(src,OUT/(name+'-'+phase+'.json'))
+    if (ROOT/'Temp/distant-forest/render-checks.json').exists():
+        shutil.copyfile(ROOT/'Temp/distant-forest/render-checks.json', OUT/'render-checks.json')
     body = ['<!doctype html><meta charset="utf-8"><title>Distant forest review</title><style>body{background:#18201c;color:#eee;font:16px system-ui;max-width:1500px;margin:24px auto}img{width:49%}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #536057}</style>',
             '<h1>Distant forest — fixed Blender structure review</h1><p>Before: 9f8a34b. Production meshes, texture bytes and normals. Fixed 35° sun, exposure 0, Standard transform. No fog, HDRP, native uploads or GPU timing. Ground pasture reference: sRGB (105,126,86). Camera labels are altitude above terrain; oblique slant ranges are longer.</p>',
             '<table><tr><th>Altitude</th><th>Revision</th><th>Forest / pasture linear Y</th><th>Forest / pasture greyscale</th></tr>']

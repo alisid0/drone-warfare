@@ -16,12 +16,12 @@
     "phase": "after",
     "forestPixels": 1216636,
     "pasturePixels": 166510,
-    "forestY": 0.0715212409464842,
-    "pastureY": 0.16948227487284517,
-    "forestGrey": 74.79113588772147,
-    "pastureGrey": 114.38063789664237,
-    "linearRatio": 0.42199835351598464,
-    "greyscaleRatio": 0.6538793388729384
+    "forestY": 0.07150833733150558,
+    "pastureY": 0.1694822893946586,
+    "forestGrey": 74.82577790474929,
+    "pastureGrey": 114.3806424869222,
+    "linearRatio": 0.4219221818805525,
+    "greyscaleRatio": 0.6541821787135402
   },
   {
     "altitude": 1000,
@@ -40,12 +40,12 @@
     "phase": "after",
     "forestPixels": 1164408,
     "pasturePixels": 187085,
-    "forestY": 0.07106332186748832,
-    "pastureY": 0.16737765908858893,
-    "forestGrey": 74.60914138818684,
-    "pastureGrey": 113.71505206995015,
-    "linearRatio": 0.42456874026345554,
-    "greyscaleRatio": 0.6561061181442552
+    "forestY": 0.07101518276218471,
+    "pastureY": 0.16737765820873554,
+    "forestGrey": 74.62042961644681,
+    "pastureGrey": 113.71505179290985,
+    "linearRatio": 0.42428113478336615,
+    "greyscaleRatio": 0.6562053874129212
   },
   {
     "altitude": 2500,

@@ -13,6 +13,19 @@ static class Checks
         Vector2 corner = new Vector2(Mathf.FloorToInt((origin.x + WorldPlan.Half) / 2048f) * 2048f - WorldPlan.Half,
             Mathf.FloorToInt((origin.y + WorldPlan.Half) / 2048f) * 2048f - WorldPlan.Half);
         var fine = Build(corner, 16);
+        var uniform = Build(corner, 8);
+        var adaptive = new ForestHlod.Data { corner = corner, step = 8, adaptive = true,
+            focus = new Vector3(corner.x + 100f, WorldPlan.Height(corner.x + 100f, corner.y + 100f) + 100f, corner.y + 100f) };
+        var refinement = ForestHlod.Build(adaptive, null); while (refinement.MoveNext()) { }
+        if (adaptive.vertices.Length >= uniform.vertices.Length) throw new Exception("Adaptive canopy did not reduce vertices");
+        foreach (var p in Boundary(uniform, corner.x + 2048f - origin.x))
+        {
+            bool found = false;
+            for (int k = 0; k < adaptive.vertices.Length; k++)
+                if (Vector3.Distance(adaptive.vertices[k], p.Value) < 0.0001f
+                    && Vector3.Distance(adaptive.normals[k], uniform.normals[p.Key]) < 0.0001f) { found = true; break; }
+            if (!found) throw new Exception("Adaptive refinement changed the shared perimeter");
+        }
         int matches = 0;
         foreach (int step in new[] { 8, 16, 64, 128 })
         {
@@ -52,7 +65,9 @@ static class Checks
         double tierRatio = coarseLum / fineLum;
         if (tierRatio < .90 || tierRatio > 1.10) throw new Exception("HLOD luminance hand-over exceeds 10 percent");
         Console.WriteLine($"SEAMS {matches} matching vertices/normals; tier luminance {tierRatio:F4}; coarse first {firstFrames} frames; generation slices mean {total / frames:F3}, max {longest:F3} ms");
-        return new { boundaryMatches = matches, coarseFineLuminance = tierRatio, generationOnly = new { firstFrames, all49Frames = frames,
+        return new { boundaryMatches = matches, coarseFineLuminance = tierRatio,
+            adaptiveVertices = adaptive.vertices.Length, uniformVertices = uniform.vertices.Length,
+            generationOnly = new { firstFrames, all49Frames = frames,
             worstBlockFrames = worstFrames, meanMs = total / frames, worstMs = longest, slices = times }, nativeUploadAndGpuMeasured = false };
     }
 
