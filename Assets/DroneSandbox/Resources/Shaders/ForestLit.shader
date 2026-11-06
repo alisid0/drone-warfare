@@ -3,11 +3,18 @@ Shader "DroneSandbox/ForestLit"
 {
     Properties
     {
+        _ForestViewport("Forest half-frustum tangents", Vector) = (0,0,0,0)
+        _ForestSelection("Forest selection position and ready radius", Vector) = (0,0,0,0)
+        _ForestProjection("Forest forward and focal pixels", Vector) = (0,0,1,0)
+        _ForestCrown("Forest local crown center", Vector) = (0,0,0,0)
+        _ForestRadius("Forest local radius axis", Vector) = (1,0,0,0)
+        _ForestOrigin("Forest world origin", Vector) = (0,0,0,0)
+        _ForestDetail("Shared world crown relief", 2D) = "gray" {}
         _ForestEnabled("Forest fade enabled", Float) = 0
         _ForestTier("Forest tier", Float) = 0
         _ForestBuild("Forest refinement", Float) = 1
         _ForestCamera("Forest camera", Vector) = (0,0,0,0)
-        _ForestDistances("Forest distances", Vector) = (45,125,350,700)
+        _ForestDistances("Forest inverse crown pixels", Vector) = (25,83,333,700)
 
         // Following set of parameters represent the parameters node inside the MaterialGraph.
         // They are use to fill a SurfaceData. With a MaterialGraph this should not exist.

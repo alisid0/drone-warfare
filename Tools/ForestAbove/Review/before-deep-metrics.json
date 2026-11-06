@@ -1,0 +1,1 @@
+{"sector":"deep","logical":104972,"full":0,"reduced":0,"cards":2863,"coverageFrames":12,"nearRefinementFrames":-1,"jumpCoverageFrames":17,"jumpRefinementFrames":-1,"flight":{"managedP95Ms":0.628,"blankFrames":0},"lowFlight":{"managedP95Ms":0,"blankFrames":0},"nativeUploadsAndGpuMeasured":false}

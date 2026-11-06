@@ -122,9 +122,9 @@ namespace DroneSandbox
                 width = 1f, radius = Mathf.Lerp(2f, 3.1f + 1.2f * age, margin), cover = edge * glade };
         }
 
-        // The surface describes connected stands, not isolated bumps on a mesh sampling lattice.
+        // Keep the stand surface below the photo crown caps (0.72 height for broadleaf), so arriving cards retain their crowns.
         public static float Canopy(Stand stand, float x, float z) => stand.cover * Mathf.Max(2f,
-            stand.height * 0.80f + (Noise(x, z, 31f, 31) - 0.5f) * 5f
+            stand.height * 0.55f + (Noise(x, z, 31f, 31) - 0.5f) * 5f
             + (Noise(x + 17f, z - 9f, 53f, 32) - 0.5f) * 2f
             + (Noise(x, z, 13f, 33) - 0.5f) * 7f);
 

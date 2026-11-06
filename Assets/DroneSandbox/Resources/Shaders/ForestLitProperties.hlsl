@@ -1,3 +1,5 @@
+TEXTURE2D(_ForestDetail);
+SAMPLER(sampler_ForestDetail);
 // Derived from installed HDRP 17.6 LitProperties; see ThirdPartyNotices.txt.
 // ===========================================================================
 //                              WARNING:
@@ -106,6 +108,12 @@ SAMPLER(sampler_LayerInfluenceMaskMap);
 CBUFFER_START(UnityPerMaterial)
 // Forest adapter additions; keep these outside keyword conditionals for SRP Batcher layout compatibility.
 float4 _ForestCamera;
+float4 _ForestSelection;
+float4 _ForestViewport;
+float4 _ForestProjection;
+float4 _ForestCrown;
+float4 _ForestRadius;
+float4 _ForestOrigin;
 float4 _ForestDistances;
 float _ForestTier;
 float _ForestBuild;
