@@ -27,7 +27,7 @@ namespace DroneSandbox
                 for (int k = 0; k < dry.Length; k++)
                 {
                     Vector2 p = Point(k);
-                    dry[k] = data.DryDistance(p) > 5f;
+                    dry[k] = !data.FeatureReserved(p, 12f) && data.DryDistance(p) > 5f;
                     distance[k] = float.MaxValue; previous[k] = crossing[k] = -1;
                 }
                 root = Nearest(hq, false);
@@ -113,6 +113,7 @@ namespace DroneSandbox
                 for (int i = 0; i <= steps; i++)
                 {
                     Vector2 p = Vector2.Lerp(a, b, i / (float)steps);
+                    if (data.FeatureReserved(p, 8f)) return false;
                     if (bank)
                     {
                         if (data.RiverDistance(p, out float width, out _) < width + 1f || data.LakeDistance(p, out _) < 2f) return false;

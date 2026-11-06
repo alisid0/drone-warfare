@@ -54,6 +54,7 @@ namespace DroneSandbox
         // Feature ownership is sampled separately from colour; IDs and angles are never interpolated as numbers.
         public Color32 Control(float x, float z, Vector2 coverPosition, Segment[] lanes = null, Segment[] streams = null)
         {
+            if (features.SurfaceAt(x, z, out _)) return new Color32(2, 0, 0, 50); // a runway or yard: faint grit, like tarmac roads
             Cover cover = SurfaceCover(x, z, coverPosition);
             float bank = Bank(x, z, streams ?? rivers, out _);
             if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
@@ -74,6 +75,8 @@ namespace DroneSandbox
         // Smooth coverage is measured in metres; roads win at crossings and retain their actual vector widths.
         Vector3 PaintPoint(float x, float z, Vector2 at, Segment[] lanes, Segment[] streams, float pixel)
         {
+            // Landmarks' runways, aprons, yards and ballast (sRGB, in unwarped world metres) win over cover and roads.
+            if (features.SurfaceAt(x, z, out Color feature)) return FarDetailPalette.Decode(feature);
             Cover cover = SurfaceCover(x, z, at);
             float bank = Bank(x, z, streams, out float riverWidth);
             if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;

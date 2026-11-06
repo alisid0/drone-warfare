@@ -47,8 +47,8 @@ namespace DroneSandbox
             return order;
         }
 
-        // Prefer matching cells, then explicit related kinds. Within the best available kind, minimize map
-        // displacement and distance from the intended front depth; a rare airfield must still be an airfield.
+        // Allocate a permanent landmark first. If none is free, choose related geography; PlanAt removes any
+        // unsupported built-landmark identity instead of inventing a second airfield or an empty rail yard.
         static Vector2 ChooseSpot(Hotspot spot, List<Vector2> used)
         {
             float z = Mathf.Lerp(WorldPlan.Half - 6000f, -WorldPlan.Half + 6000f, Mathf.Clamp01(spot.mapPosition.x));
@@ -57,6 +57,7 @@ namespace DroneSandbox
             float baseline = Theatre.Front(spot.mapPosition.x) - Theatre.Advance;
             float depth = (spot.mapPosition.y - baseline) * 8000f - 2000f;
             var target = new Vector2(WorldPlan.FrontAt(z).x + depth, z);
+            if (IsLandmarkKind(spot.kind) && FeatureSpot(spot.kind, target, used, out Vector2 featureSpot)) return featureSpot;
             Vector2 best = default; float score = float.MaxValue, bestKind = float.MaxValue;
             for (int cz = 1; cz < WorldPlan.CellCount - 1; cz++)
                 for (int cx = 1; cx < WorldPlan.CellCount - 1; cx++)
@@ -64,7 +65,7 @@ namespace DroneSandbox
                     WorldCell cell = WorldPlan.Cell(cx, cz);
                     Vector2 p = new Vector2(-WorldPlan.Half + (cx + 0.5f) * WorldPlan.CellSize,
                         -WorldPlan.Half + (cz + 0.5f) * WorldPlan.CellSize);
-                    if (cell.water > 0.55f) continue;
+                    if (cell.water > 0.55f || LandmarkWindow(p)) continue;
                     bool occupied = false;
                     foreach (var other in used)
                         if (Mathf.Abs(p.x - other.x) < 2f * Half && Mathf.Abs(p.y - other.y) < 2f * Half) { occupied = true; break; }

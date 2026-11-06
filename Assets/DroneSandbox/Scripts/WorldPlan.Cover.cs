@@ -62,6 +62,7 @@ namespace DroneSandbox
             foreach (var s in Settlements) StampSettlement(s);
             foreach (var farm in Farms) ClearGround(farm.position, 180f, Cover.Farmland);
             foreach (var site in Sites) if (site.kind != WorldSiteKind.Landmark) ClearGround(site.position, site.kind == WorldSiteKind.Airbase ? 650f : 140f, Cover.Pasture);
+            foreach (var feature in Features) StampFeature(feature, true);
         }
 
         // Bilinear district influence is sufficient at 250 m and avoids millions of settlement searches.
@@ -163,6 +164,11 @@ namespace DroneSandbox
                     cells[index] = cell;
                 }
             });
+            foreach (var feature in Features)
+            {
+                int k = CellIndex(feature.center);
+                var cell = cells[k]; cell.kind = feature.SectorKind; cells[k] = cell;
+            }
         }
 
         // Feature vectors on the closed world edge belong to the last cell, never a fictitious cell 56.

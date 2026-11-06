@@ -12,6 +12,7 @@ namespace DroneSandbox
         public readonly int seed;
         readonly float[] heights;
         readonly Cover[] covers;
+        readonly WorldFeatureMap features; // the permanent landmarks' surfaces and graded platforms
         readonly int count;
         readonly Segment[] roads, rivers;
         readonly Dictionary<long, Segment[]> riverCells = new Dictionary<long, Segment[]>();
@@ -41,6 +42,7 @@ namespace DroneSandbox
         public FarDetailData(int seed, float[] heights, Cover[] covers, int count, Segment[] roads, Segment[] rivers, float[][] coarse)
         {
             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
+            features = WorldPlan.CaptureFeatureMap(); // immutable, so workers can read it
             this.roads = roads; this.rivers = rivers; this.coarse = coarse;
             fields = new FarFieldPlan(seed, roads);
             var cells = new Dictionary<long, List<Segment>>();
@@ -91,7 +93,8 @@ namespace DroneSandbox
         {
             float u = Repeat(x, Size), v = Repeat(z, Size);
             float edge = Math.Min(Math.Min(u, Size - u), Math.Min(v, Size - v));
-            return Mix(CoarseHeight(x, z), Height(x, z) + roughness, Smooth(edge / 128f));
+            float detail = Mix(CoarseHeight(x, z), Height(x, z) + roughness, Smooth(edge / 128f));
+            return Mix(Height(x, z), detail, features.DetailWeight(x, z)); // tile roughness must not cut a landmark's platform
         }
 
         // Exact Ground world-plan roughness; only the main-thread sampler calls Unity's native Perlin implementation.

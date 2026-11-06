@@ -68,6 +68,7 @@ namespace DroneSandbox
         public static float Edge(float x, float z)
         {
             if (!WorldPlan.Inside(x, z)) return 0f;
+            if (WorldPlan.FeatureReserved(new Vector2(x, z), 8f)) return 0f;
             Cover cover = WorldPlan.CoverAt(x, z);
             if (cover != Cover.Forest && cover != Cover.Pasture && cover != Cover.Farmland) return 0f;
             float step = WorldPlan.HeightStep;

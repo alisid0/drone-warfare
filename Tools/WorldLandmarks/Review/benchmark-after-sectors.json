@@ -1,0 +1,65 @@
+[
+  {
+    "kind": "IndustrialZone",
+    "sample": 0,
+    "planMs": 61.3465,
+    "buildMs": 1654.8916,
+    "error": null
+  },
+  {
+    "kind": "IndustrialZone",
+    "sample": 1,
+    "planMs": 42.0031,
+    "buildMs": 638.9094,
+    "error": null
+  },
+  {
+    "kind": "IndustrialZone",
+    "sample": 2,
+    "planMs": 40.2299,
+    "buildMs": 571.4003,
+    "error": null
+  },
+  {
+    "kind": "Airfield",
+    "sample": 0,
+    "planMs": 8.2727,
+    "buildMs": 501.6539,
+    "error": null
+  },
+  {
+    "kind": "Airfield",
+    "sample": 1,
+    "planMs": 20.4859,
+    "buildMs": 393.7059,
+    "error": null
+  },
+  {
+    "kind": "Airfield",
+    "sample": 2,
+    "planMs": 6.3843,
+    "buildMs": 455.6084,
+    "error": null
+  },
+  {
+    "kind": "RailJunction",
+    "sample": 0,
+    "planMs": 8.3174,
+    "buildMs": 570.2116,
+    "error": null
+  },
+  {
+    "kind": "RailJunction",
+    "sample": 1,
+    "planMs": 15.3049,
+    "buildMs": 465.4245,
+    "error": null
+  },
+  {
+    "kind": "RailJunction",
+    "sample": 2,
+    "planMs": 5.9625,
+    "buildMs": 399.5312,
+    "error": null
+  }
+]
