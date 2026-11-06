@@ -933,15 +933,23 @@ namespace DroneSandbox
         static List<int>[] fieldCells;
         static int fieldCellCount;
 
+        // A field's trapezoid with its two side-slope normalisers worked out once, for FieldAppearance.Edge per texel.
+        struct FieldShape { public Vector2 center, along; public float halfLength, halfWidth, taper, shear, left, right; }
+        static FieldShape[] fieldShapes;
+
         // Index every field and orchard by its corners, padded for the feathering and the legacy warp.
         static void IndexFields()
         {
             fieldCellCount = Mathf.CeilToInt(Size / FieldCell);
             fieldCells = new List<int>[fieldCellCount * fieldCellCount];
             int count = MapLayout.Fields.Count + MapLayout.Plan.orchards.Count;
+            fieldShapes = new FieldShape[count];
             for (int k = 0; k < count; k++)
             {
                 var f = FieldOrOrchard(k);
+                float slope = f.halfWidth * f.taper / f.halfLength;
+                fieldShapes[k] = new FieldShape { center = f.center, along = f.along, halfLength = f.halfLength, halfWidth = f.halfWidth, taper = f.taper, shear = f.shear,
+                    left = 1f / Mathf.Sqrt(1f + (f.shear - slope) * (f.shear - slope)), right = 1f / Mathf.Sqrt(1f + (f.shear + slope) * (f.shear + slope)) };
                 Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
                 for (int c = 0; c < 4; c++)
                 {
@@ -960,14 +968,24 @@ namespace DroneSandbox
         // Fields first, then the plan's orchards, as MapLayout.InField numbers them.
         static FieldPlot FieldOrOrchard(int k) => k < MapLayout.Fields.Count ? MapLayout.Fields[k] : MapLayout.Plan.orchards[k - MapLayout.Fields.Count];
 
-        // The largest signed edge distance of the fields and orchards near p (-10 m when none is close).
+        // The largest signed edge distance of the fields and orchards near p (-10 m when none is close): FieldAppearance.Edge's
+        // distances to the two ends and the two sloping sides, with the point unwarped once.
         static float FieldDistance(Vector2 p)
         {
             int x = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
             int z = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
             var near = fieldCells[z * fieldCellCount + x];
             float best = -10f;
-            if (near != null) foreach (int k in near) best = Mathf.Max(best, FieldAppearance.Edge(FieldOrOrchard(k), p));
+            if (near == null) return best;
+            Vector2 q = FieldPlot.Unwarp(p);
+            foreach (int k in near)
+            {
+                var s = fieldShapes[k];
+                float dx = q.x - s.center.x, dz = q.y - s.center.y;
+                float u = dx * s.along.x + dz * s.along.y, v = -dx * s.along.y + dz * s.along.x - s.shear * u;
+                float half = s.halfWidth * (1f + s.taper * u / s.halfLength);
+                best = Mathf.Max(best, Mathf.Min(s.halfLength - Mathf.Abs(u), Mathf.Min((half + v) * s.left, (half - v) * s.right)));
+            }
             return best;
         }
 
@@ -1087,17 +1105,22 @@ namespace DroneSandbox
                     // Ground cover with a reason, as aerial photos show it. How wet the ground lies decides it: damp
                     // grass along the river and the lake and down the hollows, drier grass on higher ground, pasture
                     // between; broad drifts (80 m and 25 m across) only nudge it, so damp ground follows the low lines.
-                    float damp = Mathf.Max(1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw) / 16f), 1f - Mathf.SmoothStep(0f, 1f, lake / 14f));
-                    float hollow = Mathf.SmoothStep(0f, 1f, (Sample(lieHeights, here) - Sample(worldHeights, here) - 0.3f) / 1.6f);
-                    float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, here) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
-                    float drift = Mathf.PerlinNoise(x * 0.0125f + 70f, z * 0.0125f + 20f) * 0.65f + Mathf.PerlinNoise(x * 0.04f + 9f, z * 0.04f + 4f) * 0.35f;
-                    float wetness = 0.5f + 0.75f * hollow - 0.45f * high - 0.3f * (drift - 0.5f);
-                    wetness = Mathf.Max(Mathf.Clamp01(wetness), damp);
-                    // Each paddock's use (grazed, hay or rough grazing with thistles) and the 12-35 m grazing drifts,
-                    // shared with the distant painters (FarDetailData.Paddock, FieldAppearance.Grass).
-                    float paddockAmount = 0f, paddock = detail != null ? detail.Paddock(x + origin.x, z + origin.y, texel, out paddockAmount) : -1f;
-                    FieldAppearance.Grass(x + origin.x, z + origin.y, wetness, paddock, paddockAmount, texel, out float wet, out float rough, out float soil);
-                    dirt = Mathf.Max(dirt, soil);
+                    // Under a crop only its soil can show, so the meadow is worked out off the fields alone.
+                    float wet = 0f, rough = 0f;
+                    if (field < 1f)
+                    {
+                        float damp = Mathf.Max(1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw) / 16f), 1f - Mathf.SmoothStep(0f, 1f, lake / 14f));
+                        float hollow = Mathf.SmoothStep(0f, 1f, (Sample(lieHeights, here) - Sample(worldHeights, here) - 0.3f) / 1.6f);
+                        float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, here) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
+                        float drift = Mathf.PerlinNoise(x * 0.0125f + 70f, z * 0.0125f + 20f) * 0.65f + Mathf.PerlinNoise(x * 0.04f + 9f, z * 0.04f + 4f) * 0.35f;
+                        float wetness = 0.5f + 0.75f * hollow - 0.45f * high - 0.3f * (drift - 0.5f);
+                        wetness = Mathf.Max(Mathf.Clamp01(wetness), damp);
+                        // Each paddock's use (grazed, hay or rough grazing with thistles) and the 12-35 m grazing drifts,
+                        // shared with the distant painters (FarDetailData.Paddock, FieldAppearance.Grass).
+                        float paddockAmount = 0f, paddock = detail != null ? detail.Paddock(x + origin.x, z + origin.y, texel, out paddockAmount) : -1f;
+                        FieldAppearance.Grass(x + origin.x, z + origin.y, wetness, paddock, paddockAmount, texel, out wet, out rough, out float soil);
+                        dirt = Mathf.Max(dirt, soil);
+                    }
                     // The meadow runs right to the crop, with no uncut frame round each field: the strip between two
                     // fields is the same varied grass, and each edge's own margin lies inside the field (FieldMargins).
                     // Bake mown shoulders and the two narrow ruts after the natural grass mix.
