@@ -48,7 +48,10 @@ namespace DroneSandbox
                 var s = f.surfaces[index];
                 var a = s.area;
                 var pieces = new List<List<Vector2>> { Outline(s, origin) };
-                for (int next = index + 1; next < f.surfaces.Count && pieces.Count > 0; next++)
+                // Each cut can split every piece once per mask edge, so many overlapping wear patches multiplied the pieces
+                // without bound and hung the main thread when a works came into view (hd147). Past 32 pieces the rest are
+                // left to overlap: a few distant z-fights cost far less than a frozen game.
+                for (int next = index + 1; next < f.surfaces.Count && pieces.Count > 0 && pieces.Count <= 32; next++)
                 {
                     var later = f.surfaces[next];
                     Vector2 d = later.area.center - a.center;
