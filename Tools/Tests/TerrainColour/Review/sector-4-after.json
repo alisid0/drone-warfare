@@ -1,0 +1,107 @@
+{
+  "owner": 4,
+  "name": "Esterhay",
+  "fields": 394,
+  "layoutTimings": "blocked map 45 ms, parcels 70 ms, district occupancy 85%, farmland coverage 92.1%",
+  "times": {
+    "worldCaptureMs": 1138.7363,
+    "layoutMs": 234.8088,
+    "groundBuildMs": 386.2157,
+    "splatMs": 364.9684,
+    "farmlandBuildMs": 473.536,
+    "fieldMarginsMs": 16.5302,
+    "tileMs": 55.1567,
+    "regionalPageMs": 200.6984,
+    "worldBlockMs": 1313.514
+  },
+  "stats": {
+    "means": {
+      "between": {
+        "r": 106.3,
+        "g": 118.5,
+        "b": 79.3,
+        "samples": 41945
+      },
+      "crop-MownHay": {
+        "r": 149.5,
+        "g": 148.9,
+        "b": 84.1,
+        "samples": 108368
+      },
+      "crop-Ploughed": {
+        "r": 82.8,
+        "g": 62.2,
+        "b": 41.9,
+        "samples": 100889
+      },
+      "crop-Sunflower": {
+        "r": 97.3,
+        "g": 94.5,
+        "b": 24.7,
+        "samples": 55924
+      },
+      "crop-Wheat": {
+        "r": 168.5,
+        "g": 147,
+        "b": 91.2,
+        "samples": 121156
+      },
+      "crop-YoungCrop": {
+        "r": 87,
+        "g": 95.3,
+        "b": 43.6,
+        "samples": 67409
+      },
+      "margin-Hedge": {
+        "r": 83.5,
+        "g": 96.8,
+        "b": 60.4,
+        "samples": 3062
+      },
+      "margin-Strip": {
+        "r": 102.6,
+        "g": 115.7,
+        "b": 73.8,
+        "samples": 4550
+      },
+      "margin-Track": {
+        "r": 102.8,
+        "g": 113.2,
+        "b": 75.7,
+        "samples": 5301
+      },
+      "margin-Wide": {
+        "r": 105.7,
+        "g": 113.5,
+        "b": 77.3,
+        "samples": 6963
+      },
+      "pasture": {
+        "r": 106.7,
+        "g": 120.4,
+        "b": 80.2,
+        "samples": 322
+      }
+    },
+    "fieldLumaSpread": {
+      "crop-MownHay": 4.14,
+      "crop-Ploughed": 2.95,
+      "crop-Sunflower": 3.12,
+      "crop-Wheat": 4.3,
+      "crop-YoungCrop": 3
+    },
+    "meadow": {
+      "openShare": 1,
+      "samples": 54756,
+      "lumaStd": 4.16,
+      "below64mStd": 2.65
+    },
+    "dampCropShare": 0.0182,
+    "cropLowPercentiles": {
+      "p50": 0,
+      "p90": 0.194,
+      "p97": 0.307,
+      "p99": 0.349
+    }
+  }
+}

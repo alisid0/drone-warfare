@@ -1,0 +1,113 @@
+{
+  "owner": 9,
+  "name": "Carrick",
+  "fields": 588,
+  "layoutTimings": "blocked map 44 ms, parcels 89 ms, district occupancy 92%, farmland coverage 91.2%",
+  "times": {
+    "worldCaptureMs": 1155.2387,
+    "layoutMs": 291.2264,
+    "groundBuildMs": 683.1694,
+    "splatMs": 660.0212,
+    "farmlandBuildMs": 585.6318,
+    "fieldMarginsMs": 65.8076,
+    "tileMs": 54.0325,
+    "regionalPageMs": 192.7551,
+    "worldBlockMs": 1227.8136
+  },
+  "stats": {
+    "means": {
+      "between": {
+        "r": 122.5,
+        "g": 124.8,
+        "b": 87.1,
+        "samples": 40555
+      },
+      "crop-MownHay": {
+        "r": 150.7,
+        "g": 149.6,
+        "b": 84.9,
+        "samples": 95700
+      },
+      "crop-Ploughed": {
+        "r": 84.6,
+        "g": 64.3,
+        "b": 43.5,
+        "samples": 96288
+      },
+      "crop-Sunflower": {
+        "r": 97.8,
+        "g": 94.9,
+        "b": 26.1,
+        "samples": 51341
+      },
+      "crop-Wheat": {
+        "r": 167.7,
+        "g": 146.1,
+        "b": 90.9,
+        "samples": 110887
+      },
+      "crop-YoungCrop": {
+        "r": 88.3,
+        "g": 96.5,
+        "b": 45.2,
+        "samples": 72804
+      },
+      "margin-Bare": {
+        "r": 122,
+        "g": 122.7,
+        "b": 82.7,
+        "samples": 1489
+      },
+      "margin-Hedge": {
+        "r": 98,
+        "g": 103.4,
+        "b": 69.1,
+        "samples": 2285
+      },
+      "margin-Strip": {
+        "r": 118.5,
+        "g": 121.7,
+        "b": 83.2,
+        "samples": 5605
+      },
+      "margin-Track": {
+        "r": 117.6,
+        "g": 117.9,
+        "b": 83.2,
+        "samples": 4048
+      },
+      "margin-Wide": {
+        "r": 116.7,
+        "g": 121,
+        "b": 84.1,
+        "samples": 6768
+      },
+      "pasture": {
+        "r": 109.7,
+        "g": 122.4,
+        "b": 81,
+        "samples": 20142
+      }
+    },
+    "fieldLumaSpread": {
+      "crop-MownHay": 1.98,
+      "crop-Ploughed": 0.89,
+      "crop-Sunflower": 1.18,
+      "crop-Wheat": 2.03,
+      "crop-YoungCrop": 1.31
+    },
+    "meadow": {
+      "openShare": 1,
+      "samples": 54756,
+      "lumaStd": 1.16,
+      "below64mStd": 0.68
+    },
+    "dampCropShare": 0,
+    "cropLowPercentiles": {
+      "p50": 0,
+      "p90": 0,
+      "p97": 0,
+      "p99": 0
+    }
+  }
+}
