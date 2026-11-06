@@ -18,9 +18,7 @@ void ForestFade(float3 positionRWS, float2 canopyUV)
     // Only completed cells may open the canopy. Crowns beyond them can arrive independently without shrinking the entire view.
     if (_ForestTier >= 3.0 && card > 0.0)
     {
-        // Macro alpha describes glades, so normal woodland rims still fade with their individual crowns.
-        float cover = SAMPLE_TEXTURE2D_LOD(_BaseColorMap, sampler_BaseColorMap, canopyUV, 0).a;
-        card *= smoothstep(0.35, 0.85, cover);
+        // Glades and wood edges reveal the actual meadow floor when their individual crowns are ready.
         card *= 1.0 - smoothstep(max(0.0, _ForestSelection.w - 32.0), max(0.01, _ForestSelection.w), distance(world.xz, _ForestSelection.xz));
         float3 delta = world - _ForestSelection.xyz;
         float3 right = cross(float3(0.0, 1.0, 0.0), _ForestProjection.xyz);
