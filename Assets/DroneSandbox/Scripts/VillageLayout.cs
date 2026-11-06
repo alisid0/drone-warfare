@@ -92,6 +92,13 @@ namespace DroneSandbox
                     }
                 }
 
+                // Ribbon frontage can lie beyond the cover-map town blob, but still owns a real sector root.
+                if (original.town && (owner < 0 || best > 300f * 300f))
+                {
+                    owner = plan.villages.Count;
+                    plan.villages.Add(p.front); plan.villageNames.Add(WorldPlan.Settlements[original.owner].name + " edge");
+                    plan.farmsteads.Add(false); best = 0f;
+                }
                 if (owner < 0 || best > 450f * 450f)
                     continue;
                 p.owner = owner;
@@ -150,6 +157,14 @@ namespace DroneSandbox
                 if (MapLayout.Plan.farmsteads[owner])
                     continue;
                 var line = MapLayout.VillageStreets[s];
+                float streetLength = 0f;
+                var route = new List<FarDetailData.Segment>();
+                for (int i = 1; i < line.Count; i++)
+                {
+                    route.Add(new FarDetailData.Segment { ax=line[i-1].x,az=line[i-1].y,bx=line[i].x,bz=line[i].y,
+                        walked=streetLength,widthA=MapLayout.RoadHalfWidth,widthB=MapLayout.RoadHalfWidth });
+                    streetLength += Vector2.Distance(line[i - 1], line[i]);
+                }
                 var rng = new Random(MapLayout.Plan.fieldSeed * 31 + s * 977 + owner);
                 foreach (float side in new[]
                 {
@@ -168,20 +183,25 @@ namespace DroneSandbox
                             continue;
                         while (next < walked + length)
                         {
-                            float width = 16f + (float)rng.NextDouble() * 14f, depth = 25f + (float)rng.NextDouble() * 35f;
-                            Vector2 along = d / length, outward = new Vector2(-along.y, along.x) * side;
+                            bool core = next > streetLength * .15f && next < streetLength * .85f;
+                            float width = core ? 12f + (float)rng.NextDouble() * 2.2f : 22f + (float)rng.NextDouble() * 8f;
+                            float depth = core ? 27f + (float)rng.NextDouble() * 10f : 38f + (float)rng.NextDouble() * 18f;
+                            if (!VillagePlan.OnRoute(route,next+width*.5f,out var at,out var along,out _)) { next+=width; continue; }
+                            Vector2 outward = new Vector2(-along.y, along.x) * side;
                             var p = new VillagePlot
                             {
-                                front = line[i - 1] + along * (next - walked) + outward * (MapLayout.RoadHalfWidth + 1.8f),
+                                front = at + outward * (MapLayout.RoadHalfWidth + 1.8f),
                                 along = along,
                                 outward = outward,
                                 frontage = width,
                                 depth = depth,
-                                setback = 9f,
+                                setback = core ? 5f : 12f,
+                                core = core,
+                                old = core,
                                 roadWidth = MapLayout.RoadHalfWidth,
                                 owner = owner,
                                 style = rng.Next(4),
-                                model = rng.NextDouble() < .65 ? "Scenery_House_A" : "Scenery_House_B"
+                                model = core ? "Scenery_House_D" : rng.NextDouble() < .65 ? "Scenery_House_A" : "Scenery_House_B"
                             };
                             MapLayout.VillagePlots.Add(p);
                             next += width;

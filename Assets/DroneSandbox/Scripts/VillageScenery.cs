@@ -51,7 +51,7 @@ namespace DroneSandbox
                 list.Add(p);
             }
             var materials = new[] { Art.Shared(new Color(.24f,.29f,.13f)), Art.Shared(new Color(.26f,.20f,.12f)),
-                Art.Shared(new Color(.39f,.36f,.29f)), Art.Shared(new Color(.16f,.22f,.10f)) };
+                Art.Shared(new Color(.39f,.36f,.29f)), Art.Shared(new Color(.16f,.22f,.10f)), Art.Shared(new Color(.82f,.82f,.76f)) };
             int used = 0;
             foreach (var block in blocks.Values)
             {
@@ -63,6 +63,7 @@ namespace DroneSandbox
                     var mesh = new VillageMesh();
                     foreach (var p in block)
                     {
+                        if (p.landUse > 0 && p.landUse < 5) { TownLandUse(mesh, p, lod); continue; }
                         if (lod == 0) Surface(mesh, p);
                         if (p.square || p.boundary == 0) continue;
                         var polygon = p.Outline();
@@ -182,7 +183,7 @@ namespace DroneSandbox
         {
             readonly List<Vector3> vertices = new List<Vector3>();
             readonly List<Vector3> normals = new List<Vector3>();
-            readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>() };
+            readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>(), new List<int>() };
 
             // Front-facing triangles retain yard and hedge silhouettes without transparent materials.
             public void Quad(int sub, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
@@ -199,8 +200,8 @@ namespace DroneSandbox
             public Renderer Finish(string name, Transform parent, Material[] materials)
             {
                 var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
-                villageMeshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.subMeshCount = 4;
-                for (int i = 0; i < 4; i++) mesh.SetTriangles(triangles[i], i);
+                villageMeshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.subMeshCount = triangles.Length;
+                for (int i = 0; i < triangles.Length; i++) mesh.SetTriangles(triangles[i], i);
                 mesh.RecalculateBounds();
                 var go = new GameObject(name); go.transform.SetParent(parent, false);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;

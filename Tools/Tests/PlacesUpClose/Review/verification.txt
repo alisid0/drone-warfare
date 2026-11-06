@@ -1,0 +1,45 @@
+prepare.py
+  Determining projects to restore...
+  Restored C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\api.csproj (in 138 ms).
+  api -> C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\bin\Release\netstandard2.1\api.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.69
+  Determining projects to restore...
+  Restored C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\harness.csproj (in 200 ms).
+  harness -> C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\bin\Release\net8.0\harness.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:06.93
+
+streaming_api.py
+  Determining projects to restore...
+  Restored C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\streaming.csproj (in 89 ms).
+  streaming -> C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\build\bin\Release\netstandard2.1\streaming.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:03.73
+
+upload_check.py
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  check -> C:\Users\ali10\Documents\DroneWarfare-world\Temp\places-up-close\upload\bin\Release\net8.0\check.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:03.48
+1 vertices: interrupted reuse preserved all attributes/indices; 10 bounded calls; upload correctly labelled.
+1024 vertices: interrupted reuse preserved all attributes/indices; 11 bounded calls; upload correctly labelled.
+1025 vertices: interrupted reuse preserved all attributes/indices; 15 bounded calls; upload correctly labelled.
+5303 vertices: interrupted reuse preserved all attributes/indices; 35 bounded calls; upload correctly labelled.

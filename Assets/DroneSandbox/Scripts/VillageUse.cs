@@ -40,6 +40,7 @@ namespace DroneSandbox
         // Work yards use a softened oval and a side drive; doors have a separate narrow approach.
         public int UseAt(float u, float v)
         {
+            if (landUse > 0 && landUse < 5) return TownUse(u, v);
             if (square) return 2;
             if (Math.Abs(u) < pathWidth * .5f && v < setback) return 2;
             if ((farm || shed || (identity & 1) == 0) && Math.Abs(u - DriveU) < driveWidth * .5f && v < YardEnd) return 2;
@@ -49,6 +50,7 @@ namespace DroneSandbox
         // Ground wear batches working areas separately from exact-width access strips.
         public int WorkAt(float u, float v)
         {
+            if (landUse > 0 && landUse < 5) return TownUse(u, v);
             if (square) return 2;
             float mid = (YardStart + YardEnd) * .5f, ry = (YardEnd - YardStart) * .5f;
             float rx = frontage * (farm ? .38f : .29f);
@@ -142,12 +144,15 @@ namespace DroneSandbox
             for (int k = 0; k < ids.Count; k++)
             {
                 var p = plots[ids[k]];
-                p.old = k < Math.Max(1, (int)Math.Round(ids.Count * .28f));
+                p.old = p.core || k < Math.Max(1, (int)Math.Round(ids.Count * .28f));
                 p.identity = rng.Next(); p.palette = k % (3 + (owner & 1)); p.settlement = owner;
                 p.scale = .89f + (float)rng.NextDouble() * .22f;
+                if (p.landUse == 4) p.scale = 1f;
                 p.pathWidth = 1f + (float)rng.NextDouble() * .8f;
                 p.driveWidth = 2.5f + (float)rng.NextDouble();
-                if (!p.farm && !p.town) p.setback = p.old ? 5.8f + (float)rng.NextDouble() * 2.1f : 10f + (float)rng.NextDouble() * 6f;
+                if (!p.farm && !p.town) p.setback = p.core ? 4.6f + (float)rng.NextDouble() * 1.5f
+                    : p.old ? 5.8f + (float)rng.NextDouble() * 2.1f : 10f + (float)rng.NextDouble() * 6f;
+                if (p.core || p.landUse == 5) p.shed = true;
                 p.boundary = k % 5 == 0 ? 0 : 1 + k % 3;
                 plots[ids[k]] = p;
             }
