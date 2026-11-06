@@ -63,14 +63,14 @@ namespace DroneSandbox
                     {
                         materials[index] = Art.NewMaterial(LandmarkMesh.Color(index));
                         materials[index].SetFloat("_Smoothness", 0.12f);
-                        if (index >= 5 && index <= 8)
+                        if (LandmarkMesh.IsBuilding(index))
                         {
                             var adapted = LandmarkInstances.Adapt(materials[index]);
                             if (adapted != null) { Art.Discard(materials[index]); materials[index] = adapted; }
                         }
                     }
                     var rp = new RenderParams(materials[index]) { camera = camera, worldBounds = batch.bounds,
-                        matProps = index >= 5 && index <= 8 ? properties : null,
+                        matProps = LandmarkMesh.IsBuilding(index) ? properties : null,
                         shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
                     Graphics.RenderMesh(rp, batch.mesh, sub, Matrix4x4.identity); DrawCalls++;
                 }

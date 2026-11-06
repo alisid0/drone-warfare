@@ -12,16 +12,21 @@ namespace DroneSandbox
         {
             if (border) Region(f, rng, u + 1.2f, v - .8f, length + 6f, width + 6f, LandmarkSurfaceKind.Soil, false);
             var area = new FeatureArea { center = f.Area.Point(u, v), along = f.along, halfLength = length / 2f, halfWidth = width / 2f };
+            f.surfaces.Add(new LandmarkSurface { area = area, outline = Outline(area, rng), kind = kind,
+                lift = .055f + f.surfaces.Count * .0001f, fall = area.Across * (.018f / Math.Max(1f, area.halfWidth)) });
+        }
+
+        // A convex counterclockwise octagon with unequal chamfers; any axis keeps the same handedness as the yard.
+        static Vector2[] Outline(FeatureArea area, Random rng)
+        {
             float x = area.halfLength, z = area.halfWidth;
             float jitter = Math.Min(6f, Math.Min(x, z) * .22f), minimum = Math.Min(2f, jitter * .5f);
             float a = Range(rng, minimum, jitter), b = Range(rng, minimum, jitter), c = Range(rng, minimum, jitter), d = Range(rng, minimum, jitter);
             float bevel = Math.Min(8f, Math.Min(x, z) * .35f);
-            var outline = new[] { area.Point(-x + bevel, -z + a), area.Point(x - bevel, -z + b),
+            return new[] { area.Point(-x + bevel, -z + a), area.Point(x - bevel, -z + b),
                 area.Point(x - b, -z + bevel + b), area.Point(x - c, z - bevel - c),
                 area.Point(x - bevel, z - c), area.Point(-x + bevel, z - d),
                 area.Point(-x + d, z - bevel - d), area.Point(-x + a, -z + bevel + a) };
-            f.surfaces.Add(new LandmarkSurface { area = area, outline = outline, kind = kind,
-                lift = .055f + f.surfaces.Count * .0001f, fall = area.Across * (.018f / Math.Max(1f, z)) });
         }
 
         // Paved circulation is 5-8 m wide, with paired 0.4 m wheel wear rather than arbitrary dark splats.

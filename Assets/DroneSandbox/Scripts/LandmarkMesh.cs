@@ -6,7 +6,9 @@ namespace DroneSandbox
     // Plain mesh data is shared by the offline renderer, local surface builder and distant GPU submissions.
     public static class LandmarkMesh
     {
-        public const int MaterialCount = 12;
+        public const int MaterialCount = 20;
+        // Later surfaces this much higher are drawn over earlier slabs instead of cutting holes in them.
+        const float LayerGap = .035f;
 
         // One material batch per landmark, including every building of that material and all its flat slabs.
         public sealed class Data
@@ -49,11 +51,13 @@ namespace DroneSandbox
                 var a = s.area;
                 var pieces = new List<List<Vector2>> { Outline(s, origin) };
                 // Each cut can split every piece once per mask edge, so many overlapping wear patches multiplied the pieces
-                // without bound and hung the main thread when a works came into view (hd147). Past 32 pieces the rest are
-                // left to overlap: a few distant z-fights cost far less than a frozen game.
-                for (int next = index + 1; next < f.surfaces.Count && pieces.Count > 0 && pieces.Count <= 32; next++)
+                // without bound and hung the main thread when a works came into view (hd147). Raised decals no longer cut
+                // the slabs below them, so only level neighbours split a slab; past 96 pieces the rest are left to overlap:
+                // a few distant z-fights cost far less than a frozen game.
+                for (int next = index + 1; next < f.surfaces.Count && pieces.Count > 0 && pieces.Count <= 96; next++)
                 {
                     var later = f.surfaces[next];
+                    if (later.lift >= s.lift + LayerGap) continue; // a raised decal hides the slab; the painter agrees, as later wins
                     Vector2 d = later.area.center - a.center;
                     // Cheap oriented separating axes reject almost all unrelated wear and paint patches.
                     if (Separated(a, later.area, d) || Separated(later.area, a, d)) continue;
@@ -193,21 +197,29 @@ namespace DroneSandbox
             Vector3 center = P(0f, wall / 2f, 0f), vx = right * x, vy = Vector3.up * (wall / 2f), vz = forward * z;
             mesh.Face(5, center + vx, vy, vz); mesh.Face(5, center - vx, vz, vy);
             mesh.Face(5, center + vz, vx, vy); mesh.Face(5, center - vz, vy, vx);
-            if (b.shape != 0) { mesh.Face(6, P(0f, wall, 0f), vz, vx); return; }
+            int roof = b.roof > 0 ? 16 + b.roof : 6;
+            if (b.shape != 0) { mesh.Face(roof, P(0f, wall, 0f), vz, vx); return; }
             mesh.Triangle(5, P(-x, wall, z), P(x, wall, z), P(0f, h, z));
             mesh.Triangle(5, P(x, wall, -z), P(-x, wall, -z), P(0f, h, -z));
-            mesh.Triangle(6, P(-x, wall, -z), P(-x, wall, z), P(0f, h, z));
-            mesh.Triangle(6, P(-x, wall, -z), P(0f, h, z), P(0f, h, -z));
-            mesh.Triangle(6, P(0f, h, -z), P(0f, h, z), P(x, wall, z));
-            mesh.Triangle(6, P(0f, h, -z), P(x, wall, z), P(x, wall, -z));
+            mesh.Triangle(roof, P(-x, wall, -z), P(-x, wall, z), P(0f, h, z));
+            mesh.Triangle(roof, P(-x, wall, -z), P(0f, h, z), P(0f, h, -z));
+            mesh.Triangle(roof, P(0f, h, -z), P(0f, h, z), P(x, wall, z));
+            mesh.Triangle(roof, P(0f, h, -z), P(x, wall, z), P(x, wall, -z));
         }
 
         // Shared lit colours keep the material count bounded; surfaces match FeatureSurfaceAt exactly.
         public static Color Color(int material)
         {
-            if (material < 5 || material >= 9) return WorldLandmarkLayout.SurfaceColor((LandmarkSurfaceKind)material);
+            if (!IsBuilding(material)) return WorldLandmarkLayout.SurfaceColor((LandmarkSurfaceKind)material);
+            if (material >= 17) return material == 17 ? new Color(0.25f, 0.24f, 0.22f) : material == 18 ? new Color(0.38f, 0.25f, 0.18f) : new Color(0.46f, 0.48f, 0.48f);
             return material == 5 ? new Color(0.48f, 0.49f, 0.46f) : material == 6 ? new Color(0.31f, 0.34f, 0.33f)
                 : material == 7 ? new Color(0.63f, 0.65f, 0.64f) : new Color(0.50f, 0.28f, 0.20f);
         }
+
+        // Walls, roofs, tanks, brick and the three aged roof tints; these proxies fade to the imported models.
+        public static bool IsBuilding(int material) => material >= 5 && material <= 8 || material >= 17;
+
+        // Photo material that replaces a metal roof of this age on the imported models, near and instanced alike.
+        public static string RoofMaterial(int roof) => roof == 1 ? "RoofBarn" : roof == 2 ? "RustySteel" : roof == 3 ? "Galvanized" : "RoofMetal";
     }
 }
