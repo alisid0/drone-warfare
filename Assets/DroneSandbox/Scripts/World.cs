@@ -44,6 +44,8 @@ namespace DroneSandbox
             Water.Build(root);
             Reservoir.Build(root);
             Lap("water");
+            RoadSurface.Build(root);
+            Lap("roads");
             Farmland.Build(root, rng);
             Lap("fields");
             var scenery = new GameObject("Scenery").transform;
@@ -103,6 +105,13 @@ namespace DroneSandbox
 
         // ---- Bridge ----
 
+        // Instanced roadside trees consume the same logical tree slots and spacing grid as ordinary scenery.
+        public static bool ReserveRoadTree(Vector2 p)
+        {
+            if (TreeCount >= TreeLimit || Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge || Undergrowth.UnderTrees(p, 3.2f)) return false;
+            TreeCount++; Undergrowth.NoteTree(p); return true;
+        }
+
         static void BuildBridge(Transform parent, Vector2 p)
         {
             MapLayout.RoadField.Query(p.x, p.y, out _, out int segment);
@@ -127,7 +136,7 @@ namespace DroneSandbox
             bridge.position = new Vector3(p.x, deck - 0.3f, p.y);
             bridge.rotation = Quaternion.Euler(0f, Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg, 0f);
             var model = Art.TryModel("Scenery_Bridge", bridge);
-            if (model != null) model.transform.localScale = new Vector3(1f, 1f, Mathf.Clamp((span * 2f + 3f) / 18f, 0.9f, 1.8f));
+            if (model != null) model.transform.localScale = new Vector3(Mathf.Max(1f, MapLayout.RoadWidth(segment) * 2f / 5.2f), 1f, Mathf.Clamp((span * 2f + 3f) / 18f, 0.9f, 1.8f));
         }
 
         // ---- Villages ----
