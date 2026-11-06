@@ -5,7 +5,7 @@ namespace DroneSandbox
     // One world-space woodland recipe shared by trees, canopy geometry and the offline review harness.
     public static class ForestPattern
     {
-        public const float TreeStep = 10f;
+        public const float TreeStep = 5f;
 
         // A stand's shared age, species and tint keep neighbouring crowns related across streaming boundaries.
         public struct Stand
@@ -67,7 +67,7 @@ namespace DroneSandbox
         // Interpolate cover before adding metre-scale shoreline noise; keep scrub out of water and built land.
         public static float Edge(float x, float z)
         {
-            if (!WorldPlan.Inside(x, z)) return 0f;
+            if (!WorldPlan.Ready || !WorldPlan.Inside(x, z)) return 0f;
             if (WorldPlan.FeatureReserved(new Vector2(x, z), 8f)) return 0f;
             Cover cover = WorldPlan.CoverAt(x, z);
             if (cover != Cover.Forest && cover != Cover.Pasture && cover != Cover.Farmland) return 0f;
@@ -85,7 +85,10 @@ namespace DroneSandbox
         static float Wood(float x, float z) => WorldPlan.Inside(x, z) && WorldPlan.CoverAt(x, z) == Cover.Forest ? 1f : 0f;
 
         // Warped 240 m districts keep species in 100-400 m patches while smaller stands vary in age.
-        public static Stand At(float x, float z)
+        public static Stand At(float x, float z) => At(x, z, Edge(x, z));
+
+        // Sector reserves supply their own boundary, but share species, ages and glades with the world.
+        public static Stand At(float x, float z, float edge)
         {
             float sx = x + (Noise(x, z, 190f, 16) - 0.5f) * 130f;
             float sz = z + (Noise(x, z, 170f, 17) - 0.5f) * 130f;
@@ -100,17 +103,18 @@ namespace DroneSandbox
                     float distance = u * u + v * v;
                     if (distance < best) { best = distance; patch = Hash(a, b, 13); }
                 }
-            float conifer = Mathf.Lerp(0.18f, 0.72f, Mathf.SmoothStep(0f, 1f, (WorldPlan.Height(x, z) - 120f) / 220f));
+            float elevation = WorldPlan.Ready ? WorldPlan.Height(x, z) : 120f;
+            float conifer = Mathf.Lerp(0.18f, 0.72f, Mathf.SmoothStep(0f, 1f, (elevation - 120f) / 220f));
             float pick = (patch & 65535) / 65536f;
             int species = pick < conifer ? (pick < conifer * 0.6f ? 2 : 3) : (pick < conifer + (1f - conifer) * 0.28f ? 1 : 0);
             float ax = x + (Noise(x, z, 67f, 19) - 0.5f) * 26f;
             float az = z + (Noise(x, z, 71f, 20) - 0.5f) * 26f;
             float age = Noise(ax, az, 30f, 14);
             age = Mathf.Clamp01((age - 0.15f) / 0.7f);
-            float edge = Edge(x, z), glade = Glade(x, z), margin = Mathf.Min(edge, glade);
+            float glade = Glade(x, z), margin = Mathf.Min(edge, glade);
             float height = Mathf.Lerp(8f, 8f + 16f * age, margin);
             return new Stand { species = species, shade = (patch >> 20) % 3, height = height,
-                width = 1f, radius = Mathf.Lerp(2f, 3f + 4f * age, margin), cover = edge * glade };
+                width = 1f, radius = Mathf.Lerp(2f, 3.1f + 1.2f * age, margin), cover = edge * glade };
         }
 
         // The surface describes connected stands, not isolated bumps on a mesh sampling lattice.
@@ -118,15 +122,19 @@ namespace DroneSandbox
             stand.cover * stand.height * (0.72f + 0.16f * Noise(x, z, 27f, 31));
 
         // Random candidates fill hashing cells; a priority exclusion gives a reproducible Poisson hard core.
-        static Vector2 Candidate(int i, int j) =>
+        public static Vector2 Candidate(int i, int j) =>
             new Vector2((i + Unit(i, j, 41)) * TreeStep, (j + Unit(i, j, 42)) * TreeStep);
 
         // Spacing, clustered density, individual age and yaw are shared by cards, meshes and the canopy bake.
         public static bool Tree(int i, int j, out Vector2 world, out Stand stand)
+            => Tree(i, j, -1f, out world, out stand);
+
+        // A five-metre hashing cell is a candidate, never a planted row; priority thinning removes close pairs.
+        public static bool Tree(int i, int j, float edge, out Vector2 world, out Stand stand)
         {
             world = Candidate(i, j); stand = default;
             int priority = Hash(i, j, 46);
-            float spacing = 4f + 2f * Noise(world.x, world.y, 35f, 47);
+            const float spacing = 2.4f;
             for (int dz = -1; dz <= 1; dz++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
@@ -135,14 +143,14 @@ namespace DroneSandbox
                     if (other > priority || (other == priority && (dz > 0 || (dz == 0 && dx > 0)))) continue;
                     if ((Candidate(i + dx, j + dz) - world).sqrMagnitude < spacing * spacing) return false;
                 }
-            stand = At(world.x, world.y);
+            stand = At(world.x, world.y, edge < 0f ? Edge(world.x, world.y) : edge);
             float cluster = Noise(world.x, world.y, 24f, 48);
-            if (Unit(i, j, 43) >= stand.cover * Mathf.Lerp(0.58f, 1f, cluster)) return false;
+            if (Unit(i, j, 43) >= stand.cover * Mathf.Lerp(0.88f, 1f, cluster)) return false;
             float individual = Unit(i, j, 49);
             stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 7f, 8f, 24f);
-            stand.radius = Mathf.Clamp(stand.radius * (0.7f + individual * 0.6f), 2f, 7f);
+            stand.radius = Mathf.Clamp(stand.radius * (0.85f + individual * 0.3f), 2f, 4.6f);
             // Isolated old trees and groups of saplings interrupt the stand's average silhouette.
-            if (Unit(i, j, 50) > 0.97f && stand.cover > 0.95f) { stand.radius = 7f; stand.height = 23f; }
+            if (Unit(i, j, 50) > 0.97f && stand.cover > 0.95f) { stand.radius = 4.6f; stand.height = 23f; }
             stand.width = stand.radius / (stand.height * ForestPalette.RadiusPerHeight[stand.species]);
             return true;
         }
