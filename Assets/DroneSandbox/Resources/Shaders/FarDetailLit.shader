@@ -362,6 +362,7 @@ Shader "DroneSandbox/GroundDetail"
             Cull [_CullMode]
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
@@ -402,6 +403,7 @@ Shader "DroneSandbox/GroundDetail"
             Cull Off
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
@@ -452,6 +454,7 @@ Shader "DroneSandbox/GroundDetail"
             }
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -539,6 +542,7 @@ Shader "DroneSandbox/GroundDetail"
             Cull Off
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -616,6 +620,7 @@ Shader "DroneSandbox/GroundDetail"
             ColorMask 0
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -660,6 +665,7 @@ Shader "DroneSandbox/GroundDetail"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -725,6 +731,7 @@ Shader "DroneSandbox/GroundDetail"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -793,6 +800,7 @@ Shader "DroneSandbox/GroundDetail"
             ZWrite On
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -855,6 +863,7 @@ Shader "DroneSandbox/GroundDetail"
             ZTest [_ZTestTransparent]
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -986,6 +995,7 @@ Shader "DroneSandbox/GroundDetail"
             ColorMask [_ColorMaskTransparentVelTwo] 2
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -1107,6 +1117,7 @@ Shader "DroneSandbox/GroundDetail"
             ColorMask 0
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
@@ -1144,6 +1155,7 @@ Shader "DroneSandbox/GroundDetail"
             ZTest LEqual // If the object have already been render in depth prepass, it will re-render to tag stencil
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             // enable dithering LOD crossfade
@@ -1174,6 +1186,7 @@ Shader "DroneSandbox/GroundDetail"
             ZTest LEqual
 
             HLSLPROGRAM
+            #pragma multi_compile_local_fragment _ _FarRegionChunk
 
             #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support

@@ -97,6 +97,7 @@ namespace DroneSandbox.EditorTools
             shader = shader.Replace("Shader \"HDRP/Lit\"", "Shader \"DroneSandbox/GroundDetail\"");
             int properties = shader.IndexOf('{', shader.IndexOf("Properties", StringComparison.Ordinal)) + 1;
             shader = shader.Insert(properties, "\n        _FarGroundControl(\"Surface and direction\", 2D) = \"black\" {}\n        _FarGroundAlbedo(\"Shared ground albedo\", 2DArray) = \"\" {}\n        _FarGroundNormal(\"Shared ground normals\", 2DArray) = \"\" {}\n");
+            shader = shader.Replace("HLSLPROGRAM", "HLSLPROGRAM\n            #pragma multi_compile_local_fragment _ _FarRegionChunk");
             shader = shader.Replace(Lit + "LitData.hlsl", Shaders + "FarDetailLitData.hlsl");
             const string notice = "// Generated from the installed HDRP 17.6 Lit by FarDetailShaderSetup. Unity source: see ThirdPartyNotices.txt.\n";
             Write(Shaders + "FarDetailLit.shader", notice + shader);

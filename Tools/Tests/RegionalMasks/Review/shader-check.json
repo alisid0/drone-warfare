@@ -1,0 +1,31 @@
+{
+  "installedHlslFiles": 523,
+  "checkedSymbols": [
+    "FarRegionBackground",
+    "FarRegionColour",
+    "FarRegionIndex",
+    "FarRegionReady",
+    "FarRegionWeight",
+    "_FarGroundAlbedo",
+    "_FarGroundControl",
+    "_FarGroundNormal",
+    "_FarRegionAlbedo",
+    "_FarRegionChunk",
+    "_FarRegionEnabled",
+    "_FarRegionPages",
+    "_FarRegionTime",
+    "_FarWorldPicture",
+    "sampler_FarGroundAlbedo",
+    "sampler_FarGroundNormal",
+    "sampler_FarRegionAlbedo",
+    "sampler_FarWorldPicture"
+  ],
+  "macroCollisions": [],
+  "variants": [
+    "tile colour",
+    "tile normal",
+    "chunk colour",
+    "chunk normal"
+  ],
+  "limit": "D3D syntax and installed macro census only. Real HDRP pass/variant compilation must run in Claude integration."
+}

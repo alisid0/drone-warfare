@@ -13,8 +13,10 @@ namespace DroneSandbox
     {
         public const int MaxTiles = 25;
         const float Reach = 1500f, KeepSeconds = 15f, ColliderReach = 500f;
-        const double BudgetMs = 0.8;
+        const double BudgetMs = 0.35;
         static FarDetail instance;
+        public static int RegionalCommitted => instance?.regional?.Committed ?? 0;
+        public static double RegionalWorkerMs => instance?.regional?.LastWorkerMs ?? 0;
         public static int Live => instance != null ? instance.live.Count : 0;
         public static int Committed { get; private set; }
         public static int PressureEvictions { get; private set; }
@@ -58,12 +60,12 @@ namespace DroneSandbox
         readonly List<FarDetailChunks.Chunk> changed = new List<FarDetailChunks.Chunk>();
         readonly Stopwatch frameTimer = new Stopwatch();
         FarDetailData plan;
+        FarDetailRegional regional;
         Task<Result> worker;
         Result ready;
         Slot incoming, outgoing;
         Request pending;
         float[] roughness;
-        Vector2[] coverPositions;
         int sampleRow, stage, chunkStage, chunkIndex;
         bool sampling;
         Vector2 origin, eye, feed, velocity, feedVelocity, previousEye, previousFeed;
@@ -76,8 +78,9 @@ namespace DroneSandbox
         {
             if (instance == null) { FarDetailChunks.Clear(); return; }
             instance.enabled = false;
+            instance.regional?.Clear(); instance.regional = null;
             instance.worker = null; instance.ready = null; instance.sampling = false;
-            instance.roughness = null; instance.coverPositions = null;
+            instance.roughness = null;
             foreach (var s in instance.live.Values) Release(s);
             foreach (var s in instance.pool) Release(s);
             if (instance.incoming != null) Release(instance.incoming);
@@ -92,6 +95,7 @@ namespace DroneSandbox
             instance = parent.GetComponent<FarDetail>() ?? parent.gameObject.AddComponent<FarDetail>();
             instance.origin = FarTerrain.Origin;
             instance.plan = WorldPlan.CaptureDetail(FarDetailChunks.Heights());
+            instance.regional = new FarDetailRegional(instance.plan);
             instance.hasPrevious = false; instance.previousDrone = null; instance.nextPlan = 0f;
             for (int i = 0; i <= MaxTiles; i++) instance.pool.Push(instance.MakeSlot(parent, i));
             ResetMetrics();
@@ -153,12 +157,14 @@ namespace DroneSandbox
             // Collision gets a separate stage even when fast workers finish before the next frame; otherwise
             // a continuously busy upload queue could starve collider activation throughout a long flight.
             bool collisionChanged = timer.Elapsed.TotalMilliseconds < 0.25 && UpdateCollider();
+            bool tileWork = false;
             if (!collisionChanged && timer.Elapsed.TotalMilliseconds < BudgetMs)
             {
-                if (sampling) Sample(timer);
-                else if (ready != null) Upload();
+                if (sampling) { tileWork = true; Sample(timer); }
+                else if (ready != null) { tileWork = true; Upload(); }
                 else if (worker == null) Schedule();
             }
+            regional?.Tick(eye, !tileWork && !collisionChanged && timer.Elapsed.TotalMilliseconds < .20);
             double elapsed = timer.Elapsed.TotalMilliseconds;
             WorstCommitMs = Math.Max(WorstCommitMs, elapsed); TotalCommitMs += elapsed; CommitFrames++;
             if (elapsed > 2.0) BudgetOverruns++;
@@ -301,7 +307,6 @@ namespace DroneSandbox
             {
                 pending = next.Value; incoming = pool.Pop(); incoming.x = pending.x; incoming.z = pending.z;
                 roughness = new float[FarDetailData.Samples * FarDetailData.Samples]; sampleRow = 0; sampling = true;
-                coverPositions = new Vector2[FarDetailData.TextureSize * FarDetailData.TextureSize];
             }
             else Launch();
         }
@@ -314,20 +319,9 @@ namespace DroneSandbox
                 int n = FarDetailData.Samples;
                 if (sampleRow < n)
                     for (int i = 0; i < n; i++) roughness[sampleRow * n + i] = FarDetailData.Roughness(pending.x * 512f + i * 4f, pending.z * 512f + sampleRow * 4f);
-                else
-                {
-                    int row = sampleRow - n;
-                    for (int i = 0; i < FarDetailData.TextureSize; i++)
-                    {
-                        float x = pending.x * 512f + (i - 0.5f) * 2f, z = pending.z * 512f + (row - 0.5f) * 2f;
-                        // These are FarTerrain.PaintWorld's exact cover drifts, sampled on the main thread.
-                        coverPositions[row * FarDetailData.TextureSize + i] = new Vector2(x + 44f * (Mathf.PerlinNoise(x / 70f, z / 70f + 31f) - 0.5f),
-                            z + 44f * (Mathf.PerlinNoise(x / 70f + 57f, z / 70f) - 0.5f));
-                    }
-                }
                 sampleRow++;
-            } while (sampleRow < FarDetailData.Samples + FarDetailData.TextureSize && timer.Elapsed.TotalMilliseconds < BudgetMs);
-            if (sampleRow == FarDetailData.Samples + FarDetailData.TextureSize) { sampling = false; Launch(); }
+            } while (sampleRow < FarDetailData.Samples && timer.Elapsed.TotalMilliseconds < BudgetMs);
+            if (sampleRow == FarDetailData.Samples) { sampling = false; Launch(); }
         }
 
         // Freeze all transaction inputs before dispatch; the worker captures no live collections or engine objects.
@@ -342,15 +336,15 @@ namespace DroneSandbox
                    outgoing != null && FarDetailChunks.Overlaps(c.corner, new FarDetailChunks.Area { x = outgoing.x, z = outgoing.z })) changed.Add(c);
             var sources = new FarDetailChunks.Geometry[changed.Count]; var corners = new Vector2[changed.Count];
             for (int i = 0; i < changed.Count; i++) { sources[i] = changed[i].source; corners[i] = changed[i].corner; }
-            var capturedPlan = plan; var capturedRough = roughness; var capturedCover = coverPositions; var areaArray = areas.ToArray();
+            var capturedPlan = plan; var capturedRough = roughness; var areaArray = areas.ToArray();
             bool add = incoming != null; int x = add ? incoming.x : 0, z = add ? incoming.z : 0;
             worker = Task.Run(() =>
             {
-                var result = new Result { tile = add ? capturedPlan.Build(x, z, capturedRough, capturedCover) : null, chunks = new FarDetailChunks.Geometry[sources.Length] };
+                var result = new Result { tile = add ? capturedPlan.Build(x, z, capturedRough, null) : null, chunks = new FarDetailChunks.Geometry[sources.Length] };
                 for (int i = 0; i < sources.Length; i++) result.chunks[i] = FarDetailChunks.Cut(sources[i], corners[i], areaArray, capturedPlan);
                 return result;
             });
-            roughness = null; coverPositions = null;
+            roughness = null;
         }
 
         // One bounded API stage per frame: no recalculation, no full-resolution collider cooking, no upload burst.
@@ -435,7 +429,7 @@ namespace DroneSandbox
         void Abort()
         {
             if (incoming != null) pool.Push(incoming);
-            incoming = outgoing = null; ready = null; sampling = false; roughness = null; coverPositions = null; changed.Clear();
+            incoming = outgoing = null; ready = null; sampling = false; roughness = null; changed.Clear();
         }
 
         // Enable at most one coarser collider per frame and remove distant ones without recooking.
