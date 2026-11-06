@@ -1,0 +1,2 @@
+geometry: 67116 near / 6510 far triangles
+TownOutskirts: 133 houses, 445 resident prop renderers; layout+world 1.78s, height 0.10s, village 0.069s; peak 276 MiB
