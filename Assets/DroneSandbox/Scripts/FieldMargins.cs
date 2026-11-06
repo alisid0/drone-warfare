@@ -35,12 +35,13 @@ namespace DroneSandbox
                     int count = Math.Max(1, (int)Math.Ceiling((b-a).magnitude / 3f));
                     Vector2 inward = new Vector2(-(b-a).y,(b-a).x).normalized;
                     if (Vector2.Dot(inward, f.center-(a+b)*.5f) < 0f) inward = -inward;
+                    // A fragment edge follows one parent edge, so its use is looked up once, a little inside its middle.
+                    int use = FieldAppearance.EdgeUse(whole.edges, FieldAppearance.NearestEdge(whole, (a+b)*.5f + inward*.5f));
                     for (int i = 0; i < count; i++)
                     {
                         Vector2 x = Vector2.Lerp(a,b,i/(float)count), y = Vector2.Lerp(a,b,(i+1f)/count), mid = (x+y)*.5f;
                         float existing = FieldAppearance.Edge(whole,mid);
                         Vector2 world = mid + origin;
-                        int use = FieldAppearance.EdgeUse(whole.edges, FieldAppearance.NearestEdge(whole, mid));
                         float width = FieldAppearance.MarginFor(use, world.x, world.y) - Math.Max(0f,existing);
                         if (width <= .1f || existing < -1f) continue;
                         var batch = Get(blocks,mid);
