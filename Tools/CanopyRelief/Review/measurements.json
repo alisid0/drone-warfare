@@ -1,0 +1,623 @@
+{
+  "before-deep": {
+    "metrics": {
+      "sector": "deep",
+      "logical": 104889,
+      "full": 12,
+      "reduced": 374,
+      "cards": 4656,
+      "coverageFrames": 7,
+      "nearRefinementFrames": -1,
+      "jumpCoverageFrames": 22,
+      "jumpRefinementFrames": 150,
+      "flight": {
+        "managedP95Ms": 1.2666,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.4195,
+        "blankFrames": 0
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 532856,
+      "peakCards": 555,
+      "peakFull": 31,
+      "peakReduced": 177,
+      "peakCanopyTriangles": 61709,
+      "peakCombinedTriangles": 591429,
+      "buildMean": 0.0022716666924477774,
+      "fastFrames": 360,
+      "selectionStarts": 192,
+      "selectionCancels": 0,
+      "selectionCompletes": 192,
+      "refinementStarts": 0,
+      "cancelledBuilds": 1,
+      "deferred": 255,
+      "generationMean": 0.10602722,
+      "selectionMean": 0.12448389,
+      "submissionMean": 0.00064305554,
+      "canopyMean": 0.008606667
+    },
+    "screenEarly": {
+      "woodedBins": 134,
+      "binsWithCrowns": 33,
+      "logicalStems": 9472,
+      "submittedRoots": 836
+    }
+  },
+  "after-deep": {
+    "metrics": {
+      "sector": "deep",
+      "logical": 104889,
+      "full": 10,
+      "reduced": 157,
+      "cards": 3678,
+      "coverageFrames": 19,
+      "nearRefinementFrames": -1,
+      "jumpCoverageFrames": 80,
+      "jumpRefinementFrames": -1,
+      "flight": {
+        "managedP95Ms": 1.4118,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.6288,
+        "blankFrames": 0
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 386120,
+      "peakCards": 549,
+      "peakFull": 13,
+      "peakReduced": 128,
+      "peakCanopyTriangles": 74692,
+      "peakCombinedTriangles": 459696,
+      "buildMean": 0.003987222214022444,
+      "fastFrames": 360,
+      "selectionStarts": 149,
+      "selectionCancels": 1,
+      "selectionCompletes": 149,
+      "refinementStarts": 0,
+      "cancelledBuilds": 1,
+      "deferred": 255,
+      "generationMean": 0.13896638,
+      "selectionMean": 0.17292972,
+      "submissionMean": 0.003076389,
+      "canopyMean": 0.015089166
+    },
+    "recipe": {
+      "sampleCount": 65536,
+      "gladeInteriorFraction": 0.08932495,
+      "minimumStandHeight": 11.999935,
+      "maximumStandHeight": 24,
+      "minimumStandRadius": 2.7999926,
+      "maximumStandRadius": 4.6,
+      "ageDelta8m": 0.053034407658372806,
+      "ageDelta96m": 0.38383376497392596
+    },
+    "floor-input": {
+      "persistent": 104889,
+      "decorative": 0,
+      "omittedFromVarrowFloor": 0
+    },
+    "screenEarly": {
+      "woodedBins": 134,
+      "binsWithCrowns": 33,
+      "logicalStems": 9335,
+      "submittedRoots": 831
+    }
+  },
+  "before-border": {
+    "metrics": {
+      "sector": "border",
+      "logical": 104462,
+      "full": 5,
+      "reduced": 239,
+      "cards": 4819,
+      "coverageFrames": 5,
+      "nearRefinementFrames": -1,
+      "jumpCoverageFrames": 28,
+      "jumpRefinementFrames": 90,
+      "flight": {
+        "managedP95Ms": 1.1805,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.4307,
+        "blankFrames": 0
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 556320,
+      "peakCards": 588,
+      "peakFull": 27,
+      "peakReduced": 185,
+      "peakCanopyTriangles": 107903,
+      "peakCombinedTriangles": 664223,
+      "buildMean": 2.7777777076052087e-05,
+      "fastFrames": 360,
+      "selectionStarts": 191,
+      "selectionCancels": 0,
+      "selectionCompletes": 191,
+      "refinementStarts": 0,
+      "cancelledBuilds": 1,
+      "deferred": 255,
+      "generationMean": 0.08572944,
+      "selectionMean": 0.12752834,
+      "submissionMean": 0.0007827778,
+      "canopyMean": 0.0063222223
+    },
+    "screenEarly": {
+      "woodedBins": 135,
+      "binsWithCrowns": 26,
+      "logicalStems": 9535,
+      "submittedRoots": 390
+    }
+  },
+  "after-border": {
+    "metrics": {
+      "sector": "border",
+      "logical": 104462,
+      "full": 18,
+      "reduced": 94,
+      "cards": 3863,
+      "coverageFrames": 19,
+      "nearRefinementFrames": -1,
+      "jumpCoverageFrames": 92,
+      "jumpRefinementFrames": -1,
+      "flight": {
+        "managedP95Ms": 1.3528,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.5956,
+        "blankFrames": 0
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 358832,
+      "peakCards": 595,
+      "peakFull": 3,
+      "peakReduced": 119,
+      "peakCanopyTriangles": 136678,
+      "peakCombinedTriangles": 489262,
+      "buildMean": 3.166666596775435e-05,
+      "fastFrames": 360,
+      "selectionStarts": 160,
+      "selectionCancels": 0,
+      "selectionCompletes": 160,
+      "refinementStarts": 0,
+      "cancelledBuilds": 1,
+      "deferred": 255,
+      "generationMean": 0.10599972,
+      "selectionMean": 0.14463334,
+      "submissionMean": 0.002556389,
+      "canopyMean": 0.009533334
+    },
+    "recipe": {
+      "sampleCount": 65536,
+      "gladeInteriorFraction": 0.08932495,
+      "minimumStandHeight": 11.999935,
+      "maximumStandHeight": 24,
+      "minimumStandRadius": 2.7999926,
+      "maximumStandRadius": 4.6,
+      "ageDelta8m": 0.053034407658372806,
+      "ageDelta96m": 0.38383376497392596
+    },
+    "floor-input": {
+      "persistent": 104462,
+      "decorative": 0,
+      "omittedFromVarrowFloor": 0
+    },
+    "screenEarly": {
+      "woodedBins": 135,
+      "binsWithCrowns": 26,
+      "logicalStems": 9447,
+      "submittedRoots": 388
+    }
+  },
+  "before-varrow-base": {
+    "metrics": {
+      "sector": "varrow-base",
+      "logical": 9066,
+      "full": 0,
+      "reduced": 512,
+      "cards": 72,
+      "coverageFrames": 3,
+      "nearRefinementFrames": 33,
+      "jumpCoverageFrames": 26,
+      "jumpRefinementFrames": 418,
+      "flight": {
+        "managedP95Ms": 0.2379,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.4082,
+        "blankFrames": 263
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 502336,
+      "peakCards": 548,
+      "peakFull": 24,
+      "peakReduced": 166,
+      "peakCanopyTriangles": 71036,
+      "peakCombinedTriangles": 548383,
+      "buildMean": 0.0022502777956510222,
+      "fastFrames": 360,
+      "selectionStarts": 416,
+      "selectionCancels": 0,
+      "selectionCompletes": 415,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.09081778,
+      "selectionMean": 0.10367722,
+      "submissionMean": 0.00033194444,
+      "canopyMean": 0.008323611
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1223.5071
+    },
+    "screenEarly": {
+      "woodedBins": 26,
+      "binsWithCrowns": 26,
+      "logicalStems": 362,
+      "submittedRoots": 362
+    }
+  },
+  "after-varrow-base": {
+    "metrics": {
+      "sector": "varrow-base",
+      "logical": 9066,
+      "full": 0,
+      "reduced": 374,
+      "cards": 335,
+      "coverageFrames": 7,
+      "nearRefinementFrames": 87,
+      "jumpCoverageFrames": 84,
+      "jumpRefinementFrames": 206,
+      "flight": {
+        "managedP95Ms": 0.186,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.4163,
+        "blankFrames": 263
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 384000,
+      "peakCards": 542,
+      "peakFull": 13,
+      "peakReduced": 128,
+      "peakCanopyTriangles": 93647,
+      "peakCombinedTriangles": 443526,
+      "buildMean": 0.019931944357833548,
+      "fastFrames": 360,
+      "selectionStarts": 416,
+      "selectionCancels": 0,
+      "selectionCompletes": 415,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.056298055,
+      "selectionMean": 0.07789889,
+      "submissionMean": 0.00031833333,
+      "canopyMean": 0.025654722
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1335.9046
+    },
+    "recipe": {
+      "sampleCount": 65536,
+      "gladeInteriorFraction": 0.08932495,
+      "minimumStandHeight": 11.999935,
+      "maximumStandHeight": 24,
+      "minimumStandRadius": 2.7999926,
+      "maximumStandRadius": 4.6,
+      "ageDelta8m": 0.053034407658372806,
+      "ageDelta96m": 0.38383376497392596
+    },
+    "floor-input": {
+      "persistent": 9066,
+      "decorative": 207,
+      "omittedFromVarrowFloor": 207
+    },
+    "screenEarly": {
+      "woodedBins": 33,
+      "binsWithCrowns": 33,
+      "logicalStems": 357,
+      "submittedRoots": 357
+    }
+  },
+  "before-varrow-bridge": {
+    "metrics": {
+      "sector": "varrow-bridge",
+      "logical": 9066,
+      "full": 6,
+      "reduced": 350,
+      "cards": 11,
+      "coverageFrames": 1,
+      "nearRefinementFrames": 27,
+      "jumpCoverageFrames": 28,
+      "jumpRefinementFrames": 498,
+      "flight": {
+        "managedP95Ms": 0.2812,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.5324,
+        "blankFrames": 289
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 523400,
+      "peakCards": 263,
+      "peakFull": 14,
+      "peakReduced": 174,
+      "peakCanopyTriangles": 56315,
+      "peakCombinedTriangles": 569447,
+      "buildMean": 0.0030302778201277965,
+      "fastFrames": 360,
+      "selectionStarts": 451,
+      "selectionCancels": 0,
+      "selectionCompletes": 449,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.13847722,
+      "selectionMean": 0.13840389,
+      "submissionMean": 0.00046666668,
+      "canopyMean": 0.011123056
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1362.7715
+    },
+    "screenEarly": {
+      "woodedBins": 17,
+      "binsWithCrowns": 17,
+      "logicalStems": 225,
+      "submittedRoots": 225
+    }
+  },
+  "after-varrow-bridge": {
+    "metrics": {
+      "sector": "varrow-bridge",
+      "logical": 9066,
+      "full": 23,
+      "reduced": 286,
+      "cards": 179,
+      "coverageFrames": 3,
+      "nearRefinementFrames": 57,
+      "jumpCoverageFrames": 82,
+      "jumpRefinementFrames": 214,
+      "flight": {
+        "managedP95Ms": 0.1262,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.5196,
+        "blankFrames": 289
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 388288,
+      "peakCards": 358,
+      "peakFull": 6,
+      "peakReduced": 129,
+      "peakCanopyTriangles": 71170,
+      "peakCombinedTriangles": 447814,
+      "buildMean": 0.022946110984452792,
+      "fastFrames": 360,
+      "selectionStarts": 459,
+      "selectionCancels": 0,
+      "selectionCompletes": 459,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.11421166,
+      "selectionMean": 0.106165,
+      "submissionMean": 0.0003052778,
+      "canopyMean": 0.028890556
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1377.3049
+    },
+    "recipe": {
+      "sampleCount": 65536,
+      "gladeInteriorFraction": 0.08932495,
+      "minimumStandHeight": 11.999935,
+      "maximumStandHeight": 24,
+      "minimumStandRadius": 2.7999926,
+      "maximumStandRadius": 4.6,
+      "ageDelta8m": 0.053034407658372806,
+      "ageDelta96m": 0.38383376497392596
+    },
+    "floor-input": {
+      "persistent": 9066,
+      "decorative": 207,
+      "omittedFromVarrowFloor": 207
+    },
+    "screenEarly": {
+      "woodedBins": 16,
+      "binsWithCrowns": 16,
+      "logicalStems": 225,
+      "submittedRoots": 225
+    }
+  },
+  "before-varrow-farmland": {
+    "metrics": {
+      "sector": "varrow-farmland",
+      "logical": 9066,
+      "full": 0,
+      "reduced": 206,
+      "cards": 10,
+      "coverageFrames": 1,
+      "nearRefinementFrames": 35,
+      "jumpCoverageFrames": 24,
+      "jumpRefinementFrames": 598,
+      "flight": {
+        "managedP95Ms": 0.5975,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.7718,
+        "blankFrames": 293
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 544280,
+      "peakCards": 621,
+      "peakFull": 19,
+      "peakReduced": 181,
+      "peakCanopyTriangles": 56315,
+      "peakCombinedTriangles": 590327,
+      "buildMean": 0.0037363889369468476,
+      "fastFrames": 360,
+      "selectionStarts": 404,
+      "selectionCancels": 0,
+      "selectionCompletes": 404,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.1547314,
+      "selectionMean": 0.17583917,
+      "submissionMean": 0.0019555555,
+      "canopyMean": 0.12915084
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1745.1366
+    },
+    "screenEarly": {
+      "woodedBins": 10,
+      "binsWithCrowns": 10,
+      "logicalStems": 233,
+      "submittedRoots": 233
+    }
+  },
+  "after-varrow-farmland": {
+    "metrics": {
+      "sector": "varrow-farmland",
+      "logical": 9066,
+      "full": 0,
+      "reduced": 183,
+      "cards": 98,
+      "coverageFrames": 3,
+      "nearRefinementFrames": 55,
+      "jumpCoverageFrames": 86,
+      "jumpRefinementFrames": 248,
+      "flight": {
+        "managedP95Ms": 0.1995,
+        "blankFrames": 0
+      },
+      "lowFlight": {
+        "metresPerSecond": 240,
+        "swiftHeight": 150,
+        "cameraHeight": 50.18,
+        "managedP95Ms": 0.4741,
+        "blankFrames": 292
+      },
+      "nativeUploadsAndGpuMeasured": false
+    },
+    "flight": {
+      "peakTriangles": 367008,
+      "peakCards": 620,
+      "peakFull": 17,
+      "peakReduced": 122,
+      "peakCanopyTriangles": 71170,
+      "peakCombinedTriangles": 426534,
+      "buildMean": 0.023288055359262216,
+      "fastFrames": 360,
+      "selectionStarts": 442,
+      "selectionCancels": 0,
+      "selectionCompletes": 442,
+      "refinementStarts": 0,
+      "cancelledBuilds": 0,
+      "deferred": 0,
+      "generationMean": 0.07887445,
+      "selectionMean": 0.08180222,
+      "submissionMean": 0.0002011111,
+      "canopyMean": 0.028955834
+    },
+    "startup": {
+      "densePatches": 224,
+      "patchesWithCanopy": 224,
+      "missed": [],
+      "buildMs": 1505.7376
+    },
+    "recipe": {
+      "sampleCount": 65536,
+      "gladeInteriorFraction": 0.08932495,
+      "minimumStandHeight": 11.999935,
+      "maximumStandHeight": 24,
+      "minimumStandRadius": 2.7999926,
+      "maximumStandRadius": 4.6,
+      "ageDelta8m": 0.053034407658372806,
+      "ageDelta96m": 0.38383376497392596
+    },
+    "floor-input": {
+      "persistent": 9066,
+      "decorative": 207,
+      "omittedFromVarrowFloor": 207
+    },
+    "screenEarly": {
+      "woodedBins": 10,
+      "binsWithCrowns": 10,
+      "logicalStems": 233,
+      "submittedRoots": 233
+    }
+  }
+}
