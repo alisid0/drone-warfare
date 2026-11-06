@@ -1,0 +1,33 @@
+{
+  "tiles": [
+    {
+      "name": "road-farm",
+      "x": -12854.826,
+      "z": 16772.557,
+      "medianMs": 49.4416,
+      "worstMs": 52.7576
+    },
+    {
+      "name": "farmland-forest",
+      "x": -9000,
+      "z": -12000,
+      "medianMs": 45.0341,
+      "worstMs": 46.2637
+    },
+    {
+      "name": "village",
+      "x": -11057.904,
+      "z": 4400.2354,
+      "medianMs": 44.9651,
+      "worstMs": 46.578
+    },
+    {
+      "name": "river",
+      "x": -12063.079,
+      "z": 16067.159,
+      "medianMs": 67.7072,
+      "worstMs": 70.1619
+    }
+  ],
+  "gutterEquality": true
+}

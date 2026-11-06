@@ -1,0 +1,8 @@
+{
+  "frames": 1575,
+  "blockedFrames": 524,
+  "initialPages": 81,
+  "newPagesAfterDiagonalMove": 17,
+  "stalePublication": false,
+  "note": "Real state machine, synchronized workers, managed engine storage. Does not measure native upload, main-thread or GPU time."
+}
