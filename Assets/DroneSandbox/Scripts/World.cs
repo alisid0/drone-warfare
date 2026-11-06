@@ -240,6 +240,12 @@ namespace DroneSandbox
                 int used = Features.VillagePlots(roots[v], plots, budget);
                 VillagePropRenderers += used; budgets[roots[v]] = budget - used;
             }
+            // Shared fixtures first, so garden clutter cannot spend the allowance they need.
+            for (int v = 0; v < roots.Length; v++)
+            {
+                Utility(roots[v], v, occupiedPlots, houses.TryGetValue(roots[v], out int count) ? count : 0, budgets);
+                Orchards(roots[v], v, occupiedPlots, budgets);
+            }
             foreach (var b in buildings)
             {
                 if (b.model == "Scenery_Church")
@@ -270,6 +276,41 @@ namespace DroneSandbox
                 budgets[root] = budget;
             }
             Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
+        }
+
+        // Larger villages have a transformer kiosk, and the largest a pump house, at a plot corner by the street:
+        // spare fringe land first, then a garden's front corner away from its drive.
+        static void Utility(Transform root, int village, List<VillagePlot> plots, int houses, Dictionary<Transform, int> budgets)
+        {
+            if (houses < 14 || !budgets.TryGetValue(root, out int budget)) return;
+            var models = houses >= 28 ? new[] { "Scenery_TransformerKiosk", "Scenery_PumpHouse" } : new[] { "Scenery_TransformerKiosk" };
+            int placed = 0;
+            for (int pass = 0; pass < 2 && placed < models.Length; pass++)
+                foreach (var p in plots)
+                {
+                    if (placed >= models.Length) break;
+                    if (p.owner != village || (pass == 0 ? p.landUse < 6 : p.square || p.farm || p.landUse != 0)) continue;
+                    float radius = models[placed] == "Scenery_PumpHouse" ? 3.4f : 2.2f, u = -p.frontage * .5f + radius + .7f, v = radius + .7f;
+                    float yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg;
+                    if (VillageProp(models[placed], p.Point(u, v), yaw, 1f, radius, root, ref budget)) placed++;
+                }
+            budgets[root] = budget;
+        }
+
+        // Small fringe orchards: up to six fruit trees on their painted 7 m rows, from the garden tree allowance.
+        static void Orchards(Transform root, int village, List<VillagePlot> plots, Dictionary<Transform, int> budgets)
+        {
+            if (!budgets.TryGetValue(root, out int budget)) return;
+            foreach (var p in plots)
+            {
+                if (p.owner != village || p.landUse != 7) continue;
+                int planted = 0;
+                for (float u = -p.frontage * .5f + 4.8f; u < p.frontage * .5f - 2f && planted < 6; u += 7f)
+                    for (float v = 6f; v < p.depth - 3f && planted < 6; v += 8f)
+                        if (gardenTrees < 120 && VillageProp("Scenery_Tree", p.Point(u, v), (p.identity + planted * 47) % 360,
+                            .32f + (p.identity >> (planted % 8) & 3) * .025f, 2f, root, ref budget)) { gardenTrees++; planted++; }
+            }
+            budgets[root] = budget;
         }
 
         // Test entire gardens before building: otherwise a clear roof can leave a hedge crossing a lane or a yard.
@@ -358,6 +399,17 @@ namespace DroneSandbox
                 VillageBuildingAt(models[i], p, (yard - p).normalized, 1f, yard, center, root, village, buildings);
             }
             VillagePath(yard - along * 6f, yard + along * 6f, 12f, yard);
+            // A working yard: churned mud where machinery turns, and the muck heap on whichever side has room.
+            Ground.Paint(yard - along * 5f + across * side * 2f, yard + along * 4f - across * side * 1f, 8f, .8f, 6);
+            foreach (var offset in new[] { new Vector2(-6f, 10f), new Vector2(6f, -11f), new Vector2(-20f, 8f), new Vector2(19f, 9f) })
+            {
+                Vector2 heap = yard + along * offset.x + across * side * offset.y;
+                if (!VillageRoom(heap, 4.4f, false)) continue;
+                Place("Scenery_MuckHeap", new Vector3(heap.x, 0f, heap.y), Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg, 1f, 0.1f, root);
+                villagePlots.Add((heap, 4.4f));
+                Ground.Paint(heap - along * 4f, heap + along * 4f, 7f, .7f, 6);
+                break;
+            }
             // The drive goes through the gap beside the front shed.
             Vector2 turn = yard - across * side * 4f, gate = yard + along * 6f - across * side * 8f;
             VillagePath(yard, turn, 2.5f, yard);
@@ -370,7 +422,7 @@ namespace DroneSandbox
         // Everything stays inside the village's strip along its streets (MapLayout.NearVillage).
         static bool VillageRoom(Vector2 p, float radius, bool keepPaths)
         {
-            if (!MapLayout.NearVillage(p, -radius)) return false;
+            if (!MapLayout.NearVillage(p, -radius) && !InFringe(p, radius)) return false;
             foreach (var plot in villagePlots)
                 if (Vector2.Distance(p, plot.at) < radius + plot.radius + 0.6f) return false;
             if (!Buildable(p) || (keepPaths && Ground.Worn(p))) return false;
@@ -387,6 +439,13 @@ namespace DroneSandbox
                 }
             }
             return true;
+        }
+
+        // Orchard trees and utility huts may also stand inside the village's paddocks, orchards and rough grass.
+        static bool InFringe(Vector2 p, float inset)
+        {
+            var plan = MapLayout.Plan;
+            return plan.world != null && MapLayout.DetailPlan != null && MapLayout.DetailPlan.villages.InFringe(p + plan.world.center, inset);
         }
 
         // Wears only dry, unfarmed access routes, stopping paths from crossing another building's footprint.
@@ -442,7 +501,10 @@ namespace DroneSandbox
                 {
                     Ground.Wear(barn - p.along * 6f, barn + p.along * 6f, 14f, .9f);
                     Ground.Wear(p.Point(p.DriveU, p.YardStart), barn - p.outward * 6f, 3.2f, .9f);
+                    // Machinery churns the ground in front of the barn doors (VillagePlot.FarmYard paints the same mud).
+                    Ground.Paint(barn - p.outward * 12f, barn - p.outward * 7f, 13f, .85f, 6);
                 }
+                VillageProp("Scenery_MuckHeap", p.MuckHeap, yaw + 90f, 1f, 4.4f, root, ref budget, false);
             }
             if (p.shed)
             {
