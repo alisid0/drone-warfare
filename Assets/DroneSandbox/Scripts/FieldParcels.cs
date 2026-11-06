@@ -42,6 +42,11 @@ namespace DroneSandbox
             Districts.Clear();
             districtLand = parcelLand = 0f;
             DistrictCoverage = 0f;
+            if (source != null)
+            {
+                DistrictCoverage = FarFieldSector.Plan(isBlocked);
+                return;
+            }
             Vector2 along = DominantDirection(), across = new Vector2(-along.y, along.x);
             const int count = 7;
             var rows = new float[count + 1];

@@ -15,14 +15,14 @@ namespace DroneSandbox
         readonly int count;
         readonly Segment[] roads, rivers;
         readonly Dictionary<long, Segment[]> riverCells = new Dictionary<long, Segment[]>();
-        readonly float[] warp;
+        public readonly FarFieldPlan fields;
         public readonly float[][] coarse;
 
         // A vector segment carries real widths, avoiding the world's deliberately exaggerated road pixels.
         public struct Segment
         {
-            public float ax, az, bx, bz, widthA, widthB;
-            public int kind;
+            public float ax, az, bx, bz, widthA, widthB, walked;
+            public int kind, route;
         }
 
         // Worker output contains only arrays and value types; the streamer owns all engine resources.
@@ -42,6 +42,7 @@ namespace DroneSandbox
         {
             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
             this.roads = roads; this.rivers = rivers; this.coarse = coarse;
+            fields = new FarFieldPlan(seed, roads);
             var cells = new Dictionary<long, List<Segment>>();
             foreach (var s in rivers)
             {
@@ -56,8 +57,6 @@ namespace DroneSandbox
                     }
             }
             foreach (var pair in cells) riverCells.Add(pair.Key, pair.Value.ToArray());
-            warp = new float[8193];
-            for (int i = 0; i < warp.Length; i++) warp[i] = Mathf.PerlinNoise(-68f + i * 200f / (warp.Length - 1), 3.7f);
         }
 
         // Bilinear sampling matches WorldPlan.Height, including its closed north/east boundary.
@@ -190,7 +189,7 @@ namespace DroneSandbox
             var list = new List<Segment>();
             foreach (var s in source)
             {
-                float pad = Math.Max(s.widthA, s.widthB) + 32f;
+                float pad = Math.Max(s.widthA, s.widthB) + 80f;
                 if (Math.Max(s.ax, s.bx) + pad < x || Math.Min(s.ax, s.bx) - pad > x + size ||
                     Math.Max(s.az, s.bz) + pad < z || Math.Min(s.az, s.bz) - pad > z + size) continue;
                 list.Add(s);
@@ -249,11 +248,18 @@ namespace DroneSandbox
         internal static FarDetailData CaptureDetail(float[][] coarse)
         {
             var roads = new List<FarDetailData.Segment>(); var rivers = new List<FarDetailData.Segment>();
-            foreach (var road in Roads) for (int k = 1; k < road.points.Count; k++)
+            int route = 0;
+            foreach (var road in Roads)
+            {
+                float walked = 0f;
+                for (int k = 1; k < road.points.Count; k++)
                 {
                     float width = road.kind == RoadClass.Highway ? 3.5f : road.kind == RoadClass.Road ? 2f : 1.5f;
-                    roads.Add(new FarDetailData.Segment { ax = road.points[k - 1].x, az = road.points[k - 1].y, bx = road.points[k].x, bz = road.points[k].y, widthA = width, widthB = width, kind = (int)road.kind });
+                    roads.Add(new FarDetailData.Segment { ax = road.points[k - 1].x, az = road.points[k - 1].y, bx = road.points[k].x, bz = road.points[k].y, widthA = width, widthB = width, kind = (int)road.kind, route = route, walked = walked });
+                    walked += Vector2.Distance(road.points[k - 1], road.points[k]);
                 }
+                route++;
+            }
             foreach (var river in Rivers) for (int k = 1; k < river.points.Count; k++)
                     rivers.Add(new FarDetailData.Segment { ax = river.points[k - 1].x, az = river.points[k - 1].y, bx = river.points[k].x, bz = river.points[k].y, widthA = river.halfWidths[k - 1], widthB = river.halfWidths[k] });
             return new FarDetailData(Seed, (float[])heights.Clone(), (Cover[])cover.Clone(), GridCount, roads.ToArray(), rivers.ToArray(), coarse);

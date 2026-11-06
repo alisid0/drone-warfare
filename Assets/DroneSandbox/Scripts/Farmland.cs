@@ -71,6 +71,7 @@ namespace DroneSandbox
         // One ground-following mesh and renderer per field; the 3 m grid keeps the real furrows on the ground.
         static void BuildField(FieldPlot plot, Transform parent, System.Random rng)
         {
+            bool worldParcel = FarFieldSurface.TryParent(plot, out var surface);
             int nu = Mathf.CeilToInt(plot.halfLength * 2f / 3f), nv = Mathf.CeilToInt(plot.halfWidth * 2f / 3f);
             var vertices = new Vector3[(nu + 1) * (nv + 1)];
             var normals = new Vector3[vertices.Length];
@@ -86,7 +87,8 @@ namespace DroneSandbox
                     int k = j * (nu + 1) + i;
                     vertices[k] = new Vector3(p.x, Ground.HeightAt(world) + Lift, p.y);
                     normals[k] = Ground.NormalAt(world);
-                    uvs[k] = new Vector2(v / Tile, u / Tile); // texture rows run along the field
+                    // World rows use physical metres, independent of taper, clipping and sector translation.
+                    uvs[k] = worldParcel ? FarFieldSurface.RowUv(surface, p, Tile) : new Vector2(v / Tile, u / Tile);
                 }
             }
             var triangles = new int[nu * nv * 6];
@@ -126,9 +128,15 @@ namespace DroneSandbox
             if (fieldTemplate != null)
             {
                 // The detail map spans the field once: the UVs run in Tile-sized steps out from the middle.
-                material.SetTexture("_DetailMap", FieldDetail(plot));
-                material.SetTextureScale("_DetailMap", new Vector2(Tile / (2f * plot.halfWidth), Tile / (2f * plot.halfLength)));
-                material.SetTextureOffset("_DetailMap", new Vector2(0.5f, 0.5f));
+                material.SetTexture("_DetailMap", FieldDetail(surface));
+                material.SetTextureScale("_DetailMap", new Vector2(Tile / (2f * surface.halfWidth), Tile / (2f * surface.halfLength)));
+                Vector2 offset = new Vector2(0.5f, 0.5f);
+                if (worldParcel)
+                {
+                    Vector2 phase = FarFieldSurface.RowUv(surface, surface.center, 1f);
+                    offset -= new Vector2(phase.x / (2f * surface.halfWidth), phase.y / (2f * surface.halfLength));
+                }
+                material.SetTextureOffset("_DetailMap", offset);
             }
             renderer.sharedMaterial = material;
         }

@@ -1,0 +1,16 @@
+{
+  "districts": 500,
+  "plots": 18080,
+  "tips": 0,
+  "slivers": 0,
+  "shortEdges": 0,
+  "smallAreas": 0,
+  "thin": 0,
+  "convergences": 0,
+  "minimumAngle": 44.99777615243359,
+  "minimumEdge": 18.006465911865234,
+  "minimumWidth": 18.00666146839218,
+  "minimumArea": 621.4622730314732,
+  "cultivatedSquareMetres": 193989488.76170674,
+  "note": "Planar parcel geometry before cover and feature masks. Baseline reconstructs the e45f400 strip skeleton with 3/2.5 m crop insets and a 4 m district inset; its 30 m strip warp and distance-difference margin are not polygonal and are omitted. After uses actual production parcels. Convergence = crops of at least three districts within 12 m of their common Voronoi vertex."
+}

@@ -32,13 +32,16 @@ namespace DroneSandbox
         public struct FieldSample
         {
             public int layer;
-            public float angle, across, along, width, length, side, end, districtEdge;
+            public float angle, projection, across, along, width, length, side, end, districtEdge;
             public bool hedge;
         }
 
         // Four stratified samples integrate crop/cover changes; analytic strip coverage retains subpixel hedges.
         public Color32 Paint(float x, float z, Vector2 coverPosition, Segment[] lanes = null, Segment[] streams = null, float footprint = 2f)
         {
+            // A tile pixel is narrower than every parcel margin; signed coverage integrates its only nearby edge.
+            // The coarse world picture still needs stratified samples when several parcels fall inside a pixel.
+            if (footprint <= 2.01f) return FarDetailPalette.Encode(PaintPoint(x, z, coverPosition, lanes ?? roads, streams ?? rivers, footprint));
             Vector3 sum = Vector3.zero;
             for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++)
                 {
@@ -51,14 +54,14 @@ namespace DroneSandbox
         // Feature ownership is sampled separately from colour; IDs and angles are never interpolated as numbers.
         public Color32 Control(float x, float z, Vector2 coverPosition, Segment[] lanes = null, Segment[] streams = null)
         {
-            Cover cover = CoverAt(coverPosition.x, coverPosition.y);
+            Cover cover = SurfaceCover(x, z, coverPosition);
             float bank = Bank(x, z, streams ?? rivers, out _);
             if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
-            int layer = GroundLayer(cover, x, z); float angle = 0f; byte strength = 255;
+            int layer = cover == Cover.Farmland ? 4 : GroundLayer(cover, x, z); float angle = 0f; byte strength = 255;
             if (cover == Cover.Farmland)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
-                if (f.side < 3f || f.end < 2.5f || f.districtEdge < 4f) layer = 4;
+                if (f.side < 0f || f.end < 0f) layer = 4;
             }
             if (bank < 4f) layer = 2;
             if (bank < 0f || cover == Cover.Water) strength = 0;
@@ -71,18 +74,11 @@ namespace DroneSandbox
         // Smooth coverage is measured in metres; roads win at crossings and retain their actual vector widths.
         Vector3 PaintPoint(float x, float z, Vector2 at, Segment[] lanes, Segment[] streams, float pixel)
         {
-            Cover cover = CoverAt(at.x, at.y);
+            Cover cover = SurfaceCover(x, z, at);
             float bank = Bank(x, z, streams, out float riverWidth);
             if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
-            Vector3 c = GroundColour(cover, x, z);
-            if (cover == Cover.Farmland) c = FieldColour(FieldAt(x, z), pixel);
-            if (cover == Cover.Village || cover == Cover.Town)
-            {
-                float street = Math.Min(Repeat(x, 90f), Repeat(z, 90f));
-                float yard = Coverage(19f - Repeat(x, 30f), pixel) * Coverage(22f - Repeat(z, 30f), pixel);
-                c = Blend(c, FarDetailPalette.Means[2], yard * (cover == Cover.Town ? .8f : .45f));
-                c = Blend(c, FarDetailPalette.Means[2], Coverage(4f - street, pixel));
-            }
+            Vector3 c = cover == Cover.Farmland ? FieldColour(FieldAt(x, z), pixel) : GroundColour(cover, x, z);
+            if (cover == Cover.Village || cover == Cover.Town) c = VillageColour(c, x, z, lanes, pixel, cover == Cover.Town);
             c = Blend(c, FarDetailPalette.Means[2], BandCoverage(3f - bank, riverWidth + 3f, pixel));
             c = Blend(c, WaterColour, BandCoverage(-bank, riverWidth, pixel));
             Road(x, z, lanes, out float edge, out int kind, out float roadWidth);
@@ -92,6 +88,13 @@ namespace DroneSandbox
         }
 
         static readonly Vector3 WaterColour = FarDetailPalette.Decode(new Color32(54, 82, 78, 255));
+
+        // World sectors use the stored cover grid. Displacing just their farm mask would cut different field outlines.
+        Cover SurfaceCover(float x, float z, Vector2 displaced)
+        {
+            Cover exact = CoverAt(x, z), soft = CoverAt(displaced.x, displaced.y);
+            return exact == Cover.Farmland || soft == Cover.Farmland ? exact : soft;
+        }
 
         // Match Ground's grass layering and high-ground bias; the sector collar uses its actual splat weights.
         Vector3 GroundColour(Cover cover, float x, float z)
@@ -122,43 +125,52 @@ namespace DroneSandbox
             wet = .8f * Smooth((wetness - .55f) / .4f); rough = .55f * Smooth((.45f - wetness) / .4f);
         }
 
-        // One district/strip definition supplies both painters and the high-frequency field orientation.
+        // One bounded parcel definition supplies the painters, sector meshes and high-frequency row orientation.
         public FieldSample FieldAt(float x, float z)
         {
-            float fx = x / 700f, fz = z / 700f, best = float.MaxValue, second = float.MaxValue;
-            int gx = (int)Math.Floor(fx), gz = (int)Math.Floor(fz), district = 0;
-            for (int oz = -1; oz <= 1; oz++) for (int ox = -1; ox <= 1; ox++)
-                {
-                    int cx = gx + ox, cz = gz + oz, h = Hash(cx, cz);
-                    float sx = cx + .15f + .7f * ((h & 1023) / 1023f), sz = cz + .15f + .7f * (((h >> 10) & 1023) / 1023f);
-                    float d = (sx - fx) * (sx - fx) + (sz - fz) * (sz - fz);
-                    if (d < best) { second = best; best = d; district = h; } else if (d < second) second = d;
-                }
-            float angle = ((district >> 3) & 1023) / 1023f * (float)Math.PI, ca = (float)Math.Cos(angle), sa = (float)Math.Sin(angle);
-            float u = x * ca + z * sa, v = -x * sa + z * ca;
-            float lookup = Clamp((u / 600f + (district & 63) + 68f) / 200f * (warp.Length - 1), 0, warp.Length - 1.001f);
-            v += 30f * (Mix(warp[(int)lookup], warp[(int)lookup + 1], lookup - (int)lookup) - .5f);
-            float width = 35f + ((district >> 13) & 63) / 63f * 75f;
-            int strip = (int)Math.Floor(v / width), hs = Hash(strip, district);
-            float length = 150f + (hs & 255) / 255f * 250f;
-            float across = Repeat(v, width), along = Repeat(u + ((hs >> 8) & 1023), length);
-            int crop = Hash((int)Math.Floor((u + ((hs >> 8) & 1023)) / length), hs) % 6;
-            return new FieldSample { layer = crop < 2 ? 5 : crop == 2 ? 6 : crop == 3 ? 8 : crop == 4 ? 7 : 9,
-                angle = angle, across = across, along = along, width = width, length = length,
-                side = Math.Min(across, width - across), end = Math.Min(along, length - along),
-                districtEdge = ((float)Math.Sqrt(second) - (float)Math.Sqrt(best)) * 700f, hedge = ((hs >> 20) & 1) == 0 };
+            return fields.At(x, z).Sample(x, z);
         }
 
         // The same crop means as the sector, with footprint-integrated boundary strips rather than thresholded pixels.
         Vector3 FieldColour(FieldSample f, float pixel)
         {
+            if (f.layer < 5) return FarDetailPalette.Means[4];
             Vector3 c = FarDetailPalette.Means[f.layer];
-            float projection = Math.Abs((float)Math.Cos(f.angle)) + Math.Abs((float)Math.Sin(f.angle));
-            float side = BandCoverage(3f - f.side, 3f, pixel * projection), end = BandCoverage(2.5f - f.end, 2.5f, pixel * projection);
+            float projection = f.projection;
+            float crop = Coverage(f.side, pixel * projection) * Coverage(f.end, pixel * projection);
+            float side = BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection);
             Vector3 hedge = FarDetailPalette.Decode(C(46, 62, 36));
-            c = Blend(c, f.hedge ? hedge : FarDetailPalette.Means[4], side * (f.hedge ? .6f : .45f));
-            c = Blend(c, FarDetailPalette.Means[4], end * (1f - side) * .45f);
-            return Blend(c, hedge, BandCoverage(4f - f.districtEdge, 4f, pixel * 1.414214f) * .6f);
+            Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f : 0f);
+            return Blend(margin, c, crop);
+        }
+
+        // Plots follow the nearest street's chainage and side. Staggered frontages and garden depths remove the lattice.
+        Vector3 VillageColour(Vector3 grass, float x, float z, Segment[] lanes, float pixel, bool town)
+        {
+            float best = 80f * 80f, along = 0f, across = 0f, roadWidth = 0f; int route = 0;
+            foreach (var s in lanes)
+            {
+                float dx = s.bx - s.ax, dz = s.bz - s.az, length2 = dx * dx + dz * dz;
+                if (length2 < .01f) continue;
+                float t = Clamp(((x - s.ax) * dx + (z - s.az) * dz) / length2, 0f, 1f);
+                float ex = x - s.ax - t * dx, ez = z - s.az - t * dz, distance = ex * ex + ez * ez;
+                if (distance >= best) continue;
+                float length = (float)Math.Sqrt(length2);
+                best = distance; along = s.walked + t * length; across = (dx * ez - dz * ex) / length;
+                roadWidth = s.widthA + (s.widthB - s.widthA) * t; route = s.route;
+            }
+            if (best >= 80f * 80f) return grass;
+            int side = across < 0f ? -1 : 1, h = Hash(route, side);
+            float pitch = 24f + (h & 15), station = along + (h >> 4 & 31);
+            int plot = (int)Math.Floor(station / pitch), hp = Hash(plot, h);
+            float frontage = Repeat(station, pitch), back = 30f + (hp & 31), depth = Math.Abs(across) - roadWidth - 3f;
+            float occupied = Coverage(depth, pixel) * Coverage(back - depth, pixel);
+            float garden = Coverage(depth - 14f, pixel) * occupied;
+            float yard = Coverage(14f - depth, pixel) * occupied * Coverage(frontage - 2f, pixel) * Coverage(pitch - 2f - frontage, pixel);
+            Vector3 c = Blend(grass, FarDetailPalette.Means[(hp & 1) == 0 ? 1 : 4], garden * .45f);
+            c = Blend(c, FarDetailPalette.Means[2], yard * (town ? .8f : .5f));
+            float hedge = Math.Max(BandCoverage(.7f - Math.Min(frontage, pitch - frontage), .7f, pixel), BandCoverage(.7f - Math.Abs(depth - back), .7f, pixel));
+            return Blend(c, FarDetailPalette.Decode(C(46, 62, 36)), hedge * occupied * .6f);
         }
 
         // Exposed for the deterministic field/mask harness.

@@ -36,6 +36,8 @@ namespace DroneSandbox
                     float distance = Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)) - half;
                     // The hidden interior need not be repainted. A pixel of overlap prevents bilinear edge leakage.
                     if (distance < -pixel || distance > Collar) continue;
+                    // Shared world parcels reach the terrain edge. A splat-only collar would erase those crop meshes.
+                    if (MapLayout.Plan.world != null && WorldPlan.CoverAt(x + origin.x, z + origin.y) == Cover.Farmland) continue;
                     int side = Mathf.Abs(x) > Mathf.Abs(z) ? (x < 0 ? 0 : 1) : (z < 0 ? 2 : 3);
                     float along = side < 2 ? z : x;
                     float u = Mathf.Clamp01((along + half) / Ground.Size) * (edges[side].Length - 1);
