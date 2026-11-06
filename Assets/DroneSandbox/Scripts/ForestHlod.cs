@@ -102,8 +102,8 @@ namespace DroneSandbox
             return d < 1800f ? 16 : d < 4000f ? 32 : d < 9000f ? 64 : 128;
         }
 
-        // Draw only camera-visible blocks and spend a bounded slice filling the nearest missing coverage first.
-        public void Update(Camera camera, Plane[] planes)
+        // Fill missing coverage first; rapid flight keeps the old 0.30 ms slice, while stationary views refine faster.
+        public void Update(Camera camera, Plane[] planes, bool cruising = false)
         {
             BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = NearCoarseBlocks = 0; frame++;
             if (!FarTerrain.ForestCanopyHlod) return;
@@ -168,7 +168,7 @@ namespace DroneSandbox
             timer.Restart();
             bool buildThisCamera = builtFrame != Time.frameCount;
             builtFrame = Time.frameCount;
-            while (buildThisCamera && builder != null && timer.Elapsed.TotalMilliseconds < BuildMilliseconds)
+            while (buildThisCamera && builder != null && timer.Elapsed.TotalMilliseconds < (cruising ? 0.30 : BuildMilliseconds))
                 if (!builder.MoveNext())
                 {
                     var next = pendingBlock; pendingBlock = null;

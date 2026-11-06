@@ -91,8 +91,8 @@ namespace DroneSandbox
         {
             public readonly List<DrawBatch> draws = new List<DrawBatch>();
             public IEnumerator builder;
-            public Vector3 position, buildingFrom, forward;
-            public float focal, ready, reach;
+            public Vector3 position, buildingFrom, forward, lastPosition;
+            public float focal, ready, reach, observedAt;
             public Vector2 viewport;
             public Vector4 distances;
             public float refreshed;
@@ -247,7 +247,10 @@ namespace DroneSandbox
                 MeshTreesDrawn = view.full + view.reduced; TreeTrianglesDrawn = view.triangles;
                 DrawTrees(cam, view);
             }
-            forest.Update(cam, planes);
+            float elapsed = Time.unscaledTime - view.observedAt;
+            bool cruising = elapsed > 0f && elapsed < 0.25f && (position - view.lastPosition).sqrMagnitude > 80f * 80f * elapsed * elapsed;
+            view.lastPosition = position; view.observedAt = Time.unscaledTime;
+            forest.Update(cam, planes, cruising);
             if (timingFrame != Time.frameCount)
             {
                 if (timingFrame >= 0) { totalMs += MainThreadMs; Samples++; MeanMs = (float)(totalMs / Samples); }
