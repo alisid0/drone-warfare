@@ -104,7 +104,8 @@ namespace DroneSandbox
                 + (ForestPattern.Noise(x, z, 57f, 83) - 0.5f) * 12f
                 + (ForestPattern.Noise(x - 21f, z, 113f, 84) - 0.5f) * 8f;
             colour.r += light / 255f; colour.g += light / 255f; colour.b += light * 0.8f / 255f;
-            colour.a = stand.cover;
+            // Preserve understorey only in glades; ordinary grove rims must fade when their crowns are ready.
+            colour.a = stand.wood > 0f ? stand.cover / stand.wood : 1f;
             return colour;
         }
 

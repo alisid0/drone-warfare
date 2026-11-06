@@ -16,9 +16,9 @@ void ForestFade(float3 positionRWS, float2 canopyUV)
     float mesh = _ForestDistances.y > 0.0 ? 1.0 - smoothstep(_ForestDistances.y * 0.9, _ForestDistances.y, d) : 0.0;
     float card = _ForestDistances.z > 0.0 ? 1.0 - smoothstep(_ForestDistances.z * 0.9, _ForestDistances.z, d) : 0.0;
     // Only completed cells may open the canopy. Crowns beyond them can arrive independently without shrinking the entire view.
-    if (_ForestTier >= 3.0)
+    if (_ForestTier >= 3.0 && card > 0.0)
     {
-        // Keep dark understorey in glades and sparse rims even when nearby individual crowns are ready.
+        // Macro alpha describes glades, so normal woodland rims still fade with their individual crowns.
         float cover = SAMPLE_TEXTURE2D_LOD(_BaseColorMap, sampler_BaseColorMap, canopyUV, 0).a;
         card *= smoothstep(0.35, 0.85, cover);
         card *= 1.0 - smoothstep(max(0.0, _ForestSelection.w - 32.0), max(0.01, _ForestSelection.w), distance(world.xz, _ForestSelection.xz));

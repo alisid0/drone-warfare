@@ -333,8 +333,10 @@ namespace DroneSandbox
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
                 float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.wood) * 1.7f;
-                height = FarScatter.GroundAt(world - FarTerrain.Origin) + relief - 0.3f;
-                if (data.local) height = Mathf.Max(height, SectorForest.CrownSupport(world - SectorForest.Origin));
+                float floor = FarScatter.GroundAt(world - FarTerrain.Origin);
+                height = floor + relief - 0.3f;
+                // Support a narrow wood's floor without raising opaque crown-shaped walls around every grove.
+                if (data.local) height = Mathf.Max(height, Mathf.Min(floor + 2.5f, SectorForest.CrownSupport(world - SectorForest.Origin)));
                 heights.Add(key, height);
                 if (!data.local && data.step <= 32) covers.Add(key, stand.cover);
                 return height;
