@@ -34,6 +34,7 @@ namespace DroneSandbox
                         lods[i].screenRelativeTransitionHeight = Mathf.Clamp(projection / distance, .0001f, .95f - i * .01f);
                         lods[i].fadeTransitionWidth = .25f;
                     }
+                    Descending(lods);
                     group.fadeMode = LODFadeMode.CrossFade; group.animateCrossFading = false; group.SetLODs(lods);
                 }
                 return;
@@ -105,13 +106,28 @@ namespace DroneSandbox
                     var renderer = part.AddComponent<MeshRenderer>(); renderer.sharedMaterial = pair.Key;
                     renderer.shadowCastingMode = ShadowCastingMode.Off; renderers.Add(renderer);
                 }
-                lods[level] = new LOD(.01f, renderers.ToArray()) { fadeTransitionWidth = .25f };
+                lods[level] = new LOD(.5f / (level + 1), renderers.ToArray()) { fadeTransitionWidth = .25f }; // placeholder, set below
             }
             var lod = root.AddComponent<LODGroup>(); lod.SetLODs(lods); lod.RecalculateBounds();
             float projection = lod.size / (2f * Mathf.Tan(Scale.CameraFov * .5f * Mathf.Deg2Rad));
             lods[0].screenRelativeTransitionHeight = Mathf.Clamp(projection / 150f, .002f, .95f);
             lods[1].screenRelativeTransitionHeight = Mathf.Min(lods[0].screenRelativeTransitionHeight * .9f, projection / 275f);
+            Descending(lods);
             lod.fadeMode = LODFadeMode.CrossFade; lod.animateCrossFading = false; lod.SetLODs(lods);
+        }
+
+        // Unity refuses a LOD whose screen size isn't strictly below the one before it (hd148 logged 21 SetLODs
+        // errors: middle levels shared a distance, and a third level kept its placeholder). Each level is kept
+        // at most 0.9 of the previous, and above a floor that still falls level by level.
+        static void Descending(LOD[] lods)
+        {
+            for (int i = 0; i < lods.Length; i++)
+            {
+                float floor = .0001f * (lods.Length - i);
+                float value = Mathf.Max(lods[i].screenRelativeTransitionHeight, floor);
+                if (i > 0) value = Mathf.Max(Mathf.Min(value, lods[i - 1].screenRelativeTransitionHeight * .9f), floor);
+                lods[i].screenRelativeTransitionHeight = value;
+            }
         }
 
         // Sector unload owns combined meshes, while source meshes and shared materials remain resource assets.
