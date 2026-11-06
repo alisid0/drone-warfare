@@ -1,0 +1,18 @@
+{
+  "Tree": {
+    "source_triangles": 4906,
+    "reduced_triangles": 2999
+  },
+  "Birch": {
+    "source_triangles": 3374,
+    "reduced_triangles": 3000
+  },
+  "Spruce": {
+    "source_triangles": 12218,
+    "reduced_triangles": 3000
+  },
+  "Pine": {
+    "source_triangles": 3572,
+    "reduced_triangles": 3000
+  }
+}
