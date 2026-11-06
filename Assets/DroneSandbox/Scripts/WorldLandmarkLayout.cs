@@ -165,6 +165,9 @@ namespace DroneSandbox
             Region(f, rng, 115f, 80f, 138f, 99f, LandmarkSurfaceKind.Concrete);
             Region(f, rng, -167f, 5f, 64f, 65f, LandmarkSurfaceKind.Soil);
             Region(f, rng, 28f, 120f, 56f, 51f, LandmarkSurfaceKind.Asphalt);
+            // Darker compacted and paler loose patches on the gravel yards, laid before the lanes so the lanes stay clean.
+            Mottle(f, rng, 114f, -83f, 120f, 110f, 5);
+            Mottle(f, rng, -80f, 96f, 230f, 66f, 6);
             Building(f, "Scenery_FactoryHall", -141f, -64f, false, new Vector3(60.35f, 11.573f, 33.335f), 48f, 0, 1.45f);
             Building(f, "Scenery_FactoryHall", -33f, -68f, false, new Vector3(60.35f, 11.573f, 33.335f), 43f, 0, 1.25f);
             Building(f, "Scenery_FactoryHall", 97f, -89f, false, new Vector3(60.35f, 11.573f, 33.335f), 38f);
@@ -206,6 +209,7 @@ namespace DroneSandbox
             Region(f, rng, -124f, 32f, 286f, 54f, LandmarkSurfaceKind.Concrete);
             Region(f, rng, 175f, 28f, 263f, 58f, LandmarkSurfaceKind.Gravel);
             Region(f, rng, 301f, 60f, 130f, 53f, LandmarkSurfaceKind.Soil);
+            Mottle(f, rng, 175f, 28f, 240f, 40f, 5);
             var a = f.Area;
             Vector2 throat = WorldPlan.FeatureRailPoint(a.Point(-390f, -62f), out _);
             // A rust-brown formation and lighter shoulders go down first; the dark ballast strips are laid over them.
@@ -216,7 +220,7 @@ namespace DroneSandbox
                 lines[track] = new[] { throat, a.Point(-350f + track * 12f, -62f), a.Point(begin, v), a.Point(300f, v) };
                 for (int i = 1; i < lines[track].Length; i++) Formation(f, lines[track][i - 1], lines[track][i]);
             }
-            foreach (float v in new[] { -34.6f, -8.9f }) Strip(f, -235f, v, 302f, v, 2.4f, LandmarkSurfaceKind.Aggregate, DecalLift);
+            foreach (float v in new[] { -34.6f, -8.9f }) { Strip(f, -235f, v, 302f, v, 2.4f, LandmarkSurfaceKind.Aggregate, DecalLift); Soften(f, .5f); }
             // One siding stands idle and one holds a short rake, so the yard is never a full diagram of wagons.
             int idle = (f.variantSeed >> 4) & 3, shortRake = (idle + 1 + ((f.variantSeed >> 7) & 1)) & 3;
             var rakeEnd = new float[4];
@@ -225,11 +229,12 @@ namespace DroneSandbox
                 float v = -30f + track * 5.5f;
                 var line = lines[track];
                 f.rails.Add(DenseRail(line));
-                for (int i = 1; i < line.Length; i++) RailSurface(f, line[i - 1], line[i]);
                 int count = 5 + inventory.Next(5);
                 if (track == idle) count = 0;
                 else if (track == shortRake) count = Math.Max(2, count / 2);
                 float start = -125f + track * 43f;
+                for (int i = 1; i < line.Length - 1; i++) RailSurface(f, line[i - 1], line[i]);
+                Ballast(f, rng, -290f + track * 20f, 300f, v, start, start + count * 16.6f, track % 2 == 1);
                 for (int i = 0; i < count; i++) Building(f, track % 2 == 0 ? "Scenery_RailContainerWagon" : "Scenery_RailHopper",
                     start + i * 16.6f, v, true, new Vector3(3.14f, track % 2 == 0 ? 4.45f : 5.535f, 15f), 0f, 3, 1f, true);
                 rakeEnd[track] = count > 0 ? start + count * 16.6f : -290f + track * 20f;
@@ -238,15 +243,15 @@ namespace DroneSandbox
             for (float u = -280f + idle * 20f + Range(rng, 0f, 15f); u < 290f;)
             {
                 float run = Math.Min(296f - u, Range(rng, 18f, 55f));
-                Blob(f, rng, u + run * .5f, -30f + idle * 5.5f, 1f, 0f, run, Range(rng, 4.6f, 6.2f), LandmarkSurfaceKind.Overgrown, .162f);
+                Blob(f, rng, u + run * .5f, -30f + idle * 5.5f, 1f, 0f, run, Range(rng, 4.6f, 6.2f), LandmarkSurfaceKind.Overgrown, MarkLift, 1.5f);
                 u += run + Range(rng, 3f, 14f);
             }
             for (int gap = 0; gap < 3; gap++)
             {
                 float from = Math.Max(rakeEnd[gap], rakeEnd[gap + 1]) + Range(rng, 8f, 20f);
-                if (from < 290f) Strip(f, from, -27.25f + gap * 5.5f, 297f, -27.25f + gap * 5.5f, 1.2f, LandmarkSurfaceKind.Overgrown, .162f);
+                if (from < 290f) { Strip(f, from, -27.25f + gap * 5.5f, 297f, -27.25f + gap * 5.5f, 1.2f, LandmarkSurfaceKind.Overgrown, MarkLift); Soften(f, 2f); }
             }
-            Blob(f, rng, 312f, -21.75f, 1f, 0f, 30f, 26f, LandmarkSurfaceKind.Overgrown, .162f);
+            Blob(f, rng, 312f, -21.75f, 1f, 0f, 30f, 26f, LandmarkSurfaceKind.Overgrown, MarkLift, 2f);
             for (int i = 0; i < 3; i++) Building(f, "Scenery_FreightShed", -179f + i * 151f, 23f + (i % 2) * 8f, false, new Vector3(40.8f, 9.787f, 21.839f), 26f);
             Building(f, "Scenery_SignalBox", -270f, 28f, true, new Vector3(10.6f, 8.15f, 11.135f), 10f, 3);
             Building(f, "Scenery_Warehouse", 232f, 21f, true, new Vector3(18f, 9f, 30f), 22f);
