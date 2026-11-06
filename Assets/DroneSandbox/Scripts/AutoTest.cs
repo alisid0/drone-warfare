@@ -2069,11 +2069,15 @@ namespace DroneSandbox
         // The far forest's canopy for the view: hd144's forest shot caught 3 blocks after 6 s and showed bare ground for
         // forest. Coverage must be complete (no missing block) within 3 s of a 2.5 km jump; waits up to 15 s to see how
         // long it really takes, and says so either way.
+        // Game time stands still meanwhile, so a mission doesn't play on, pop a tip or leave photo mode while it waits
+        // (hd149's river valley shot showed the HUD at dusk).
         IEnumerator ForestMassesSettle(string shot)
         {
-            float forestWaitStarted = Time.unscaledTime;
+            float forestWaitStarted = Time.unscaledTime, timeScale = Time.timeScale;
+            Time.timeScale = 0f;
             yield return null;
             while (ForestHlod.MissingBlocks > 0 && Time.unscaledTime - forestWaitStarted < 15f) yield return null;
+            Time.timeScale = timeScale;
             float took = Time.unscaledTime - forestWaitStarted;
             log.WriteLine($"{shot}: forest masses {(ForestHlod.MissingBlocks == 0 ? "settled" : "timed out")} at {ForestHlod.BlocksDrawn} blocks after {took:F2} s; " +
                           $"missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, cached {ForestHlod.CachedBlocks}, builds {ForestHlod.CompletedBuilds}, " +
