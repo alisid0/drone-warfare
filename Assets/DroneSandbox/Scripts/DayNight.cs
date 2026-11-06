@@ -186,6 +186,16 @@ namespace DroneSandbox
                 sun.shadowStrength = Mathf.Lerp(0.6f, 0.95f, Daylight) * Mathf.Lerp(0.45f, 1f, Atmosphere.SunScale);
             }
 
+            // The grade's warm highlights belong to a low sun: full at 10 degrees and below, none from 30 up, so a clear
+            // midday reads neutral (ChatGPT, critique 19). The cool shade stays: it carries most of a mid grey, and without
+            // it the grey card went warm again (110, 97, 91 in hd164).
+            SplitToning split = null; // looked up each frame: a new sector brings a new profile
+            if (Atmosphere.Profile != null && Atmosphere.Profile.TryGet(out split))
+            {
+                float low = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(10f, 30f, sunElevation));
+                split.highlights.value = Color.Lerp(Color.grey, Atmosphere.SplitHighlights, low);
+            }
+
             nightVolume.weight = Thermal ? 0f : 1f - Daylight;
             thermalVolume.weight = Thermal ? 1f : 0f;
             thermalColour.postExposure.value = Mathf.Lerp(1.2f, -0.3f, Daylight); // the camera sees heat, not light

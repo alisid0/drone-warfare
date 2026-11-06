@@ -240,14 +240,19 @@ namespace DroneSandbox
             vignette.smoothness.Override(0.45f);
             var whiteBalance = Get<WhiteBalance>(profile);
             // A camera's daylight white balance: the physical sun reaches the ground yellowed by the air, so with none an
-            // 18% grey card in the strategy view read (107, 94, 77) and every meadow olive (hd161). At -20 it reads
-            // (99, 95, 92); low sun is still far warmer than this, so dawn and dusk keep their colour.
-            whiteBalance.temperature.Override(-20f);
+            // 18% grey card in the strategy view read (107, 94, 77) and every meadow olive (hd161). -12 with the split
+            // toning neutral at midday (DayNight fades it in for a low sun) read (91, 91, 88); low sun is still far
+            // warmer than this, so dawn and dusk keep their colour.
+            whiteBalance.temperature.Override(-12f);
             var split = Get<SplitToning>(profile);
-            split.shadows.Override(new Color(0.47f, 0.53f, 0.57f));
-            split.highlights.Override(new Color(0.75f, 0.62f, 0.48f));
+            split.shadows.Override(SplitShadows);
+            split.highlights.Override(SplitHighlights);
             split.balance.Override(-15f);
         }
+
+        // Warm highlights over cool shade; DayNight fades the warm highlights out above a low sun, so a clear midday reads
+        // neutral (ChatGPT, critique 19).
+        public static readonly Color SplitShadows = new Color(0.47f, 0.53f, 0.57f), SplitHighlights = new Color(0.75f, 0.62f, 0.48f);
 
         // A gentle kilometre-scale haze gives the hills depth, with volumetric light reaching the ground from
         // the high play camera. Four bounded cascades cover its far corners without scaling 350 m by Distance.
