@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Lit woodland tiles sample at 16/32 m, distant masses at 64/128 m, and batch into 2 km draw blocks.
+    // Recipe woods retain a 4 m surface; world tiles use 16/32 m interiors and 8 m rims in 2 km draw blocks.
     // Generation is sliced between small sampling batches on the main thread, so changing WorldPlan cannot race a worker.
     public sealed class ForestHlod
     {
@@ -19,7 +19,7 @@ namespace DroneSandbox
         {
             public Vector2 corner;
             public int step, textureSize;
-            public bool adaptive;
+            public bool adaptive, local;
             public Vector3 focus;
             public Vector3[] vertices, normals;
             public Vector2[] uv;
@@ -61,6 +61,15 @@ namespace DroneSandbox
         public static int MissingBlocks { get; private set; }
         public static int CoarseBlocks { get; private set; }
         public static int NearCoarseBlocks { get; private set; }
+        public static float SliceBudgetMs { get; private set; }
+        public static int RefinementsStarted { get; private set; }
+        public static int CancelledBuilds { get; private set; }
+        public static int DeferredFrames { get; private set; }
+        public static float BuildMeanMs { get; private set; }
+        public static float BuildWorstMs { get; private set; }
+        static double buildTotal;
+        static int buildSamples;
+        float cruiseUntil;
 
         // Destroy all native allocations as well as a partially built block when the terrain origin changes.
         public void Clear()
@@ -69,7 +78,14 @@ namespace DroneSandbox
             if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
             blocks.Clear(); builder = null; pending = null; builtFrame = -1;
             BlocksDrawn = TrianglesDrawn = CachedBlocks = MissingBlocks = CoarseBlocks = 0;
-            CompletedBuilds = 0; BuildMs = 0f; Building = false;
+            CompletedBuilds = 0; BuildMs = 0f; Building = false; cruiseUntil = 0f;
+        }
+
+        // Keep interval counters separate from the last camera, which may render after a flight has stopped.
+        public static void ResetTimings()
+        {
+            RefinementsStarted = CancelledBuilds = DeferredFrames = buildSamples = 0;
+            buildTotal = 0; BuildMeanMs = BuildWorstMs = 0f;
         }
 
         // Sector construction has already sampled these coarse blocks; uploading does not re-run the recipe.
@@ -102,7 +118,7 @@ namespace DroneSandbox
             return d < 1800f ? 16 : d < 4000f ? 32 : d < 9000f ? 64 : 128;
         }
 
-        // Fill missing coverage first; rapid flight keeps the old 0.30 ms slice, while stationary views refine faster.
+        // Fill missing coverage first; fast flight defers fine work and caps coarse work at 0.20 ms per frame.
         public void Update(Camera camera, Plane[] planes, bool cruising = false)
         {
             BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = NearCoarseBlocks = 0; frame++;
@@ -115,11 +131,14 @@ namespace DroneSandbox
             }
             Vector3 local = camera.transform.position;
             Vector3 world = local + new Vector3(FarTerrain.Origin.x, 0f, FarTerrain.Origin.y);
+            if (cruising) cruiseUntil = Time.unscaledTime + 0.5f;
+            bool moving = Time.unscaledTime < cruiseUntil;
             // A teleport must not wait for an obsolete fine texture before receiving coarse woodland.
             if (builder != null && buildingCamera == camera && pending.step < 256 && (world - buildingFrom).sqrMagnitude > 1024f * 1024f)
             {
                 if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
                 builder = null; pending = null;
+                CancelledBuilds++;
             }
             int wantedKey = -1, wantedStep = 256;
             float best = float.MaxValue;
@@ -139,9 +158,15 @@ namespace DroneSandbox
                     {
                         block.lastSeen = frame;
                         if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
+                        // The prepared recipe crop is already finer than any requested tier; retain it while viewing that crop.
+                        Vector2 crop = block.data.corner - SectorForest.Origin;
+                        float half = Ground.Size * 0.5f;
+                        bool resolvedLocal = block.data.local && block.data.step < 256 && FarScatter.InSector(new Vector2(local.x, local.z))
+                            && crop.x < half && crop.x + BlockSize > -half && crop.y < half && crop.y + BlockSize > -half;
+                        if (resolvedLocal) continue;
                         bool moved = block.data.adaptive && block.data.step <= 16 && (world - block.data.focus).sqrMagnitude > 256f * 256f;
                         if (block.data.step > step || moved) { CoarseBlocks++; if (step <= 32) NearCoarseBlocks++; }
-                        if (block.data.step <= step && !moved) continue;
+                        if (block.data.step <= step && !moved || moving) continue;
                         // First give every visible block a coarse shape before refining any of them.
                         distance += 2e9f;
                     }
@@ -157,18 +182,25 @@ namespace DroneSandbox
             {
                 if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
                 builder = null; pending = null;
+                CancelledBuilds++;
             }
             if (builder == null && wantedKey >= 0)
             {
                 pendingKey = wantedKey; buildingFrom = world; buildingCamera = camera;
                 pending = new Data { corner = new Vector2(-WorldPlan.Half + wantedKey % BlockCount * BlockSize,
-                    -WorldPlan.Half + wantedKey / BlockCount * BlockSize), step = wantedStep, adaptive = true, focus = world };
+                    -WorldPlan.Half + wantedKey / BlockCount * BlockSize), step = wantedStep, adaptive = true, focus = world,
+                    local = MapLayout.Plan.world == null };
                 builder = Prepare(pending);
+                if (wantedStep < 256) RefinementsStarted++;
             }
             timer.Restart();
             bool buildThisCamera = builtFrame != Time.frameCount;
             builtFrame = Time.frameCount;
-            while (buildThisCamera && builder != null && timer.Elapsed.TotalMilliseconds < (cruising ? 0.30 : BuildMilliseconds))
+            SliceBudgetMs = moving ? 0.20f : (float)BuildMilliseconds;
+            // Preserve a partially built fine block during flight, but spend time only on missing coverage.
+            bool defer = moving && pending != null && pending.step < 256;
+            if (buildThisCamera && defer) DeferredFrames++;
+            while (buildThisCamera && !defer && builder != null && timer.Elapsed.TotalMilliseconds < SliceBudgetMs)
                 if (!builder.MoveNext())
                 {
                     var next = pendingBlock; pendingBlock = null;
@@ -182,7 +214,12 @@ namespace DroneSandbox
                     CompletedBuilds++;
                     builder = null; pending = null;
                 }
-            if (buildThisCamera) BuildMs = (float)timer.Elapsed.TotalMilliseconds;
+            if (buildThisCamera)
+            {
+                BuildMs = (float)timer.Elapsed.TotalMilliseconds;
+                buildTotal += BuildMs; buildSamples++; BuildMeanMs = (float)(buildTotal / buildSamples);
+                BuildWorstMs = Mathf.Max(BuildWorstMs, BuildMs);
+            }
             Building = builder != null;
             // Retain a short look-behind cache, but bound native memory after a long flight or camera tour.
             stale.Clear();
@@ -195,7 +232,7 @@ namespace DroneSandbox
         Block Upload(Data data)
         {
             // Upload releases its own CPU references; sector data remains reusable after Clear or renderer replacement.
-            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize, adaptive = data.adaptive, focus = data.focus,
+            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize, adaptive = data.adaptive, local = data.local, focus = data.focus,
                 vertices = data.vertices, normals = data.normals, uv = data.uv, ground = data.ground,
                 crown = data.crown, triangles = data.triangles, pixels = data.pixels };
             var block = new Block { data = copy, lastSeen = frame };
@@ -267,12 +304,15 @@ namespace DroneSandbox
             BlocksDrawn++; TrianglesDrawn += block.triangles;
         }
 
-        // World-coordinate sampling and a common 8 m perimeter join every refinement level without skirts.
+        // World-coordinate sampling and shared perimeter nodes join every refinement level without skirts.
         sealed class Surface
         {
             readonly Data data;
             readonly Dictionary<long, int> indices = new Dictionary<long, int>();
             readonly Dictionary<long, float> heights = new Dictionary<long, float>();
+            readonly Dictionary<long, float> covers = new Dictionary<long, float>();
+            readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>();
+            readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>();
             public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
             public readonly List<Vector2> uv = new List<Vector2>();
             public readonly List<float> ground = new List<float>(), crown = new List<float>();
@@ -291,7 +331,52 @@ namespace DroneSandbox
                 float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.cover) * 1.7f;
                 height = FarScatter.GroundAt(world - FarTerrain.Origin) + relief - 0.3f;
                 heights.Add(key, height);
+                if (!data.local && data.step <= 32) covers.Add(key, stand.cover);
                 return height;
+            }
+
+            // Refine only mixed woodland margins; solid interiors retain the existing triangle budget.
+            public int RimStep(int x, int z, int step)
+            {
+                if (data.local || step > 32 || step <= 8) return step;
+                long key = ((long)x << 32) ^ (uint)z;
+                if (rimSteps.TryGetValue(key, out int result)) return result;
+                float low = 1f, high = 0f;
+                for (int i = 0; i < 5; i++)
+                {
+                    int px = x + (i == 4 ? step / 2 : (i & 1) * step);
+                    int pz = z + (i == 4 ? step / 2 : (i >> 1) * step);
+                    Height(px, pz);
+                    float cover = covers[((long)px << 32) ^ (uint)pz];
+                    low = Mathf.Min(low, cover); high = Mathf.Max(high, cover);
+                }
+                // Keep the shared block perimeter at its fixed 8 m spacing, regardless of refinement order.
+                result = low < 0.95f && high > 0.02f ? 8 : step;
+                rimSteps.Add(key, result);
+                return result;
+            }
+
+            // Both sides use the coarser parent's whole edge, including any finer neighbours along that edge.
+            public int EdgeStep(int x, int z, bool horizontal)
+            {
+                if (horizontal ? z == 0 || z == BlockSize : x == 0 || x == BlockSize) return data.local ? 4 : 8;
+                int ax = horizontal ? x : x - 1, az = horizontal ? z - 1 : z;
+                int a = TileStep(data, ax / TileSize * TileSize, az / TileSize * TileSize);
+                int b = TileStep(data, x / TileSize * TileSize, z / TileSize * TileSize);
+                int span = Mathf.Max(a, b), stride = Mathf.Min(a, b);
+                if (horizontal) x = x / span * span; else z = z / span * span;
+                long key = ((long)x << 33) ^ ((long)z << 1) ^ (horizontal ? 1L : 0L);
+                if (edgeSteps.TryGetValue(key, out int result)) return result;
+                result = span;
+                for (int t = 0; t < span; t += stride)
+                {
+                    int px = x + (horizontal ? t : 0), pz = z + (horizontal ? 0 : t);
+                    ax = horizontal ? px : px - 1; az = horizontal ? pz - 1 : pz;
+                    result = Mathf.Min(result, RimStep(ax / a * a, az / a * a, a));
+                    result = Mathf.Min(result, RimStep(px / b * b, pz / b * b, b));
+                }
+                edgeSteps.Add(key, result);
+                return result;
             }
 
             // Central differences use the same world-space surface on both sides of every tile and block boundary.
@@ -329,6 +414,7 @@ namespace DroneSandbox
                 data.triangles = triangles.ToArray();
             }
         }
+
 
         // Stitch a quad to the finer nodes on any neighbouring edge; regular interiors need only two triangles.
         static void Quad(Surface surface, int x, int z, int step, int south, int north, int west, int east)
@@ -368,16 +454,32 @@ namespace DroneSandbox
                 for (int tx = 0; tx < BlockSize; tx += TileSize)
                 {
                     int step = TileStep(data, tx, tz);
-                    int south = tz == 0 ? 8 : TileStep(data, tx, tz - TileSize);
-                    int north = tz + TileSize == BlockSize ? 8 : TileStep(data, tx, tz + TileSize);
-                    int west = tx == 0 ? 8 : TileStep(data, tx - TileSize, tz);
-                    int east = tx + TileSize == BlockSize ? 8 : TileStep(data, tx + TileSize, tz);
+                    int seam = data.local ? 4 : 8;
+                    int south = tz == 0 ? seam : TileStep(data, tx, tz - TileSize);
+                    int north = tz + TileSize == BlockSize ? seam : TileStep(data, tx, tz + TileSize);
+                    int west = tx == 0 ? seam : TileStep(data, tx - TileSize, tz);
+                    int east = tx + TileSize == BlockSize ? seam : TileStep(data, tx + TileSize, tz);
                     for (int z = tz; z < tz + TileSize; z += step)
                         for (int x = tx; x < tx + TileSize; x += step)
                         {
-                            Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
-                                x == tx ? west : step, x + step == tx + TileSize ? east : step);
-                            yield return null;
+                            if (data.local || data.step >= 64)
+                            {
+                                Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
+                                    x == tx ? west : step, x + step == tx + TileSize ? east : step);
+                                yield return null;
+                                continue;
+                            }
+                            int detail = surface.RimStep(x, z, step);
+                            for (int vz = z; vz < z + step; vz += detail)
+                                for (int vx = x; vx < x + step; vx += detail)
+                                {
+                                    Quad(surface, vx, vz, detail,
+                                        vz == z ? surface.EdgeStep(vx, z, true) : detail,
+                                        vz + detail == z + step ? surface.EdgeStep(vx, z + step, true) : detail,
+                                        vx == x ? surface.EdgeStep(x, vz, false) : detail,
+                                        vx + detail == x + step ? surface.EdgeStep(x + step, vz, false) : detail);
+                                    yield return null;
+                                }
                         }
                 }
             var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
@@ -397,9 +499,15 @@ namespace DroneSandbox
                 }
         }
 
-        // Keep 16 m geometry near visible crowns; shared detail supplies the smaller relief on every surface tier.
+        // Small recipe groves need 4 m geometry; streamed world tiles retain their bounded 16/32 m refinement.
         static int TileStep(Data data, int x, int z)
         {
+            if (data.local)
+            {
+                Vector2 p = data.corner + new Vector2(x, z) - SectorForest.Origin;
+                float half = Ground.Size * 0.5f;
+                if (p.x < half && p.x + TileSize > -half && p.y < half && p.y + TileSize > -half) return 4;
+            }
             if (!data.adaptive || data.step >= 64) return data.step;
             Vector2 corner = data.corner + new Vector2(x, z);
             float px = Mathf.Clamp(data.focus.x, corner.x, corner.x + TileSize);

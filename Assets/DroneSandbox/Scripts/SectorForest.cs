@@ -24,6 +24,16 @@ namespace DroneSandbox
 
         static readonly List<Stem> stems = new List<Stem>();
         static readonly List<Grove> groves = new List<Grove>();
+        // Cached bounds let the renderer find small recipe groves without scanning empty world candidate cells.
+        public sealed class LocalCell
+        {
+            public readonly List<Stem> stems = new List<Stem>();
+            public Bounds bounds;
+        }
+
+        static readonly Dictionary<long, LocalCell> localCells = new Dictionary<long, LocalCell>();
+        public const int RenderCell = 120;
+        public static IReadOnlyDictionary<long, LocalCell> LocalCells => localCells;
         static int[] indices;
         static int firstX, firstZ, columns, rows;
         public static IReadOnlyList<Stem> Stems => stems;
@@ -36,7 +46,7 @@ namespace DroneSandbox
         // Drop sector ownership before planting gardens, so stale logical trees cannot exclude the next sector.
         public static void Reset()
         {
-            Ready = false; indices = null; stems.Clear(); groves.Clear(); PreparedCanopy = null; Version++;
+            Ready = false; indices = null; stems.Clear(); groves.Clear(); localCells.Clear(); PreparedCanopy = null; Version++;
         }
 
         // Populate every accepted stem, without a render budget or a GameObject; reuse the floor's existing input.
@@ -74,7 +84,16 @@ namespace DroneSandbox
                 if (Undergrowth.UnderTrees(p, 2.4f)) continue; // only gardens/orchards exist in the grid yet
                 stem.position.y = Ground.HeightAt(stem.position) - 0.15f;
                 stems.Add(stem); indices[k] = stems.Count; woodland.Add(p);
+                if (MapLayout.Plan.world == null)
+                {
+                    int cx = Mathf.FloorToInt((p.x + Origin.x) / RenderCell), cz = Mathf.FloorToInt((p.y + Origin.y) / RenderCell);
+                    long key = ((long)cx << 32) ^ (uint)cz;
+                    if (!localCells.TryGetValue(key, out var cell))
+                        localCells.Add(key, cell = new LocalCell { bounds = new Bounds(stem.position, Vector3.zero) });
+                    cell.stems.Add(stem); cell.bounds.Encapsulate(stem.position);
+                }
             }
+            foreach (var cell in localCells.Values) cell.bounds.Expand(52f);
             foreach (var stem in stems) Undergrowth.NoteTree(new Vector2(stem.position.x, stem.position.z));
             // Publish occupancy only after all indices and stems exist; renderers invalidate any pre-build cache.
             Ready = true; Version++;
@@ -92,7 +111,9 @@ namespace DroneSandbox
             int z1 = Mathf.FloorToInt((Origin.y + Ground.Size * 0.5f + WorldPlan.Half) / ForestHlod.BlockSize);
             for (int j = z0; j <= z1; j++) for (int i = x0; i <= x1; i++)
             {
-                var data = new ForestHlod.Data { corner = new Vector2(i * ForestHlod.BlockSize - WorldPlan.Half, j * ForestHlod.BlockSize - WorldPlan.Half), step = 128 };
+                // A 128 m grid can miss an entire recipe grove. Resolve the local crop before its floor is painted.
+                var data = new ForestHlod.Data { corner = new Vector2(i * ForestHlod.BlockSize - WorldPlan.Half, j * ForestHlod.BlockSize - WorldPlan.Half),
+                    step = 128, local = MapLayout.Plan.world == null };
                 var build = ForestHlod.Build(data, null); while (build.MoveNext()) { }
                 result.Add(data);
             }
@@ -150,7 +171,12 @@ namespace DroneSandbox
             }
             if (edge <= 0f || !(core ? CoreOpen(p) : MapLayout.IsWild(p, 0.5f))) return 0f;
             foreach (var c in plan.clearings) edge *= Mathf.SmoothStep(0f, 1f, (Vector2.Distance(p, c) - Scale.D(24f)) / 20f);
-            foreach (var g in plan.woodlandGlades) edge *= Mathf.SmoothStep(0f, 1f, (Vector2.Distance(p, g.center) - g.radius) / 18f);
+            foreach (var g in plan.woodlandGlades)
+            {
+                // Keep the reserved interior clear, with irregular young trees through a soft outer rim.
+                float ripple = ForestPattern.Noise(p.x + Origin.x, p.y + Origin.y, 17f, 96) * 8f;
+                edge *= Mathf.SmoothStep(0f, 1f, (Vector2.Distance(p, g.center) - g.radius - ripple) / 24f);
+            }
             return edge;
         }
 

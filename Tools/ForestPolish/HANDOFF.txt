@@ -1,0 +1,173 @@
+Forest polish - codex/forest-polish, based on 96b0197
+
+Code commits
+  5277051 Cover recipe woods at startup and defer canopy refinement during fast flight
+  964c149 Prioritize local crowns and bound fast-flight tree submissions
+  2ad3baf Refine mixed canopy rims with shared eight metre seams
+
+Changes and evidence
+
+Varrow's logical stems now populate a small index of occupied render cells with
+cached bounds. Visible occupied cells load first, directly from those stems,
+instead of waiting behind empty world candidate cells. Boundary cells still
+include world stems outside the crop. The recipe crop gets a 4 m canopy before
+the floor is painted; the previous 128 m grid could miss whole small woods or
+interpolate their surface below the ground. Its surrounding world remains coarse.
+The completed local surface is retained while viewing the crop instead of being
+rebuilt for a world refinement request.
+
+Ground.cs needs NO change. Logical woods remain the input to PaintForestFloor,
+Undergrowth and Canopy. This fixes their render coverage rather than deleting
+their floor or gameplay occupancy. World.BuildWoods also remains unchanged.
+
+In the production-source harness at Varrow's actual snapped world origin:
+  Raised startup canopy in dense 50 m patches: 130/224 before, 224/224 after.
+  After 0.5 simulated seconds at the base: 14/26 wooded screen bins contain
+    individual crowns before, 26/26 after (154 -> 362 submitted visible roots).
+  At the bridge: 12/17 -> 17/17 bins (156 -> 226 submitted visible roots).
+  Logical Varrow stems: 9,066 both revisions; none were removed to hide litter.
+
+Cost: recipe-sector construction measured 0.276 -> 1.161 seconds in the managed
+harness. The four exported startup blocks contain 303,952 vertices
+and 92,632 triangles, versus 5,236 vertices / 3,715 triangles before. The retained
+CPU mesh channels are about 13 MiB. Native upload latency and memory need checking.
+World-sector interiors retain their existing resolution; mixed rims refine to 8 m.
+
+Fast flight now holds its motion state for 0.5 seconds across skipped feed frames.
+Either camera can keep shared canopy refinement deferred. Missing coverage still
+preempts fine work, with a 0.20 ms coarse-build slice; stopped views retain 0.85 ms.
+At >80 m/s, the main-camera allowances are:
+  Below 80 m AGL: full 64, reduced 192, cards 1,800, triangles 650,000.
+  Above 80 m AGL: full 32, reduced 160, cards 1,800, triangles 450,000.
+  Small feed (<=360 pixels high): 16 / 60 / 900 / 180,000, even when stationary.
+  Normal strategy view: existing 200 / 1,000 / 5,000 / 1,800,000 allowances.
+Both sides of the existing fades count. Only full trees cast shadows. Instanced
+reduced trees already had shadows off; Art now also turns off decorative reduced
+tree LOD shadows (riverbanks, gardens and orchards).
+
+The hd151 forest-flight log is sampled after the Swift stops and the camera
+zooms out, so its zero tree counts and 0.85 ms build slice do not describe the
+whole flight. New interval counters survive that stop and are reset by the
+existing FarScatter.ResetTimings call. Mesh and shadow submissions are smaller;
+their effect on GPU execution time needs native profiling.
+
+Two-camera 240 m/s harness results, 360 frames, with the feed every other frame:
+                      baseline CPU p95   candidate CPU p95
+  Varrow base route       0.863 ms            0.717 ms
+  Varrow bridge route     1.181 ms            0.705 ms
+  Deep Forest route       0.917 ms            0.565 ms
+Deep Forest main-view peak tree triangles fell from 1,635,000 to 532,856.
+All candidate routes recognized fast movement for 360 frames, started zero
+refinements and cancelled zero or one selection. The Deep Forest route discarded
+one old deferred canopy build after moving more than 1,024 m, with no replacement
+fine build during flight. Canopy build mean fell from about
+0.26-0.27 ms to about 0.003 ms. Deep Forest kept individual trees throughout.
+Varrow routes cross open land and have zero-tree intervals in BOTH revisions;
+the continuous canopy coverage path stays available there.
+
+Reserved glades now have a deterministic 0-8 m irregular margin and a 24 m soft
+transition through the existing young edge trees. The reserved interior remains
+clear. World procedural glades already had a warped soft recipe, but their
+16/32 m canopy mesh cut straight across that margin. Mixed edges now use 8 m
+geometry; interior tiles keep the original spacing. Both sides agree on a shared
+edge spacing across adaptive tiles, and the block perimeter stays at 8 m. The
+harness checks every raised interior mesh edge has exactly two incident faces.
+The settled Deep Forest export has 90,068 canopy triangles versus 36,686 before;
+this extra simple geometry is substantially smaller than the fast-flight tree
+triangle reduction. Fine rim construction is deferred during fast flight too.
+The old Blender review also assigned litter with a hard threshold per 8 m triangle, creating
+artificial stair steps; both new comparison renders use the same filtered floor.
+
+Review files
+  Review/varrow-base-early_before.png / varrow-base-early_after.png
+  Review/varrow-bridge-early_before.png / varrow-bridge-early_after.png
+  Review/deep_before.png / deep_after.png
+  Review/measurements.json
+
+The Varrow views match the 02a/02c camera target, range, yaw, pitch and 45-degree
+vertical FOV after 30 simulated 60 Hz frames. They use the production scheduler,
+logical stems, actual canopy meshes and repository FBXs. Deep Forest is the
+settled 300 m / 45-degree comparison. Lighting, exposure and ground approximation
+are identical between revisions. Buildings, water, HDRP, temporal fades and native
+Unity Perlin noise are not reproduced. These are structural harness views, not
+native hd151 screenshots. The corrected harness uses the dam-based world origin,
+two cameras, and the actual low strategy-camera height: Rts.LookAt grounds its
+focus, so a Swift at 150 m does NOT put the 75 m-range strategy camera at 150 m.
+
+Verification and limits
+
+Three C# 9 projects compile against Unity 6000.6.7f1 engine assemblies with zero
+warnings/errors: forest consumers, complete current terrain integration, and Art.
+Unchanged HDRP service signatures have harness stubs; actual changed Renderer,
+LODGroup, mesh, instancing and camera APIs use Unity assemblies. The harness checks
+startup coverage, canopy seam topology, per-view budgets, two-camera motion,
+bounded refinements, strategy flight, projection and a 2.5 km jump. Source is CRLF, deterministic, and
+adds no packages or LINQ. Protected gameplay, Ground, water and Codex B files are
+unchanged. No Unity Editor or player was launched.
+
+The no-world preview path also passes. Its different seed/origin gives 218/219
+raised-canopy patch samples; the remaining sparse rim's exact logical tree was
+verified in the submitted batches after moving the camera to it. Live Varrow
+retains the stricter 224/224 canopy assertion and complete screen-bin coverage.
+
+Native frame p95 <=12 ms is NOT verified. Managed timings exclude native uploads,
+GPU work and the rest of the game. Material/shader behavior and the existing
+zero-fallback result must be checked by Claude in the player.
+
+Build checklist for Claude
+
+1. Integrate the code and build HDRP. Run hd152 with the existing forest lines plus
+   the exact interval lines below. Keep the current ResetTimings before the Swift
+   flight. Verify zero fallbacks and no new shader/player errors.
+2. Inspect 02a_base and 02c_bridge at 0.5 s and after settling. North of the base
+   and beside the river, litter must have crowns/canopy over it. Sweep all Varrow
+   woods, including outer woods and sector edges, and test preview without an
+   active world. Check first-frame upload cost and recipe loading time.
+3. Inspect Deep Forest and Border Line from the existing strategy views. Check
+   glade rims, edge trees, road/river clearances and canopy handovers. Keep initial
+   missing coverage within 3 s. After fast flight stops, refinement should resume
+   after the 0.5 s hold, with no permanent coarse-only state.
+   The wide Deep Forest view still reports some near coarse blocks after 10 s in
+   the managed harness (baseline also did); assess visible refinement latency in
+   the native build separately from the quick initial coverage.
+4. Repeat the 4x Swift flight on Low with its feed enabled: frame p95 <=12 ms,
+   forest mean <=1 ms, no gaps on turns/jumps. Repeat Medium/High and photo/feed
+   cameras. Capture CPU and GPU profiler samples DURING the wooded fast segment,
+   not only after stopping. Compare forest submission, alpha-tested foliage,
+   depth and shadow passes, canopy uploads, and the new phase/cancellation lines.
+   Confirm decorative reduced tree LODs and instanced reduced/cards cast no shadows.
+
+Exact log.WriteLine additions beside the existing forest flight screen line:
+
+log.WriteLine($"forest flight budget: fast frames {FarScatter.FastFrames}, samples {FarScatter.Samples}, peak per-camera full/reduced/card {FarScatter.PeakFullTrees}/{FarScatter.PeakReducedTrees}/{FarScatter.PeakCards}, peak tree triangles {FarScatter.PeakTreeTriangles}; selection start/complete/cancel {FarScatter.SelectionStarts}/{FarScatter.SelectionCompletes}/{FarScatter.SelectionCancels}");
+log.WriteLine($"forest flight phases: generation {FarScatter.GenerationMeanMs:F3}, selection {FarScatter.SelectionMeanMs:F3}, submission {FarScatter.SubmissionMeanMs:F3}, canopy {FarScatter.CanopyMeanMs:F3} ms mean/frame (all cameras)");
+log.WriteLine($"forest flight canopy: build mean {ForestHlod.BuildMeanMs:F3} ms, worst {ForestHlod.BuildWorstMs:F3} ms, refinements {ForestHlod.RefinementsStarted}, cancelled {ForestHlod.CancelledBuilds}, deferred frames {ForestHlod.DeferredFrames}");
+
+Exact live sample line for the base/bridge/sector screenshots:
+
+log.WriteLine($"forest motion: camera {FarScatter.CameraSpeed:F1} m/s, canopy slice {ForestHlod.SliceBudgetMs:F2} ms; recipe cells {SectorForest.LocalCells.Count}, logical stems {SectorForest.Stems.Count}, woods build {SectorForest.BuildMilliseconds:F1} ms");
+
+Peak counters include transition frames and each rendered camera; they are not a
+sum of both cameras' geometry. Canopy phase includes scheduling and draw calls;
+build mean measures the slice within it. Neither counter measures GPU execution.
+
+Reproduce sequentially, without Unity or another Blender job running
+
+Use C:/Users/ali10/AppData/Local/Programs/Python/Python313/python.exe -I for:
+  Tools/ForestPolish/prepare.py
+  Tools/ForestPolish/run.py before varrow-base
+  Tools/ForestPolish/run.py after varrow-base
+  Tools/ForestPolish/run.py before varrow-bridge
+  Tools/ForestPolish/run.py after varrow-bridge
+  Tools/ForestPolish/run.py before deep
+  Tools/ForestPolish/run.py after deep
+  Tools/ForestPolish/run.py after preview
+  Tools/ForestPolish/audit.py
+
+For each phase (before, after), render sectors varrow-base-early,
+varrow-bridge-early and deep one process at a time:
+  "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --factory-startup --threads 2 --python-exit-code 1 --python Tools/ForestPolish/render.py -- <phase> <sector>
+
+Baseline sources come from git object 96b0197, with no checkout switch. Generated
+scenes and assemblies stay under ignored Temp/forest-polish. Review PNGs and the
+compact measurements are the retained artifacts.
