@@ -37,6 +37,7 @@ namespace DroneSandbox
             if (MapLayout.Plan.ponds.Count > 0) BuildPonds(root);
         }
 
+        // Keep the spillway's waves and foam; the whole river needs more scattered light from above.
         static void BuildRiver(Transform root)
         {
             bool dam = MapLayout.HasDam;
@@ -61,6 +62,38 @@ namespace DroneSandbox
             river.largeBand1Multiplier = 0.45f;
             river.ripplesWindSpeed = 10f;
             river.ripplesChaos = 0.3f;
+
+            // This also applies to Varrow, whose river shares a surface with its plunge pool. Reflections,
+            // spillway foam, lake materials and the close-range dam wave settings remain HDRP's own.
+            {
+                // HDRP retains its physical Fresnel, sky/SSR reflections and sun highlights. A short absorption
+                // length and a stronger ambient term stop the dark bed dominating a high, steep camera.
+                river.refractionColor = new Color(.30f, .48f, .43f);
+                river.scatteringColor = new Color(.20f, .32f, .30f);
+                river.absorptionDistance = 1.8f;
+                river.ambientScattering = .45f;
+                river.heightScattering = .12f;
+                river.startSmoothness = .96f;
+                river.endSmoothness = .94f;
+                river.smoothnessFadeStart = 250f;
+                river.smoothnessFadeDistance = 750f;
+                // A River has one agitation band, not the ocean's two swell bands. Keep low chop, with the
+                // existing ripple simulation fading over the strategy camera's actual slant distance.
+                if (!dam)
+                {
+                    river.repetitionSize = 75f;
+                    river.largeWindSpeed = 8f;
+                    river.largeBand0Multiplier = .35f;
+                }
+                river.ripplesFadeMode = WaterSurface.FadeMode.Custom;
+                river.ripplesFadeStart = 120f;
+                river.ripplesFadeDistance = 550f;
+                // No extra simulation or reflection passes. Save work the turbid bed cannot show, and let the
+                // existing two-metre mesh carry distant ripples without long-range tessellation.
+                if (!dam) river.caustics = false;
+                river.tessellationFactorFadeStart = 80f;
+                river.tessellationFactorFadeRange = 320f;
+            }
 
             // The current runs down the river's own course (a map of its direction, bend by bend), carrying the
             // ripples and foam along with it.
