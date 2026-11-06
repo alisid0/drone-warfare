@@ -170,13 +170,22 @@ namespace DroneSandbox
         // Bound local woods geographically, never by deleting stems when a shared renderer allowance fills up.
         static void PlanGroves(Random rng)
         {
-            int count = Mathf.Min(32, Mathf.RoundToInt(22f * MapLayout.Plan.forest / 0.3f));
-            float limit = MapLayout.Edge - 10f;
-            for (int attempt = 0; attempt < 1600 && groves.Count < count; attempt++)
+            var plan = MapLayout.Plan;
+            int innerWant = Mathf.Min(10, Mathf.RoundToInt(6f * plan.forest / 0.3f));
+            int outerWant = Mathf.Min(22, Mathf.RoundToInt(16f * plan.forest / 0.3f));
+            int inner = 0, outer = 0;
+            float limit = MapLayout.Edge - 10f, innerLimit = Mathf.Min(Scale.D(105f), MapLayout.Edge * 0.48f);
+            for (int attempt = 0; attempt < 1600 && (inner < innerWant || outer < outerWant); attempt++)
             {
-                Vector2 p = new Vector2((float)rng.NextDouble() * limit * 2f - limit, (float)rng.NextDouble() * limit * 2f - limit);
+                // Finish the inner quota explicitly; random sampling across 4 km2 otherwise favours the outer ring.
+                float reach = inner < innerWant ? innerLimit : limit;
+                Vector2 p = new Vector2((float)rng.NextDouble() * reach * 2f - reach, (float)rng.NextDouble() * reach * 2f - reach);
+                bool isOuter = Mathf.Max(Mathf.Abs(p.x), Mathf.Abs(p.y)) > innerLimit;
+                if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
                 if (!MapLayout.IsWild(p, 3f)) continue;
-                groves.Add(new Grove { center = p, radius = Mathf.Min(Scale.D(12f + (float)rng.NextDouble() * 18f), Ground.Size * 0.075f),
+                if (isOuter) outer++; else inner++;
+                groves.Add(new Grove { center = p,
+                    radius = Mathf.Min(Scale.D((isOuter ? 16f : 8f) + (float)rng.NextDouble() * (isOuter ? 14f : 9f)), Ground.Size * 0.075f),
                     stretch = 1f + (float)rng.NextDouble() * 0.5f, angle = (float)rng.NextDouble() * Mathf.PI });
             }
         }
