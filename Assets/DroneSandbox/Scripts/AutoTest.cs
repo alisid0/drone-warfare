@@ -744,6 +744,7 @@ namespace DroneSandbox
                           $"over 2 ms {FarDetail.BudgetOverruns}, pressure evictions {FarDetail.PressureEvictions}; frame p95 {p95:F2} ms ({flightFrames.Count} frames, screenshot I/O excluded), " +
                           $"{Screen.width}x{Screen.height}, {SystemInfo.graphicsDeviceName}");
             log.WriteLine($"World forest over the flight: {ForestLine()}");
+            log.WriteLine($"forest flight screen: effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, near coarse {ForestHlod.NearCoarseBlocks}, CPU mean {FarScatter.MeanMs:F3} ms, worst {FarScatter.WorstMs:F3} ms, samples {FarScatter.Samples}");
             if (FarScatter.Samples > 0 && FarScatter.MeanMs > 1f) errors++;
             if (!lowField || !lowForest || FarDetail.Live > FarDetail.MaxTiles || FarDetail.Committed == 0 ||
                 FarDetail.WorstCommitMs > 2.0 || meanCommit > 1.0 || p95 > 16.7f) errors++;
@@ -1275,6 +1276,8 @@ namespace DroneSandbox
                 yield return Shot($"31_sector_{n:00}_{kind}");
                 // What of the woods this view drew: hd145's dense forest drew nothing in a Deep Forest sector.
                 log.WriteLine($"  {ForestLine()}");
+                log.WriteLine($"  forest screen: full/reduced/card {FarScatter.FullTreesDrawn}/{FarScatter.ReducedTreesDrawn}/{FarScatter.CardTreesDrawn}, effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, crown reach {FarScatter.CrownReach:F0} m, ready radius {FarScatter.ReadyRadius:F0} m; missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, near coarse {ForestHlod.NearCoarseBlocks}, build {ForestHlod.BuildMs:F3} ms");
+                log.WriteLine($"  forest materials: fallbacks {ForestMaterials.FallbackCount}, remapped variants {ForestMaterials.RemappedCount}; last fallback {ForestMaterials.LastFallback}");
                 photo.Exit();
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
