@@ -16,6 +16,10 @@ namespace DroneSandbox
         readonly District[] districts = new District[Count * Count];
         readonly object[] gates = new object[64];
         readonly Dictionary<long, FarDetailData.Segment[]> roadCells = new Dictionary<long, FarDetailData.Segment[]>();
+        long buildTicks;
+        int builtDistricts;
+        public double BuildMilliseconds => Interlocked.Read(ref buildTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        public int BuiltDistricts => Volatile.Read(ref builtDistricts);
 
         // Index road directions once; no global polygon pass or native Unity call is needed on world setup.
         public FarFieldPlan(int seed, FarDetailData.Segment[] roads, FarDetailCover cover = null, Func<float, float, float> height = null)
@@ -139,8 +143,18 @@ namespace DroneSandbox
             }
         }
 
-        // Four metre district tracks separate farms; the corner bevel keeps three farms from forming spokes.
+        // Sum construction CPU time separately from painting wall time; concurrent workers can overlap.
         District Build(int x, int z)
+        {
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            var result = BuildDistrict(x, z);
+            Interlocked.Add(ref buildTicks, System.Diagnostics.Stopwatch.GetTimestamp() - start);
+            Interlocked.Increment(ref builtDistricts);
+            return result;
+        }
+
+        // Four metre district tracks separate farms; the corner bevel keeps three farms from forming spokes.
+        District BuildDistrict(int x, int z)
         {
             int hash = Hash(x, z);
             var d = new District { x = x, z = z, site = Site(x, z) };

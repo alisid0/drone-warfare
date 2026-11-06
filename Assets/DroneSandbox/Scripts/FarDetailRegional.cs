@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Stage = DroneSandbox.FarDetailTiming.Stage;
 
 namespace DroneSandbox
 {
@@ -19,7 +20,8 @@ namespace DroneSandbox
         readonly Texture2D upload;
         Task<FarDetailRegionData> worker;
         FarDetailRegionData ready;
-        int stage;
+        int stage, copyMip, copyRow;
+        Stage operation;
         float retryAfter;
         bool disposed;
 
@@ -37,6 +39,7 @@ namespace DroneSandbox
             array.Apply(false, true);
             upload = new Texture2D(n, n, TextureFormat.DXT1, FarDetailRegionData.Mips, false)
             { name = "Regional ground upload", wrapMode = TextureWrapMode.Clamp };
+            upload.Apply(false, false); // allocate the reusable native staging resource before the flight
             Shader.SetGlobalTexture("_FarRegionAlbedo", array);
             Shader.SetGlobalTexture("_FarWorldPicture", FarTerrain.WorldTexture);
             Shader.SetGlobalVectorArray("_FarRegionPages", pages);
@@ -54,13 +57,21 @@ namespace DroneSandbox
         // FarDetail owns the one frame timer: a regional upload never shares a frame with a tile/collider API stage.
         public void Tick(Vector2 eye, bool commit)
         {
+            long stamp = FarDetailTiming.Begin(); operation = Stage.RegionPlan;
+            TickCore(eye, commit);
+            FarDetailTiming.End(operation, stamp);
+        }
+
+        // Keep queue selection separate from the measured texture stage, including the first completed worker.
+        void TickCore(Vector2 eye, bool commit)
+        {
             if (disposed || array == null) return;
             Shader.SetGlobalFloat("_FarRegionTime", Time.unscaledTime);
             if (!commit) return;
             if (worker != null && worker.IsCompleted)
             {
                 if (worker.IsFaulted) { Debug.LogException(worker.Exception); retryAfter = Time.unscaledTime + 2f; }
-                else { ready = worker.Result; LastWorkerMs = ready.milliseconds; stage = 0; }
+                else { ready = worker.Result; LastWorkerMs = ready.milliseconds; stage = copyMip = copyRow = 0; }
                 worker = null;
             }
             if (ready != null)
@@ -82,27 +93,39 @@ namespace DroneSandbox
                 if (distance < best) { best = distance; bx = x; bz = z; }
             }
             if (best == float.MaxValue) return;
-            var snapshot = plan;
-            worker = Task.Run(() => FarDetailRegionData.Build(snapshot, bx, bz));
+            Launch(bx, bz);
         }
 
-        // Three CPU writes, one tiny staging upload, three GPU copies, then one publication; never Apply the array again.
+        // Isolate the worker closure from TickCore so idle streaming frames do not allocate a display class.
+        void Launch(int x, int z)
+        {
+            var snapshot = plan;
+            worker = Task.Run(() => FarDetailRegionData.Build(snapshot, x, z));
+        }
+
+        // Copy BC1 in block-aligned bands, with invalidation and publication in their own frames. Never Apply the array.
         void Upload()
         {
             int slot = Index(ready.x, ready.z);
-            if (stage < 3) upload.SetPixelData(ready.mips[stage], stage);
-            else if (stage == 3) upload.Apply(false, false);
-            else if (stage < 7)
+            if (stage < 3) { operation = Stage.RegionPixels; upload.SetPixelData(ready.mips[stage], stage); }
+            else if (stage == 3) { operation = Stage.RegionApply; upload.Apply(false, false); }
+            else if (stage == 4)
             {
-                if (stage == 4)
-                {
-                    pages[slot] = Vector4.zero;
-                    Shader.SetGlobalVectorArray("_FarRegionPages", pages);
-                }
-                Graphics.CopyTexture(upload, 0, stage - 4, array, slot, stage - 4);
+                operation = Stage.RegionPublish; pages[slot] = Vector4.zero;
+                Shader.SetGlobalVectorArray("_FarRegionPages", pages);
+            }
+            else if (stage == 5)
+            {
+                operation = Stage.RegionCopy;
+                int n = FarDetailRegionData.Resolution >> copyMip, rows = Math.Min(128, n - copyRow);
+                Graphics.CopyTexture(upload, 0, copyMip, 0, copyRow, n, rows, array, slot, copyMip, 0, copyRow);
+                copyRow += rows;
+                if (copyRow == n) { copyRow = 0; copyMip++; }
+                if (copyMip < FarDetailRegionData.Mips) return;
             }
             else
             {
+                operation = Stage.RegionPublish;
                 pages[slot] = new Vector4(ready.x, ready.z, Time.unscaledTime, 1f);
                 Shader.SetGlobalVectorArray("_FarRegionPages", pages);
                 ready = null; Committed++;

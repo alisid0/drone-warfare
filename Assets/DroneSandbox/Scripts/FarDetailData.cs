@@ -15,11 +15,20 @@ namespace DroneSandbox
         readonly WorldFeatureMap features; // the permanent landmarks' surfaces and graded platforms
         readonly int count;
         readonly Segment[] roads, rivers;
-        readonly Dictionary<long, Segment[]> riverCells = new Dictionary<long, Segment[]>();
+        readonly Dictionary<long, Segment[]> riverCells;
         public readonly FarFieldPlan fields;
         public readonly FarDetailCover cover;
         public readonly VillagePlan villages;
         public readonly float[][] coarse;
+
+        // A sector owns its coarse heights, but shares all immutable world inputs and already planned districts.
+        internal FarDetailData(FarDetailData source, float[][] coarse)
+        {
+            seed = source.seed; heights = source.heights; covers = source.covers; count = source.count;
+            roads = source.roads; rivers = source.rivers; riverCells = source.riverCells;
+            features = source.features; fields = source.fields; cover = source.cover; villages = source.villages;
+            this.coarse = coarse;
+        }
 
         // A vector segment carries real widths, avoiding the world's deliberately exaggerated road pixels.
         public struct Segment
@@ -36,6 +45,7 @@ namespace DroneSandbox
             public Vector2[] uv;
             public int[] triangles, collisionTriangles;
             public Color32[] pixels, controls;
+            public Color32[][] mips;
             public Vector4[] tangents;
             public double generationMs;
         }
@@ -44,6 +54,7 @@ namespace DroneSandbox
         public FarDetailData(int seed, float[] heights, Cover[] covers, int count, Segment[] roads, Segment[] rivers, float[][] coarse, VillagePlan villages = null)
         {
             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
+            riverCells = new Dictionary<long, Segment[]>();
             features = WorldPlan.CaptureFeatureMap(); // immutable, so workers can read it
             this.villages = villages ?? new VillagePlan(seed, roads, WorldPlan.Settlements);
             var streets = new List<Segment>(roads); streets.AddRange(this.villages.lanes);
@@ -110,11 +121,12 @@ namespace DroneSandbox
         }
 
         // Build heights, normals, skirts, collider and pixels entirely as worker-owned managed data.
-        public Tile Build(int x, int z, float[] roughness, Vector2[] coverPositions)
+        public Tile Build(int x, int z, float[] roughness, Vector2[] coverPositions, Tile reuse = null)
         {
             var timer = System.Diagnostics.Stopwatch.StartNew();
             int n = Samples, length = n * n + 4 * n;
-            var tile = new Tile { x = x, z = z, vertices = new Vector3[length], normals = new Vector3[length], uv = new Vector2[length] };
+            var tile = reuse ?? new Tile { vertices = new Vector3[length], normals = new Vector3[length], uv = new Vector2[length] };
+            tile.x = x; tile.z = z;
             float x0 = x * Size, z0 = z * Size;
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
@@ -135,32 +147,32 @@ namespace DroneSandbox
                     float norm = 1f / (float)Math.Sqrt(dx * dx + dz * dz + 1f);
                     tile.normals[j * n + i] = new Vector3(-dx * norm, norm, -dz * norm);
                 }
-            var triangles = new List<int>(Quads * Quads * 6 + Quads * 48);
-            Grid(triangles, Quads);
+            var triangles = tile.triangles == null ? new List<int>(Quads * Quads * 6 + Quads * 48) : null;
+            if (triangles != null) Grid(triangles, Quads);
             for (int side = 0; side < 4; side++)
                 for (int t = 0; t < n; t++)
                 {
                     int e = Edge(side, t), k = n * n + side * n + t;
                     Vector3 p = tile.vertices[e]; p.y -= 80f;
                     tile.vertices[k] = p; tile.normals[k] = tile.normals[e]; tile.uv[k] = tile.uv[e];
-                    if (t == 0) continue;
+                    if (t == 0 || triangles == null) continue;
                     int prev = Edge(side, t - 1);
                     triangles.Add(prev); triangles.Add(e); triangles.Add(k - 1); triangles.Add(e); triangles.Add(k); triangles.Add(k - 1);
                     triangles.Add(prev); triangles.Add(k - 1); triangles.Add(e); triangles.Add(e); triangles.Add(k - 1); triangles.Add(k);
                 }
-            tile.triangles = triangles.ToArray();
-            tile.collision = new Vector3[33 * 33];
+            if (triangles != null) tile.triangles = triangles.ToArray();
+            if (tile.collision == null) tile.collision = new Vector3[33 * 33];
             for (int j = 0; j < 33; j++) for (int i = 0; i < 33; i++) tile.collision[j * 33 + i] = tile.vertices[j * 4 * n + i * 4];
-            triangles.Clear(); Grid(triangles, 32); tile.collisionTriangles = triangles.ToArray();
-            tile.tangents = new Vector4[length];
+            if (tile.collisionTriangles == null) { triangles.Clear(); Grid(triangles, 32); tile.collisionTriangles = triangles.ToArray(); }
+            if (tile.tangents == null) tile.tangents = new Vector4[length];
             for (int k = 0; k < length; k++)
             {
                 Vector3 normal = tile.normals[k];
                 float inv = 1f / (float)Math.Sqrt(normal.y * normal.y + normal.x * normal.x);
                 tile.tangents[k] = new Vector4(normal.y * inv, -normal.x * inv, 0f, -1f);
             }
-            tile.pixels = new Color32[TextureSize * TextureSize];
-            tile.controls = new Color32[tile.pixels.Length];
+            if (tile.pixels == null) tile.pixels = new Color32[TextureSize * TextureSize];
+            if (tile.controls == null) tile.controls = new Color32[tile.pixels.Length];
             var localRoads = Nearby(roads, x0, z0); var localRivers = Nearby(rivers, x0, z0);
             for (int j = 0; j < TextureSize; j++) for (int i = 0; i < TextureSize; i++)
                 {
@@ -169,6 +181,7 @@ namespace DroneSandbox
                     tile.pixels[k] = Paint(wx, wz, new Vector2(wx, wz), localRoads, localRivers);
                     tile.controls[k] = Control(wx, wz, new Vector2(wx, wz), localRoads, localRivers);
                 }
+            tile.mips = FarDetailMips.Build(tile.pixels, TextureSize, tile.mips);
             tile.generationMs = timer.Elapsed.TotalMilliseconds;
             return tile;
         }
@@ -252,9 +265,16 @@ namespace DroneSandbox
     // Snapshot access lives beside the private grids rather than reaching into a live plan from worker tasks.
     public static partial class WorldPlan
     {
-        // World generation has finished when FarTerrain calls this; clone every mutable input once per rebuild.
+        public static double DetailCaptureMs { get; private set; }
+        public static double DetailCopyMs { get; private set; }
+        public static double DetailIndexMs { get; private set; }
+
+        // Grid identity also changes on same-seed regeneration; old workers retain their own immutable snapshot.
         internal static FarDetailData CaptureDetail(float[][] coarse)
         {
+            if (detailCover == cover && detailHeights == heights && detailSnapshot != null)
+                return coarse == null ? detailSnapshot : new FarDetailData(detailSnapshot, coarse);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             var roads = new List<FarDetailData.Segment>(); var rivers = new List<FarDetailData.Segment>();
             int route = 0;
             foreach (var road in Roads)
@@ -272,10 +292,21 @@ namespace DroneSandbox
                     rivers.Add(new FarDetailData.Segment { ax = river.points[k - 1].x, az = river.points[k - 1].y, bx = river.points[k].x, bz = river.points[k].y, widthA = river.halfWidths[k - 1], widthB = river.halfWidths[k] });
             var lanes = roads.ToArray();
             if (villageCover != cover) { villageSnapshot = new VillagePlan(Seed, lanes, Settlements); villageCover = cover; }
-            return new FarDetailData(Seed, (float[])heights.Clone(), (Cover[])cover.Clone(), GridCount, lanes, rivers.ToArray(), coarse, villageSnapshot);
+            double start = timer.Elapsed.TotalMilliseconds;
+            var capturedHeights = (float[])heights.Clone(); var capturedCover = (Cover[])cover.Clone();
+            DetailCopyMs = timer.Elapsed.TotalMilliseconds - start;
+            start = timer.Elapsed.TotalMilliseconds;
+            detailSnapshot = new FarDetailData(Seed, capturedHeights, capturedCover, GridCount, lanes, rivers.ToArray(), null, villageSnapshot);
+            DetailIndexMs = timer.Elapsed.TotalMilliseconds - start;
+            detailCover = cover; detailHeights = heights;
+            DetailCaptureMs = timer.Elapsed.TotalMilliseconds;
+            return coarse == null ? detailSnapshot : new FarDetailData(detailSnapshot, coarse);
         }
 
         static Cover[] villageCover;
         static VillagePlan villageSnapshot;
+        static Cover[] detailCover;
+        static float[] detailHeights;
+        static FarDetailData detailSnapshot;
     }
 }

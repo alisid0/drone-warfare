@@ -32,6 +32,12 @@ namespace DroneSandbox
         static Texture2D worldTexture;
         static Material material;
         static int textureSeed = -1;
+        static FarDetailData picturePlan;
+        static FarWorldPicture painter;
+        public static string BuildTimings { get; private set; } = "";
+        public static string PictureTimings { get; private set; } = "not started";
+        public static bool PicturePending => painter != null && painter.Busy;
+        static double geometryMs, meshUploadMs, colliderMs, chunkSnapshotMs;
 
         // The near ring's reach and blend, which the chunks sink under (Backdrop builds the ring itself).
         public const float NearReach = 1500f, NearBlend = 400f;
@@ -70,6 +76,10 @@ namespace DroneSandbox
         public static void Build()
         {
             if (!WorldPlan.Ready) return;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            geometryMs = meshUploadMs = colliderMs = chunkSnapshotMs = 0;
+            var times = new System.Text.StringBuilder();
+            void Lap(string name) { times.AppendFormat("{0} {1:F2} ms, ", name, clock.Elapsed.TotalMilliseconds); clock.Restart(); }
             FarDetail.Clear();
             if (root == null)
             {
@@ -82,12 +92,19 @@ namespace DroneSandbox
             foreach (var m in meshes) Art.Discard(m);
             meshes.Clear();
             colliders.Clear();
-            if (textureSeed != WorldPlan.Seed)
+            Lap("clear");
+            var snapshot = WorldPlan.CaptureDetail(null);
+            Lap("snapshot");
+            if (textureSeed != WorldPlan.Seed || !ReferenceEquals(picturePlan, snapshot))
             {
                 BuildCanopy();
+                Lap("canopy");
+                picturePlan = snapshot;
                 PaintWorld();
+                Lap("preview/dispatch");
             }
             FarDetailEdge.Apply(worldTexture, Origin);
+            Lap("collar");
             SampleEdge();
             if (material == null)
             {
@@ -96,10 +113,14 @@ namespace DroneSandbox
                 material.SetFloat("_Smoothness", 0f);
             }
             material.mainTexture = worldTexture;
+            Lap("edge/material");
             for (int cz = 0; cz < ChunkCount; cz++)
                 for (int cx = 0; cx < ChunkCount; cx++)
                     BuildChunk(cx, cz);
+            Lap("chunks/colliders");
             FarDetail.Initialise(root);
+            Lap("detail pools/region array");
+            BuildTimings = times.ToString() + $"chunk parts: geometry {geometryMs:F2} ms, mesh APIs {meshUploadMs:F2} ms, collider bind/cook {colliderMs:F2} ms, snapshot {chunkSnapshotMs:F2} ms";
         }
 
         // ---- Heights ----
@@ -226,9 +247,11 @@ namespace DroneSandbox
             go.transform.SetParent(root, false);
             go.transform.position = new Vector3(corner.x - Origin.x, 0f, corner.y - Origin.y);
             var lods = new LOD[LodQuads.Length];
+            FarDetailChunks.Geometry source = null;
             for (int l = 0; l < LodQuads.Length; l++)
             {
-                var mesh = ChunkMesh(corner, LodQuads[l]);
+                var mesh = ChunkMesh(corner, LodQuads[l], out var geometry);
+                if (l == 0) source = geometry;
                 meshes.Add(mesh);
                 var part = new GameObject("LOD" + l);
                 part.transform.SetParent(go.transform, false);
@@ -239,21 +262,26 @@ namespace DroneSandbox
                 lods[l] = new LOD(l == 0 ? 0.55f : l == 1 ? 0.22f : 0.0001f, new Renderer[] { renderer });
                 if (l == LodQuads.Length - 1)
                 {
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
                     var collider = part.AddComponent<MeshCollider>();
                     collider.sharedMesh = mesh;
                     colliders.Add(collider);
+                    colliderMs += MillisecondsSince(start);
                 }
             }
             var group = go.AddComponent<LODGroup>();
             group.SetLODs(lods);
             group.RecalculateBounds();
-            FarDetailChunks.Register(corner, lods[0].renderers[0].GetComponent<MeshFilter>(), group);
+            long capture = System.Diagnostics.Stopwatch.GetTimestamp();
+            FarDetailChunks.Register(corner, lods[0].renderers[0].GetComponent<MeshFilter>(), group, source);
+            chunkSnapshotMs += MillisecondsSince(capture);
         }
 
         // A grid of (quads + 1) x (quads + 1) heights over the chunk, plus a skirt round it, with normals from the world's own
         // slopes (so neighbouring chunks light alike) and UVs into the world picture.
-        static Mesh ChunkMesh(Vector2 corner, int quads)
+        static Mesh ChunkMesh(Vector2 corner, int quads, out FarDetailChunks.Geometry source)
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             int n = quads + 1;
             float step = ChunkSize / quads;
             var vertices = new Vector3[n * n + 4 * n];
@@ -296,16 +324,23 @@ namespace DroneSandbox
                     triangles.Add(e0); triangles.Add(edgeIndex); triangles.Add(s0); triangles.Add(edgeIndex); triangles.Add(k); triangles.Add(s0);
                     triangles.Add(e0); triangles.Add(s0); triangles.Add(edgeIndex); triangles.Add(edgeIndex); triangles.Add(s0); triangles.Add(k);
                 }
+            var indices = triangles.ToArray();
+            source = quads == LodQuads[0] ? new FarDetailChunks.Geometry { vertices = vertices, normals = normals, uv = uvs, triangles = indices } : null;
+            geometryMs += MillisecondsSince(started); started = System.Diagnostics.Stopwatch.GetTimestamp();
             var mesh = new Mesh { name = $"Far terrain {quads}" };
             mesh.indexFormat = vertices.Length > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
             mesh.vertices = vertices;
             mesh.normals = normals;
             mesh.uv = uvs;
-            mesh.SetTriangles(triangles, 0);
+            mesh.SetTriangles(indices, 0);
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
+            meshUploadMs += MillisecondsSince(started);
             return mesh;
         }
+
+        // Timestamp arithmetic avoids allocating a Stopwatch for every chunk and native API stage.
+        static double MillisecondsSince(long start) => (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
         // Where a ray meets the far terrain (its coarsest level, which every chunk keeps as its collider).
         public static bool Raycast(Ray ray, out Vector3 point)
@@ -327,12 +362,14 @@ namespace DroneSandbox
 
         // ---- The world picture ----
 
-        // The same area-filtered palette and vector masks as the tiles, sampled at the world's pixel footprint.
+        // Display a cheap cover preview immediately, then paint shared parcels and vectors off the main thread.
         static void PaintWorld()
         {
+            FarDetailEdge.Forget(worldTexture);
             Art.Discard(worldTexture);
-            var pixels = WorldPlan.CaptureDetail(null).WorldPixels(TextureSize);
-            worldTexture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, true)
+            const int preview = 256;
+            var pixels = picturePlan.PreviewPixels(preview);
+            worldTexture = new Texture2D(preview, preview, TextureFormat.RGBA32, true)
             {
                 name = "World picture",
                 wrapMode = TextureWrapMode.Clamp,
@@ -341,7 +378,34 @@ namespace DroneSandbox
             worldTexture.SetPixels32(pixels);
             worldTexture.Apply(true, false); // a small collar is restored/repainted at each sector change
             textureSeed = WorldPlan.Seed;
+            painter = root.GetComponent<FarWorldPicture>() ?? root.gameObject.AddComponent<FarWorldPicture>();
+            PictureTimings = "painting on worker (2 threads)";
+            painter.Begin(picturePlan, worldTexture);
         }
+
+        // Keep the texture object itself: Backdrop and regional shader bindings see the final picture together.
+        internal static void FinishPicture(Texture2D target, Color32[] pixels, double workerMs)
+        {
+            if (target == null || target != worldTexture) return;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            FarDetailEdge.Forget(target);
+            if (!target.Reinitialize(TextureSize, TextureSize, TextureFormat.RGBA32, true))
+            { PictureFailed(); UnityEngine.Debug.LogError("Could not resize the world picture."); return; }
+            double resize = clock.Elapsed.TotalMilliseconds; clock.Restart();
+            target.SetPixelData(pixels, 0);
+            double copy = clock.Elapsed.TotalMilliseconds; clock.Restart();
+            // Paint the collar before the sole upload; the old path regenerated and uploaded all mips twice.
+            FarDetailEdge.Apply(target, Origin, false);
+            double collar = clock.Elapsed.TotalMilliseconds; clock.Restart();
+            target.Apply(true, false);
+            double apply = clock.Elapsed.TotalMilliseconds;
+            PictureTimings = $"worker {workerMs:F2} ms, resize {resize:F2} ms, CPU copy 64 MiB {copy:F2} ms, collar {collar:F2} ms, Apply/mips {apply:F2} ms; "
+                + $"districts {picturePlan.fields.BuiltDistricts}, district CPU {picturePlan.fields.BuildMilliseconds:F2} ms; "
+                + $"snapshot cold {WorldPlan.DetailCaptureMs:F2} ms (clone {WorldPlan.DetailCopyMs:F2}, index {WorldPlan.DetailIndexMs:F2}); BC1 0 ms, full readback 0 ms";
+        }
+
+        // Both worker and native publication failures remain visible in the build log.
+        internal static void PictureFailed() { PictureTimings = "failed (see exception)"; }
 
         // The world picture, for the near ring round the sector (Backdrop) to paint itself with.
         public static Texture2D WorldTexture => worldTexture;

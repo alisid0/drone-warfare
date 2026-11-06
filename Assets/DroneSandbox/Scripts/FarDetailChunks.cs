@@ -50,8 +50,8 @@ namespace DroneSandbox
             All.Clear();
         }
 
-        // Read engine mesh arrays once at setup, while they are still immutable and on the main thread.
-        public static void Register(Vector2 corner, MeshFilter filter, LODGroup group)
+        // Reuse the builder's immutable arrays; external callers can still capture an existing mesh once at setup.
+        public static void Register(Vector2 corner, MeshFilter filter, LODGroup group, Geometry source = null)
         {
             var mesh = filter.sharedMesh;
             All.Add(new Chunk
@@ -60,7 +60,7 @@ namespace DroneSandbox
                 filter = filter,
                 group = group,
                 original = mesh,
-                source = new Geometry { vertices = mesh.vertices, normals = mesh.normals, uv = mesh.uv, triangles = mesh.triangles }
+                source = source ?? new Geometry { vertices = mesh.vertices, normals = mesh.normals, uv = mesh.uv, triangles = mesh.triangles }
             });
         }
 
@@ -83,10 +83,10 @@ namespace DroneSandbox
         // Subtract active tile rectangles from the original triangles, preserving every outside fragment exactly.
         public static Geometry Cut(Geometry source, Vector2 corner, Area[] areas, FarDetailData plan)
         {
-            var vertices = new List<Vector3>(source.vertices); var normals = new List<Vector3>(source.normals); var uv = new List<Vector2>(source.uv); var indices = new List<int>(source.triangles.Length);
             var relevant = new List<Area>();
             foreach (var area in areas) if (Overlaps(corner, area)) relevant.Add(area);
             if (relevant.Count == 0) return source;
+            var vertices = new List<Vector3>(source.vertices); var normals = new List<Vector3>(source.normals); var uv = new List<Vector2>(source.uv); var indices = new List<int>(source.triangles.Length);
             var pieces = new List<List<Vertex>>();
             for (int t = 0; t < source.triangles.Length; t += 3)
             {

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Stage = DroneSandbox.FarDetailTiming.Stage;
 
 namespace DroneSandbox
 {
@@ -25,6 +26,7 @@ namespace DroneSandbox
         public static int CommitFrames { get; private set; }
         public static int BudgetOverruns { get; private set; }
         public static double LastGenerationMs { get; private set; }
+        public static double WorstBakeMs { get; private set; }
 
         // One pooled resource set retains its mesh and CPU-readable texture for reuse without GPU allocation churn.
         sealed class Slot
@@ -35,6 +37,7 @@ namespace DroneSandbox
             public Texture2D texture, control;
             public Material material;
             public FarDetailData.Tile data;
+            public Task<double> bake;
             public int x, z;
             public float lastWanted;
         }
@@ -53,9 +56,10 @@ namespace DroneSandbox
             public FarDetailChunks.Geometry[] chunks;
         }
 
-        readonly Dictionary<long, Slot> live = new Dictionary<long, Slot>();
-        readonly Stack<Slot> pool = new Stack<Slot>();
-        readonly List<Request> requests = new List<Request>();
+        readonly Dictionary<long, Slot> live = new Dictionary<long, Slot>(MaxTiles);
+        readonly Stack<Slot> pool = new Stack<Slot>(MaxTiles + 1);
+        readonly List<Request> requests = new List<Request>(MaxTiles * 4);
+        static readonly Comparison<Request> compare = Compare;
         readonly HashSet<long> wanted = new HashSet<long>();
         readonly List<FarDetailChunks.Chunk> changed = new List<FarDetailChunks.Chunk>();
         readonly Stopwatch frameTimer = new Stopwatch();
@@ -66,7 +70,8 @@ namespace DroneSandbox
         Slot incoming, outgoing;
         Request pending;
         float[] roughness;
-        int sampleRow, stage, chunkStage, chunkIndex;
+        float[] roughnessBuffer;
+        int sampleRow, stage, chunkStage, chunkIndex, mipStage;
         bool sampling;
         Vector2 origin, eye, feed, velocity, feedVelocity, previousEye, previousFeed;
         bool hasPrevious, hasFeed;
@@ -95,6 +100,7 @@ namespace DroneSandbox
             instance = parent.GetComponent<FarDetail>() ?? parent.gameObject.AddComponent<FarDetail>();
             instance.origin = FarTerrain.Origin;
             instance.plan = WorldPlan.CaptureDetail(FarDetailChunks.Heights());
+            instance.roughnessBuffer = new float[FarDetailData.Samples * FarDetailData.Samples];
             instance.regional = new FarDetailRegional(instance.plan);
             instance.hasPrevious = false; instance.previousDrone = null; instance.nextPlan = 0f;
             for (int i = 0; i <= MaxTiles; i++) instance.pool.Push(instance.MakeSlot(parent, i));
@@ -106,7 +112,8 @@ namespace DroneSandbox
         public static void ResetMetrics()
         {
             Committed = PressureEvictions = CommitFrames = BudgetOverruns = 0;
-            WorstCommitMs = TotalCommitMs = LastGenerationMs = 0;
+            WorstCommitMs = TotalCommitMs = LastGenerationMs = WorstBakeMs = 0;
+            FarDetailTiming.Reset();
         }
 
         // Precreate reusable engine resources; the extra slot is hidden until an old tile is retired atomically.
@@ -128,6 +135,8 @@ namespace DroneSandbox
             s.material.mainTexture = s.texture; s.material.SetFloat("_Smoothness", 0f);
             s.texture.wrapMode = TextureWrapMode.Clamp; s.texture.anisoLevel = 8;
             s.texture.filterMode = FilterMode.Trilinear;
+            // Force the first native allocation during setup rather than the first measured flight commit.
+            s.texture.Apply(false, false); s.control.Apply(false, false); s.mesh.MarkDynamic();
             s.collider = s.go.AddComponent<MeshCollider>(); s.collider.enabled = false;
             s.go.SetActive(false);
             return s;
@@ -135,7 +144,11 @@ namespace DroneSandbox
 
         // Sector transitions release resources explicitly, including pooled objects that were never made live.
         static void Release(Slot s)
-        { Art.Discard(s.mesh); Art.Discard(s.collision); Art.Discard(s.texture); Art.Discard(s.control); Art.Discard(s.material); Art.Discard(s.go); }
+        {
+            // BakeMesh owns the native mesh until completion; only teardown may wait, never a streaming frame.
+            if (s.bake != null) { try { s.bake.GetAwaiter().GetResult(); } catch (Exception e) { UnityEngine.Debug.LogException(e); } }
+            Art.Discard(s.mesh); Art.Discard(s.collision); Art.Discard(s.texture); Art.Discard(s.control); Art.Discard(s.material); Art.Discard(s.go);
+        }
 
         // Streaming continues while paused, using real camera velocity and real seconds for cache retention.
         void LateUpdate()
@@ -143,8 +156,10 @@ namespace DroneSandbox
             var camera = Camera.main;
             if (plan == null || camera == null || !FarTerrain.Active) return;
             var timer = frameTimer; timer.Restart();
+            FarDetailTiming.BeginFrame(); long stamp = FarDetailTiming.Begin();
             Track(camera);
             if (Time.unscaledTime >= nextPlan) { Plan(); nextPlan = Time.unscaledTime + 0.2f; }
+            FarDetailTiming.End(Stage.Plan, stamp);
             if (worker != null && worker.IsCompleted)
             {
                 if (worker.IsFaulted)
@@ -152,20 +167,24 @@ namespace DroneSandbox
                     UnityEngine.Debug.LogException(worker.Exception);
                     worker = null; Abort();
                 }
-                else { ready = worker.Result; worker = null; stage = chunkStage = chunkIndex = 0; }
+                else { ready = worker.Result; worker = null; stage = chunkStage = chunkIndex = mipStage = 0; }
             }
             // Collision gets a separate stage even when fast workers finish before the next frame; otherwise
             // a continuously busy upload queue could starve collider activation throughout a long flight.
+            stamp = FarDetailTiming.Begin();
             bool collisionChanged = timer.Elapsed.TotalMilliseconds < 0.25 && UpdateCollider();
+            FarDetailTiming.End(Stage.ColliderBind, stamp);
             bool tileWork = false;
             if (!collisionChanged && timer.Elapsed.TotalMilliseconds < BudgetMs)
             {
-                if (sampling) { tileWork = true; Sample(timer); }
-                else if (ready != null) { tileWork = true; Upload(); }
-                else if (worker == null) Schedule();
+                stamp = FarDetailTiming.Begin();
+                if (sampling) { tileWork = true; Sample(timer); FarDetailTiming.End(Stage.Sample, stamp); }
+                else if (ready != null) { tileWork = true; var part = UploadStage(); Upload(); FarDetailTiming.End(part, stamp); }
+                else if (worker == null) { Schedule(); FarDetailTiming.End(Stage.Schedule, stamp); }
             }
             regional?.Tick(eye, !tileWork && !collisionChanged && timer.Elapsed.TotalMilliseconds < .20);
             double elapsed = timer.Elapsed.TotalMilliseconds;
+            FarDetailTiming.EndFrame(elapsed, elapsed > WorstCommitMs);
             WorstCommitMs = Math.Max(WorstCommitMs, elapsed); TotalCommitMs += elapsed; CommitFrames++;
             if (elapsed > 2.0) BudgetOverruns++;
         }
@@ -197,7 +216,7 @@ namespace DroneSandbox
             requests.Clear(); wanted.Clear();
             AddCandidates(eye, velocity);
             if (hasFeed) AddCandidates(feed, feedVelocity);
-            requests.Sort(Compare);
+            requests.Sort(compare);
             int keep = Math.Min(MaxTiles, requests.Count);
             if (requests.Count > keep) requests.RemoveRange(keep, requests.Count - keep);
             wanted.Clear();
@@ -306,7 +325,7 @@ namespace DroneSandbox
             if (next.HasValue)
             {
                 pending = next.Value; incoming = pool.Pop(); incoming.x = pending.x; incoming.z = pending.z;
-                roughness = new float[FarDetailData.Samples * FarDetailData.Samples]; sampleRow = 0; sampling = true;
+                roughness = roughnessBuffer; sampleRow = 0; sampling = true;
             }
             else Launch();
         }
@@ -337,10 +356,11 @@ namespace DroneSandbox
             var sources = new FarDetailChunks.Geometry[changed.Count]; var corners = new Vector2[changed.Count];
             for (int i = 0; i < changed.Count; i++) { sources[i] = changed[i].source; corners[i] = changed[i].corner; }
             var capturedPlan = plan; var capturedRough = roughness; var areaArray = areas.ToArray();
+            var reuse = incoming?.data;
             bool add = incoming != null; int x = add ? incoming.x : 0, z = add ? incoming.z : 0;
             worker = Task.Run(() =>
             {
-                var result = new Result { tile = add ? capturedPlan.Build(x, z, capturedRough, null) : null, chunks = new FarDetailChunks.Geometry[sources.Length] };
+                var result = new Result { tile = add ? capturedPlan.Build(x, z, capturedRough, null, reuse) : null, chunks = new FarDetailChunks.Geometry[sources.Length] };
                 for (int i = 0; i < sources.Length; i++) result.chunks[i] = FarDetailChunks.Cut(sources[i], corners[i], areaArray, capturedPlan);
                 return result;
             });
@@ -350,7 +370,7 @@ namespace DroneSandbox
         // One bounded API stage per frame: no recalculation, no full-resolution collider cooking, no upload burst.
         void Upload()
         {
-            if (incoming != null && stage < 12)
+            if (incoming != null && stage < 14)
             {
                 var d = ready.tile; var s = incoming;
                 switch (stage++)
@@ -359,8 +379,10 @@ namespace DroneSandbox
                     case 1: s.mesh.SetNormals(d.normals); break;
                     case 2: s.mesh.SetUVs(0, d.uv); break;
                     case 3: s.mesh.SetIndices(d.triangles, MeshTopology.Triangles, 0, false); s.mesh.bounds = new Bounds(new Vector3(256f, 256f, 256f), new Vector3(512f, 4096f, 512f)); break;
-                    case 4: s.texture.SetPixelData(d.pixels, 0); break;
-                    case 5: s.texture.Apply(true, false); break;
+                    case 4:
+                        s.texture.SetPixelData(d.mips[mipStage], mipStage);
+                        if (++mipStage < d.mips.Length) stage--; break;
+                    case 5: s.texture.Apply(false, false); break;
                     case 6: s.collider.sharedMesh = null; s.collision.Clear(); s.collision.SetVertices(d.collision); break;
                     case 7: s.collision.SetIndices(d.collisionTriangles, MeshTopology.Triangles, 0); break;
                     case 8: s.mesh.SetTangents(d.tangents); break;
@@ -369,6 +391,8 @@ namespace DroneSandbox
                     case 11:
                         s.go.transform.position = new Vector3(s.x * 512f - origin.x, 0f, s.z * 512f - origin.y);
                         FarDetailMaterial.Bind(s.material, s.texture, s.control, s.x, s.z); break;
+                    case 12: StartBake(s); break;
+                    case 13: s.mesh.UploadMeshData(false); break;
                 }
                 return;
             }
@@ -376,17 +400,57 @@ namespace DroneSandbox
             {
                 var c = changed[chunkIndex]; var data = ready.chunks[chunkIndex];
                 if (ReferenceEquals(data, c.source)) { chunkIndex++; return; }
-                if (c.back == null) c.back = new Mesh { indexFormat = IndexFormat.UInt32 };
+                if (c.back == null) { c.back = new Mesh { indexFormat = IndexFormat.UInt32 }; c.back.MarkDynamic(); }
                 switch (chunkStage++)
                 {
                     case 0: c.back.Clear(); c.back.SetVertices(data.vertices); break;
                     case 1: c.back.SetNormals(data.normals); break;
                     case 2: c.back.SetUVs(0, data.uv); break;
-                    case 3: c.back.SetIndices(data.triangles, MeshTopology.Triangles, 0, false); c.back.bounds = c.original.bounds; chunkIndex++; chunkStage = 0; break;
+                    case 3: c.back.SetIndices(data.triangles, MeshTopology.Triangles, 0, false); c.back.bounds = c.original.bounds; break;
+                    case 4: c.back.UploadMeshData(false); chunkIndex++; chunkStage = 0; break;
                 }
                 return;
             }
+            if (incoming?.bake != null)
+            {
+                if (!incoming.bake.IsCompleted) return;
+                if (incoming.bake.IsFaulted) { UnityEngine.Debug.LogException(incoming.bake.Exception); incoming.bake = null; Abort(); return; }
+                WorstBakeMs = Math.Max(WorstBakeMs, incoming.bake.Result);
+                incoming.bake = null;
+            }
             Publish();
+        }
+
+        // Only this dispatch allocates a closure; ordinary upload stages stay allocation-free.
+        static void StartBake(Slot s)
+        {
+            var id = s.collision.GetEntityId(); var options = s.collider.cookingOptions;
+            s.bake = Task.Run(() =>
+            {
+                long start = Stopwatch.GetTimestamp();
+                Physics.BakeMesh(id, false, options);
+                return (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+            });
+        }
+
+        // Label the next bounded operation before entering it, including deferred mesh uploads and publication.
+        Stage UploadStage()
+        {
+            if (incoming != null && stage < 14)
+            {
+                switch (stage)
+                {
+                    case 4: return Stage.TilePixels;
+                    case 5: return Stage.TileApply;
+                    case 6: case 7: return Stage.CollisionMesh;
+                    case 9: return Stage.ControlPixels;
+                    case 10: return Stage.ControlApply;
+                    case 12: return Stage.CollisionBakeDispatch;
+                    case 13: return Stage.MeshUpload;
+                    default: return Stage.TileMesh;
+                }
+            }
+            return chunkIndex < changed.Count ? (chunkStage == 4 ? Stage.MeshUpload : Stage.ChunkMesh) : Stage.Publish;
         }
 
         // Swap every ready surface in the same LateUpdate; there is never a frame with a hole but no tile.
@@ -403,7 +467,7 @@ namespace DroneSandbox
             if (outgoing != null)
             {
                 live.Remove(Key(outgoing.x, outgoing.z)); outgoing.go.SetActive(false); outgoing.collider.enabled = false;
-                outgoing.data = null; pool.Push(outgoing);
+                pool.Push(outgoing); // the hidden slot's next worker reuses its arrays
             }
             if (incoming != null)
             {
