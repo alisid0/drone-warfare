@@ -91,7 +91,8 @@ namespace DroneSandbox
             SampleEdge();
             if (material == null)
             {
-                material = Art.NewMaterial(Color.white);
+                material = FarDetailMaterial.Create();
+                material.EnableKeyword("_FarRegionChunk");
                 material.SetFloat("_Smoothness", 0f);
             }
             material.mainTexture = worldTexture;

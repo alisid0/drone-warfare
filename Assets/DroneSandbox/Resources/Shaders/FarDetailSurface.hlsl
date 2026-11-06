@@ -6,6 +6,7 @@ SAMPLER(sampler_FarGroundAlbedo);
 SAMPLER(sampler_FarGroundNormal); // its own: a pass that reads only normals must not hold the albedo's sampler alone
 
 #include "FarDetailPalette.hlsl"
+#include "FarDetailRegional.hlsl"
 
 // A box-filtered periodic band has stable area even when a row becomes smaller than one screen pixel.
 float GroundBand(float at, float period, float width, float footprint)
@@ -56,13 +57,29 @@ void GroundSample(float4 code, float2 world, float2 dx, float2 dy, out float3 de
 // Bilinear weights blend sampled surfaces, not IDs or orientations. Interiors need only one surface sample.
 void FarDetailSurface(FragInputs input, inout SurfaceData surface, inout float3 gradient)
 {
+    gradient = 0;
+#if defined(_FarRegionChunk)
+    float2 world = input.texCoord0.xy * 56000 - 28000;
+#else
     float2 world = input.texCoord0.xy * 512.0 + _BaseColorMap_ST.zw;
+#endif
+    float farDistance = distance(GetAbsolutePositionWS(input.positionRWS), _WorldSpaceCameraPos);
     float2 dx = ddx(world), dy = ddy(world);
+#if defined(_FarRegionChunk)
+        surface.baseColor = FarRegionColour(world, dx, dy, surface.baseColor, farDistance);
+        surface.perceptualSmoothness = 0;
+        return;
+#else
     float2 uv = (input.texCoord0.xy * 256.0 + 1.0) / 258.0;
     surface.baseColor = SAMPLE_TEXTURE2D(_BaseColorMap, sampler_BaseColorMap, uv).rgb;
+    float2 farLocal = input.texCoord0.xy * 512;
+    float farEdge = min(min(farLocal.x, farLocal.y), min(512 - farLocal.x, 512 - farLocal.y));
+    float farTileWeight = (1 - smoothstep(900, 1300, farDistance)) * smoothstep(0, 32, farEdge);
+    if (_FarRegionEnabled > 0.5 && farTileWeight < 1)
+        surface.baseColor = lerp(FarRegionBackground(world, dx, dy, farDistance), surface.baseColor, farTileWeight);
     surface.perceptualSmoothness = 0;
     float fade = 1.0 - saturate((max(length(dx), length(dy)) - 1.0) / 2.0);
-    gradient = 0;
+    fade *= farTileWeight;
     // Once a screen pixel spans 3 m, only the shared mean remains; skip discrete maps and array samples.
     if (fade <= 0) return;
     float2 p = input.texCoord0.xy * 256.0 + 0.5;
@@ -85,4 +102,5 @@ void FarDetailSurface(FragInputs input, inout SurfaceData surface, inout float3 
     }
     surface.baseColor *= lerp(1, colour, fade);
     gradient = (-slope.x * input.tangentToWorld[0] - slope.y * input.tangentToWorld[1]) * fade;
+#endif
 }
