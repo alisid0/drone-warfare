@@ -95,7 +95,24 @@ namespace DroneSandbox
         {
             properties.SetVector(Selection, new Vector4(eye.x, eye.y, eye.z, ready));
             properties.SetVector(Projection, new Vector4(forward.x, forward.y, forward.z, focal));
-            properties.SetVector(Origin, new Vector4(FarTerrain.Origin.x, FarTerrain.Origin.y, 0f, 0f));
+            Vector2 shift = SunShift();
+            properties.SetVector(Origin, new Vector4(FarTerrain.Origin.x, FarTerrain.Origin.y, shift.x, shift.y));
+        }
+
+        static int sunFrame = -1;
+        static Vector2 sunShift;
+
+        // How far a canopy crown's shadow falls sideways per metre of height, once per frame. Shadows shorten as cloud
+        // dims the sun below half of noon light (DayNight scales its lux) and vanish under the moon or with the sun down.
+        static Vector2 SunShift()
+        {
+            if (sunFrame == Time.frameCount) return sunShift;
+            sunFrame = Time.frameCount;
+            var sun = RenderSettings.sun;
+            Vector3 travel = sun != null && sun.isActiveAndEnabled ? sun.transform.forward : Vector3.up;
+            float strength = sun != null ? Mathf.Clamp01(sun.intensity / 50000f) : 0f;
+            sunShift = travel.y < -0.05f ? Vector2.ClampMagnitude(new Vector2(travel.x, travel.z) / -travel.y, 4f) * strength : Vector2.zero;
+            return sunShift;
         }
 
         // A frozen view may still be submitted during a turn; restrict its canopy hole to its original frustum.
