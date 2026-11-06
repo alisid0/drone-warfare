@@ -89,6 +89,8 @@ namespace DroneSandbox
                 }
             }
             if (layer < 0) layer = GroundLayer(cover == Cover.Farmland ? Cover.Pasture : cover, x, z);
+            float compound = features.Outside(x, z);
+            if (compound < MarginLimit && compound < CompoundMargin(x, z)) { layer = CompoundWear(x, z) > .5f ? 2 : 4; angle = 0f; } // a compound's worn margin
             // A garden painted over farmland must also suppress that field's procedural crop rows.
             if (villages.At(new Vector2(x, z), out var garden))
             {
@@ -123,6 +125,14 @@ namespace DroneSandbox
             var land = cover.At(x, z);
             Vector3 c = CoverColour(x, z, pixel, land);
             if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Village, x, z, pixel));
+            // A compound's own grass, and a worn margin outside its fence-side footprint edge: the fields run to it.
+            float compound = features.Outside(x, z);
+            if (compound < MarginLimit + pixel)
+            {
+                float edge = CompoundMargin(x, z);
+                Vector3 worn = Blend(FarDetailPalette.Means[2], CompoundGravel, Smooth((cover.Noise(x, z, 9f, 134) - .5f) / .2f));
+                c = Blend(Blend(VergeColour, worn, CompoundWear(x, z) * .85f), c, Coverage(compound - edge, pixel));
+            }
             c = PaintRiver(c, bank, riverWidth, pixel);
             float lakeBank = LakeBank(x, z, pixel, out bool reservoir);
             Vector3 basin = PaintLake(c, lakeBank, reservoir, pixel);
@@ -135,6 +145,17 @@ namespace DroneSandbox
         }
 
         static readonly Vector3 WaterColour = WaterAppearance.Lake;
+        // A compound's margin: 5-15 m wide outside its footprint, wandering over 40 m, of the landmark surfaces' own verge
+        // grass (their soft edges fade into it) worn through in patches to soil and gravel by vehicles and storage.
+        public const float MarginLimit = 15f;
+        static readonly Vector3 VergeColour = FarDetailPalette.Decode(WorldLandmarkLayout.ToneColor(WorldLandmarkLayout.VergeTone));
+        static readonly Vector3 CompoundGravel = FarDetailPalette.Decode(new Color32(122, 116, 102, 255));
+
+        // The margin's width at a point, shared with the sector's field planner (MapLayout.FieldWorks).
+        public float CompoundMargin(float x, float z) => 5f + 10f * cover.Noise(x, z, 41f, 131);
+
+        // How worn the margin is at a point (0 grass, 1 bare): 6-17 m patches over about two fifths of it.
+        float CompoundWear(float x, float z) => Smooth((cover.Noise(x, z, 6f, 132) * .6f + cover.Noise(x, z, 17f, 133) * .4f - .48f) / .2f);
         // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
         static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
         // A grass strip along a field edge (and between an orchard's rows), and a rough uncut margin (FieldPalette, as the sector's meshes).

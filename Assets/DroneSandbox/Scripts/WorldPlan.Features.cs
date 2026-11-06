@@ -310,7 +310,10 @@ namespace DroneSandbox
             }
         }
 
-        // Flat through the last bilinear sample under the footprint, then smoothstep into original terrain.
+        // Flat through the last bilinear sample under the footprint, then smoothstep into original terrain. Land use
+        // keeps the farmland and pasture round a compound as it was, so fields run up to its worn margin (which the
+        // painters draw, FarDetailData.CompoundMargin); only woods leave the grading reserve, where no tree may stand, and
+        // the compound's own ground well inside its fence is grass.
         static void StampFeature(WorldFeature f, bool landUse)
         {
             float reach = f.halfLength + f.halfWidth + f.clearance + 48f;
@@ -321,7 +324,7 @@ namespace DroneSandbox
                     float outside = Math.Max(Math.Abs(d.x * f.along.x + d.y * f.along.y) - f.halfLength,
                         Math.Abs(-d.x * f.along.y + d.y * f.along.x) - f.halfWidth);
                     int k = j * GridCount + i;
-                    if (landUse) { if (outside <= f.clearance + 24f) cover[k] = Cover.Pasture; }
+                    if (landUse) { if (outside <= -HeightStep || outside <= f.clearance + 24f && cover[k] == Cover.Forest) cover[k] = Cover.Pasture; }
                     else if (outside < f.clearance + 48f)
                         heights[k] = Lerp(f.elevation, heights[k], Smooth((outside - 48f) / f.clearance));
                 }

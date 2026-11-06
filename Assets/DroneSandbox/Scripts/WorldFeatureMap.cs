@@ -56,6 +56,21 @@ namespace DroneSandbox
             color = default; return false;
         }
 
+        // How far a point lies outside the nearest compound's footprint, its fenced land (negative inside it); the
+        // painters lay the compound's worn margin from this, and fields run to it.
+        public float Outside(float x, float z)
+        {
+            var entries = bins[Index(x, z)]; var p = new Vector2(x, z);
+            float nearest = float.MaxValue;
+            if (entries != null) foreach (var entry in entries)
+            {
+                Vector2 d = p - entry.area.center;
+                nearest = Math.Min(nearest, Math.Max(Math.Abs(Vector2.Dot(d, entry.area.along)) - entry.area.halfLength,
+                    Math.Abs(Vector2.Dot(d, entry.area.Across)) - entry.area.halfWidth));
+            }
+            return nearest;
+        }
+
         // Zero selects the captured world height; one permits ordinary tile roughness and coarse-edge blending.
         public float DetailWeight(float x, float z)
         {
