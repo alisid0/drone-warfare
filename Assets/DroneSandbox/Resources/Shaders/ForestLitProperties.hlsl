@@ -1,5 +1,4 @@
 TEXTURE2D(_ForestDetail);
-TEXTURE2D(_ForestDetailB);
 SAMPLER(sampler_ForestDetail);
 // Derived from installed HDRP 17.6 LitProperties; see ThirdPartyNotices.txt.
 // ===========================================================================

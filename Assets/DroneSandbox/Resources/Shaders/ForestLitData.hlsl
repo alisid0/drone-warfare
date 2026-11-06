@@ -292,14 +292,19 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     #endif
 #endif
 
-    // Mipmapped stochastic detail gives even the bootstrap surface separate crowns without a repeating 128 m tile.
+    // World-stable crowns, footprint-filtered, give every canopy level individual sunlit and shaded crowns.
     if (_ForestTier >= 3.0 && _ForestEnabled > 0.5)
     {
         float2 forestWorld = GetAbsolutePositionWS(input.positionRWS).xz + _ForestOrigin.xy;
-        float3 detail = ForestCrownDetail(forestWorld);
         float crownWeight = smoothstep(0.1, 0.7, alpha);
-        surfaceData.baseColor *= lerp(1.0, 1.0 + (detail.r - 0.5) * 1.6, crownWeight);
-        float2 slope = detail.gb * (0.65 * crownWeight);
+        // Ray tracing has no derivatives; an eight-metre footprint keeps the crowns' far-field mean there.
+        float2 worldDx = float2(8.0, 0.0), worldDy = float2(0.0, 8.0);
+#if !defined(SHADER_STAGE_RAY_TRACING)
+        worldDx = ddx(forestWorld); worldDy = ddy(forestWorld);
+#endif
+        float2 slope;
+        float crownFactor = ForestCrownDetail(forestWorld, worldDx, worldDy, surfaceData.baseColor, crownWeight, _ForestOrigin.zw, slope);
+        surfaceData.baseColor *= crownFactor;
         surfaceData.normalWS = normalize(surfaceData.normalWS + float3(slope.x, 0.0, slope.y));
     }
 
