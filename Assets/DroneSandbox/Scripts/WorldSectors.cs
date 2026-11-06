@@ -17,7 +17,9 @@ namespace DroneSandbox
             if (float.IsNaN(worldCenter.x) || float.IsNaN(worldCenter.y) || !Inside(worldCenter, WorldPlan.Half - Half))
                 throw new ArgumentOutOfRangeException(nameof(worldCenter), "The entire sector must lie inside WorldPlan.");
             if (kindHint == SectorKind.VarrowValley) throw new ArgumentException("Use SectorPlan.Varrow and its dam anchor for Varrow Valley.", nameof(kindHint));
-            var plan = SectorGenerator.Generate(kindHint, seed);
+            var feature = LandmarkFor(worldCenter, kindHint);
+            if (IsLandmarkKind(kindHint) && feature == null) kindHint = SectorKind.RollingFarmland;
+            var plan = SectorIdentity.WorldRecipe(kindHint, seed);
             plan.world = new WorldSectorData(worldCenter, kindHint);
             plan.river = null; plan.bridges.Clear(); plan.roads.Clear(); plan.railways.Clear();
             plan.villages.Clear(); plan.villageNames.Clear(); plan.farmsteads.Clear(); plan.ponds.Clear();
@@ -34,14 +36,25 @@ namespace DroneSandbox
             plan.ridges = 0f;
             if (plan.world.townShare > 0.35f) plan.kind = SectorKind.MarketTown;
             else if (plan.world.townShare > 0.02f) plan.kind = SectorKind.TownOutskirts;
-            // The landmark (airfield, works, rail yard, town grid, forest core, marsh) was planned round the
-            // generator's own river and roads, which the world has just replaced; moved site by site afterwards, a
-            // compound's buildings scattered over the sector while its yards stayed behind. Take it out, buildings and
-            // all, and plan it again once the base, the HQ and the world's roads stand.
-            bool landmark = plan.reservedFeatures.Count > 0 || plan.wetland != null;
-            if (landmark) ClearLandmark(plan);
+            // Reserve all intersecting permanent features before placing mission pads and access tracks.
+            if (feature != null) plan.kind = feature.SectorKind;
+            bool builtKind = IsLandmarkKind(kindHint);
+            if (builtKind) plan.sites.Clear();
+            plan.features &= ~(SectorFeature.Airstrip | SectorFeature.RailYard);
+            foreach (var f in plan.world.features)
+            {
+                var a = f.Area; a.center -= worldCenter;
+                a.halfLength += f.clearance; a.halfWidth += f.clearance;
+                plan.reservedFeatures.Add(a);
+            }
             PlaceMission(plan);
-            if (landmark) SectorIdentity.Plan(plan);
+            SectorIdentity.PlanWorld(plan);
+            // Natural and town detail still use their existing recipes where there is no built compound.
+            if (plan.world.features.Count == 0 && !builtKind)
+            {
+                try { SectorIdentity.Plan(plan); }
+                catch (InvalidOperationException) { ClearLandmark(plan); }
+            }
             return plan;
         }
 
@@ -111,7 +124,10 @@ namespace DroneSandbox
             Vector2 hq = FindPad(plan, oldHq, 38f, 450f, occupied, null, default, 0f);
             occupied.Add((hq, 38f));
             var access = new Access(plan.world, hq);
-            Vector2 basePos = FindPad(plan, oldBase, 36f, 450f, occupied, access, hq, 350f);
+            Vector2 basePos;
+            try { basePos = FindPad(plan, oldBase, 36f, 450f, occupied, access, hq, 350f); }
+            // A wet central island may leave usable, connected ground only nearer the edge of this same window.
+            catch (InvalidOperationException) { basePos = FindPad(plan, oldBase, 36f, 750f, occupied, access, hq, 350f); }
             occupied.Add((basePos, 36f));
             plan.basePosition = V3(basePos); plan.enemyHqPosition = V3(hq);
             // FromOld uses these only for legacy compound-relative offsets; procedural missions use local positions.
@@ -186,6 +202,7 @@ namespace DroneSandbox
         static bool PadFits(SectorPlan plan, Vector2 p, float radius, float reach)
         {
             var data = plan.world;
+            if (data.FeatureReserved(p, radius + 20f)) return false;
             if (!Inside(p, Mathf.Min(reach, Half - radius - 30f)) || data.DryDistance(p) < radius + 16f) return false;
             foreach (var v in plan.villages) if (Vector2.Distance(v, p) < MapLayout.VillageReach + radius + 12f) return false;
             foreach (var road in data.roads)

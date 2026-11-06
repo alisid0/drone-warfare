@@ -50,8 +50,12 @@ namespace DroneSandbox
         public static bool FeatureReserved(Vector2 point, float margin = 0f)
         {
             // Farm margins can cross a bin boundary; the bins already include a 300 m query guard.
-            foreach (var f in FeaturesNear(point.x, point.y))
+            var nearby = FeaturesNear(point.x, point.y);
+            for (int i = 0; i < nearby.Count; i++)
+            {
+                var f = nearby[i];
                 if (f.Area.Contains(point, f.clearance + margin)) return true;
+            }
             return false;
         }
 
@@ -59,8 +63,10 @@ namespace DroneSandbox
         public static bool FeatureSurfaceAt(float x, float z, out Color color)
         {
             var p = new Vector2(x, z);
-            foreach (var f in FeaturesNear(x, z))
+            var nearby = FeaturesNear(x, z);
+            for (int index = 0; index < nearby.Count; index++)
             {
+                var f = nearby[index];
                 if (!f.Area.Contains(p, f.clearance)) continue;
                 for (int i = f.surfaces.Count - 1; i >= 0; i--)
                     if (f.surfaces[i].area.Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(f.surfaces[i].kind); return true; }
@@ -120,9 +126,15 @@ namespace DroneSandbox
             for (int side = 0; side < 2; side++)
             {
                 WorldFeature best = null; float score = float.MaxValue;
-                for (int i = 0; i < (side == 0 ? 24 : 700); i++)
+                for (int i = 0; i < (side == 0 ? 24 : 3200); i++)
                 {
+                    if (side == 1 && i >= 700 && best != null) break;
                     Vector2 p = side == 0 ? airbase.position : new Vector2(Range(rng, 11000f, 22000f), Range(rng, -21000f, 21000f));
+                    if (side == 1 && i >= 700)
+                    {
+                        float z = Range(rng, -24000f, 24000f);
+                        p = new Vector2(Range(rng, FrontAt(z).x + 1500f, 24500f), z);
+                    }
                     float angle = side == 0 ? i * (float)Math.PI / 12f : Range(rng, 0f, 3.141593f);
                     var f = Candidate(WorldFeatureKind.Airfield, p, new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)), side + 1);
                     float cost = Grade(p.x, p.y) * 10000f + Distance(p, NearestRoad(p)) * 0.02f;
@@ -166,12 +178,13 @@ namespace DroneSandbox
             for (int n = 0; n < 4; n++)
             {
                 WorldFeature best = null; float score = float.MaxValue;
-                Vector2 anchor = Settlements[n].center;
+                Vector2 anchor = Settlements[n % 2].center;
                 for (int i = 0; i < 650; i++)
                 {
                     float angle = Range(rng, 0f, 6.283185f), radius = Range(rng, 1700f, 6500f);
                     Vector2 p = anchor + new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * radius;
                     Vector2 join = FeatureRailPoint(p, out Vector2 along);
+                    if (Distance(p, join) > 2200f) continue;
                     var f = Candidate(WorldFeatureKind.IndustrialZone, p, along, 10 + n);
                     float cost = Distance(p, join) + radius * 0.35f;
                     if (cost >= score || !FeatureGround(f, null)) continue;
@@ -268,7 +281,11 @@ namespace DroneSandbox
             }
             f.accessRoad = Roads.Count;
             AddRoad(ring[exit], join, RoadClass.Road);
-            if (Roads.Count == f.accessRoad) return;
+            // AddRoad deliberately ignores sub-two-metre links. The perimeter road still needs its gate.
+            if (Roads.Count == f.accessRoad)
+            {
+                var road = new WorldRoad { kind = RoadClass.Road }; road.points.Add(join); Roads.Add(road);
+            }
             var prefix = new List<Vector2> { gate, ring[0] };
             if (exit <= 2) for (int i = 1; i < exit; i++) prefix.Add(ring[i]);
             else for (int i = 4; i > exit; i--) prefix.Add(ring[i]);

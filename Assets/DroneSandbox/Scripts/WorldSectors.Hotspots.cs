@@ -57,6 +57,7 @@ namespace DroneSandbox
             float baseline = Theatre.Front(spot.mapPosition.x) - Theatre.Advance;
             float depth = (spot.mapPosition.y - baseline) * 8000f - 2000f;
             var target = new Vector2(WorldPlan.FrontAt(z).x + depth, z);
+            if (IsLandmarkKind(spot.kind) && FeatureSpot(spot.kind, target, used, out Vector2 featureSpot)) return featureSpot;
             Vector2 best = default; float score = float.MaxValue, bestKind = float.MaxValue;
             for (int cz = 1; cz < WorldPlan.CellCount - 1; cz++)
                 for (int cx = 1; cx < WorldPlan.CellCount - 1; cx++)
@@ -64,7 +65,7 @@ namespace DroneSandbox
                     WorldCell cell = WorldPlan.Cell(cx, cz);
                     Vector2 p = new Vector2(-WorldPlan.Half + (cx + 0.5f) * WorldPlan.CellSize,
                         -WorldPlan.Half + (cz + 0.5f) * WorldPlan.CellSize);
-                    if (cell.water > 0.55f) continue;
+                    if (cell.water > 0.55f || LandmarkWindow(p)) continue;
                     bool occupied = false;
                     foreach (var other in used)
                         if (Mathf.Abs(p.x - other.x) < 2f * Half && Mathf.Abs(p.y - other.y) < 2f * Half) { occupied = true; break; }

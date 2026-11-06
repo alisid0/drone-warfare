@@ -34,6 +34,7 @@ namespace DroneSandbox
         public readonly List<WorldBridge> bridges = new List<WorldBridge>();
         public readonly List<WorldDam> dams = new List<WorldDam>();
         public readonly List<WorldSettlement> settlements = new List<WorldSettlement>();
+        public readonly List<WorldFeature> features = new List<WorldFeature>();
         public readonly List<Rect> woods = new List<Rect>();
         public float minimumHeight, maximumHeight, forestShare, fieldShare, townShare;
         public int primaryRiver = -1;
@@ -48,6 +49,12 @@ namespace DroneSandbox
         internal WorldSectorData(Vector2 origin, SectorKind hint)
         {
             center = origin; seed = WorldPlan.Seed; kindHint = hint;
+            // Features are immutable after generation, so retaining these objects also survives regeneration.
+            foreach (var f in WorldPlan.Features)
+            {
+                float featureReach = WorldSectors.Half + f.halfLength + f.halfWidth + f.clearance;
+                if (Mathf.Abs(f.center.x - origin.x) < featureReach && Mathf.Abs(f.center.y - origin.y) < featureReach) features.Add(f);
+            }
             float reach = WorldSectors.Half + WorldSectors.Margin + WorldPlan.HeightStep;
             float x0 = (float)Math.Floor((origin.x - reach + WorldPlan.Half) / WorldPlan.HeightStep) * WorldPlan.HeightStep - WorldPlan.Half;
             float z0 = (float)Math.Floor((origin.y - reach + WorldPlan.Half) / WorldPlan.HeightStep) * WorldPlan.HeightStep - WorldPlan.Half;
@@ -215,7 +222,25 @@ namespace DroneSandbox
         }
 
         // Detail and local earthworks fade out before the terrain edge, where the global height must win exactly.
-        public float DetailWeight(float x, float z) => Mathf.SmoothStep(0f, 1f,
-            (WorldSectors.Half - Mathf.Max(Mathf.Abs(x), Mathf.Abs(z))) / 100f);
+        public float DetailWeight(float x, float z)
+        {
+            float weight = Mathf.SmoothStep(0f, 1f, (WorldSectors.Half - Mathf.Max(Mathf.Abs(x), Mathf.Abs(z))) / 100f);
+            Vector2 p = new Vector2(x, z) + center;
+            foreach (var f in features)
+            {
+                Vector2 d = p - f.center;
+                float outside = Mathf.Max(Mathf.Abs(Vector2.Dot(d, f.along)) - f.halfLength,
+                    Mathf.Abs(Vector2.Dot(d, f.Area.Across)) - f.halfWidth);
+                weight *= Mathf.SmoothStep(0f, 1f, (outside - f.clearance) / 48f);
+            }
+            return weight;
+        }
+
+        // Mission placement and route searches use the snapshot, never mutable world-generation state.
+        public bool FeatureReserved(Vector2 local, float margin)
+        {
+            foreach (var f in features) if (f.Area.Contains(local + center, f.clearance + margin)) return true;
+            return false;
+        }
     }
 }

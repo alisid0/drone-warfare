@@ -83,7 +83,7 @@ namespace DroneSandbox
             {
                 float v = -30f + track * 5.5f, begin = -290f + track * 20f;
                 var line = new[] { throat, a.Point(-350f + track * 12f, -62f), a.Point(begin, v), a.Point(300f, v) };
-                f.rails.Add(line);
+                f.rails.Add(DenseRail(line));
                 for (int i = 1; i < line.Length; i++) RailSurface(f, line[i - 1], line[i]);
                 int count = 5 + rng.Next(5);
                 for (int i = 0; i < count; i++) Building(f, track % 2 == 0 ? "Scenery_RailContainerWagon" : "Scenery_RailHopper",
@@ -93,6 +93,18 @@ namespace DroneSandbox
             Building(f, "Scenery_SignalBox", -270f, 28f, true, new Vector3(10.6f, 8.15f, 11.135f), 10f, 3);
             Surface(f, 20f, -1f, 560f, 7f, LandmarkSurfaceKind.Concrete);
             Surface(f, 0f, 84f, 16f, 32f, LandmarkSurfaceKind.Asphalt);
+        }
+
+        // Short collinear neighbours stop MapLayout's Catmull-Rom pass overshooting a long siding at the throat.
+        static Vector2[] DenseRail(Vector2[] corners)
+        {
+            var points = new System.Collections.Generic.List<Vector2> { corners[0] };
+            for (int i = 1; i < corners.Length; i++)
+            {
+                int steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(corners[i - 1], corners[i]) / 12f));
+                for (int j = 1; j <= steps; j++) points.Add(Vector2.Lerp(corners[i - 1], corners[i], j / (float)steps));
+            }
+            return points.ToArray();
         }
 
         // The facing convention is identical to SectorIdentity.Site and the FBX roots used by Features.

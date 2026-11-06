@@ -6,9 +6,41 @@ namespace DroneSandbox
     // Gives named sectors a protected, real-size centrepiece after the old layout has been scaled to two km.
     public static class SectorIdentity
     {
+        [System.ThreadStatic] static bool worldRecipe;
+
+        // World crops need only the mission skeleton; skip searching for a temporary, fictitious landmark.
+        internal static SectorPlan WorldRecipe(SectorKind kind, int seed)
+        {
+            bool previous = worldRecipe; worldRecipe = true;
+            try { return SectorGenerator.Generate(kind, seed); }
+            finally { worldRecipe = previous; }
+        }
+
+        // Project permanent roots without rerolling, relocating or rescaling a single building.
+        public static void PlanWorld(SectorPlan p)
+        {
+            foreach (var f in p.world.features)
+            {
+                foreach (var b in f.buildings)
+                {
+                    Vector2 at = b.position - p.world.center;
+                    if (Mathf.Max(Mathf.Abs(at.x), Mathf.Abs(at.y)) > WorldSectors.Half - 5f) continue;
+                    Site(p, b.model, at, b.facing, b.flat);
+                }
+                if (f.kind == WorldFeatureKind.Airfield && f.Fits(p.world.center, WorldSectors.Half))
+                {
+                    p.features |= SectorFeature.Airstrip;
+                    p.airstripCenter = f.Area.Point(0f, -65f) - p.world.center;
+                    p.airstripAlong = f.along; p.airstripLength = 880f; p.airstripWidth = 30f;
+                }
+                if (f.kind == WorldFeatureKind.RailJunction) p.features |= SectorFeature.RailYard | SectorFeature.Rail;
+                if (f.kind == WorldFeatureKind.IndustrialZone) p.features |= SectorFeature.Industry;
+            }
+        }
         // Plans land use before MapLayout lays out village streets or parcels; other sector recipes stay intact.
         public static void Plan(SectorPlan p)
         {
+            if (worldRecipe) return;
             if (p.kind == SectorKind.Marshland) { Marsh(p); return; }
             bool forest = p.kind == SectorKind.DeepForest, industry = p.kind == SectorKind.IndustrialZone;
             bool airfield = p.kind == SectorKind.Airfield, rail = p.kind == SectorKind.RailJunction;
