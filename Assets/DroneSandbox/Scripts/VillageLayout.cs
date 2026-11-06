@@ -8,6 +8,45 @@ namespace DroneSandbox
     // Projects the immutable village plots into the playable crop, and gives legacy Operations the same plot data.
     internal static class VillageLayout
     {
+        // Sector-only road wander must not move the shared old street through an already planned property.
+        public static void HoldFrontages(List<List<Vector2>> lines)
+        {
+            var plan = MapLayout.Plan;
+            if (plan.world == null || MapLayout.DetailPlan == null) return;
+            foreach (var road in plan.world.roads)
+            {
+                // PlaceMission inserts its access route at index zero; ownership is by the shared source array.
+                int k = plan.roads.IndexOf(road.points);
+                if (k < 0 || k >= lines.Count) continue;
+                var source = road.points;
+                for (int i = 0; i < lines[k].Count; i++)
+                {
+                    Vector2 p = lines[k][i];
+                    if (!MapLayout.DetailPlan.villages.Near(p + plan.world.center, 45f)) continue;
+                    float best = float.MaxValue; Vector2 nearest = p;
+                    for (int j = 1; j < source.Length; j++)
+                    {
+                        Vector2 a = source[j - 1], d = source[j] - a;
+                        float t = Mathf.Clamp01(Vector2.Dot(p - a, d) / Math.Max(.01f, d.sqrMagnitude));
+                        Vector2 q = a + d * t; float distance = (q - p).sqrMagnitude;
+                        if (distance < best) { best = distance; nearest = q; }
+                    }
+                    lines[k][i] = nearest;
+                }
+            }
+        }
+
+        // Match the street's actual owner after mission access is inserted, keeping verges and gates consistent.
+        public static float RoadWidth(int index)
+        {
+            var plan = MapLayout.Plan;
+            if (index < plan.roads.Count)
+                foreach (var road in plan.world.roads)
+                    if (ReferenceEquals(plan.roads[index], road.points))
+                        return road.kind == RoadClass.Highway ? 3.5f : road.kind == RoadClass.Track ? 1.5f : 2f;
+            return index < plan.roads.Count ? 1.5f : 2f;
+        }
+
         // The old town recipe creates a second unconnected town on reserved farmland. Replace only that scenery;
         // mission pads, permanent works, railways and their sites keep their original ownership.
         public static void PrepareRecipe(SectorPlan p)
@@ -59,8 +98,8 @@ namespace DroneSandbox
                 MapLayout.VillagePlots.Add(p);
                 var line = new List<Vector2>
                 {
-                    p.front - p.outward * 3.4f - p.along * (p.frontage * .5f),
-                    p.front - p.outward * 3.4f + p.along * (p.frontage * .5f)
+                    p.front - p.outward * p.StreetOffset - p.along * (p.frontage * .5f),
+                    p.front - p.outward * p.StreetOffset + p.along * (p.frontage * .5f)
                 };
                 MapLayout.VillageStreets.Add(line);
                 MapLayout.VillageOfStreet.Add(owner);
@@ -133,12 +172,13 @@ namespace DroneSandbox
                             Vector2 along = d / length, outward = new Vector2(-along.y, along.x) * side;
                             var p = new VillagePlot
                             {
-                                front = line[i - 1] + along * (next - walked) + outward * (MapLayout.RoadHalfWidth + 1.4f),
+                                front = line[i - 1] + along * (next - walked) + outward * (MapLayout.RoadHalfWidth + 1.8f),
                                 along = along,
                                 outward = outward,
                                 frontage = width,
                                 depth = depth,
                                 setback = 9f,
+                                roadWidth = MapLayout.RoadHalfWidth,
                                 owner = owner,
                                 style = rng.Next(4),
                                 model = rng.NextDouble() < .65 ? "Scenery_House_A" : "Scenery_House_B"
@@ -151,6 +191,8 @@ namespace DroneSandbox
                     }
                 }
             }
+            for (int owner = 0; owner < MapLayout.Plan.villages.Count; owner++)
+                VillageUse.Assign(MapLayout.VillagePlots, owner, MapLayout.Plan.fieldSeed, MapLayout.Plan.villages[owner]);
         }
     }
 }

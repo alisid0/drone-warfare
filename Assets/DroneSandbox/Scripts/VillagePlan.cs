@@ -133,6 +133,7 @@ namespace DroneSandbox
                                     frontage = Math.Max(12f, Math.Min(30f, width)),
                                     depth = s.town ? 35f + (float)rng.NextDouble() * 15f : 25f + (float)rng.NextDouble() * 35f,
                                     setback = s.town ? 7f : 9f + (float)rng.NextDouble() * 3f,
+                                    roadWidth = road.widthA,
                                     owner = owner,
                                     town = s.town,
                                     style = rng.Next(4)

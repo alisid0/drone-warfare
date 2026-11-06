@@ -219,6 +219,8 @@ namespace DroneSandbox
             RoadLines = new List<List<Vector2>>();
             foreach (var road in p.roads) RoadLines.Add(Smooth(road, 2f));
             Wander(RoadLines);
+            VillageLayout.HoldFrontages(RoadLines);
+            VillageAccess.Preserve(RoadLines);
             foreach (var street in p.featureStreets) RoadLines.Add(Smooth(street, 2f));
             Lap("roads");
             // Village clearance must query this sector's railways, never the previous sector's cached field.
@@ -235,12 +237,12 @@ namespace DroneSandbox
                 int offset = 0;
                 for (int i = 0; i < RoadLines.Count; i++)
                 {
-                    RoadClass kind = i < p.world.roads.Count ? p.world.roads[i].kind : RoadClass.Track;
-                    float width = kind == RoadClass.Highway ? 3.5f : kind == RoadClass.Track ? 1.5f : RoadHalfWidth;
+                    float width = VillageLayout.RoadWidth(i);
                     for (int j = 0; j < RoadLines[i].Count; j++) roadWidths[offset++] = width;
                 }
             }
             TrackLines = PlanTracks();
+            VillageAccess.Preserve(TrackLines, true);
             TrackField = new PathField(TrackLines, 6f, Ground.Size);
             Lap("road fields");
 
@@ -417,12 +419,12 @@ namespace DroneSandbox
                     Vector2 dir = (street[Mathf.Min(at + 1, street.Count - 1)] - street[Mathf.Max(at - 1, 0)]).normalized;
                     float side = rng.NextDouble() < 0.5 ? 1f : -1f;
                     Vector2 heading = Rotate(new Vector2(-dir.y, dir.x) * side, Range(rng, -15f, 15f) * Mathf.Deg2Rad);
-                    float length = Range(rng, 70f, 140f), bend = Range(rng, -0.3f, 0.3f);
+                    float length = Range(rng, 70f, 140f), bend = Range(rng, 2f, 6f), period = Range(rng, 40f, 90f);
+                    Vector2 laneSide = new Vector2(-heading.y, heading.x);
                     var lane = new List<Vector2> { street[at] };
                     for (float walked = 2f; walked <= length; walked += 2f)
                     {
-                        heading = Rotate(heading, bend * 2f / length);
-                        Vector2 q = lane[lane.Count - 1] + heading * 2f;
+                        Vector2 q = street[at] + heading * walked + laneSide * (bend * (1f - Mathf.Cos(Mathf.PI * walked / period)) * .5f);
                         if (StreetBlocked(q, v) || (walked > 12f && NearOtherRoad(q, road, 16f))) break;
                         lane.Add(q);
                     }

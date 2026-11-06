@@ -9,6 +9,7 @@ namespace DroneSandbox
     public partial struct VillagePlot
     {
         public float Scale => scale > 0f ? scale : 1f;
+        public float StreetOffset => roadWidth + (town ? 1.4f : 1.8f);
         public Vector2 Gate => front + along * DriveU;
         public float DriveU => frontage * .5f - (farm ? 5f : 3.8f);
         public float YardStart => setback + (farm ? 7f : 5f);

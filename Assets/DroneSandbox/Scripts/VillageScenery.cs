@@ -1,209 +1,210 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Gardens share four materials and two LOD renderers per settlement, instead of a renderer per fence panel.
+    // Yard surfaces and mixed boundaries share 96 m blocks; fine garden work disappears at 300 m.
     public static partial class Features
     {
-        static readonly List<Object> villageMeshes = new List<Object>();
-        // Destroy runtime meshes on a rebuild, as destroying a scenery root does not free its shared meshes.
+        static readonly List<UnityEngine.Object> villageMeshes = new List<UnityEngine.Object>();
+
+        // Small garden clutter stops at 300 m; barns, houses and sheds remain as the major structures.
+        public static void VillagePropLods(GameObject prop)
+        {
+            foreach (var group in prop.transform.GetComponentsInChildren<LODGroup>())
+            {
+                var levels = group.GetLODs();
+                Vector3 scale = group.transform.lossyScale;
+                float projected = group.size * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z))
+                    / (2f * Mathf.Tan(Scale.CameraFov * .5f * Mathf.Deg2Rad));
+                float previous = .99f;
+                for (int i = 0; i < levels.Length; i++)
+                {
+                    float distance = 300f * (i + 1f) / levels.Length;
+                    levels[i].screenRelativeTransitionHeight = Mathf.Min(previous * .9f, projected / distance);
+                    previous = levels[i].screenRelativeTransitionHeight;
+                }
+                group.SetLODs(levels);
+            }
+        }
+
+        // Rebuilds release generated meshes independently of the scenery hierarchy.
         public static void ClearVillagePlots()
         {
-            foreach (var mesh in villageMeshes)
-                Art.Discard(mesh);
+            foreach (var mesh in villageMeshes) Art.Discard(mesh);
             villageMeshes.Clear();
         }
 
-        // Ground surfaces and enclosure silhouettes stay visible at 400 m; rail detail drops out sooner.
+        // Two renderers per occupied block replace the old settlement-wide enclosure mesh.
         public static int VillagePlots(Transform root, List<VillagePlot> plots, int budget)
         {
-            if (plots.Count == 0 || budget < 2)
-                return 0;
-            var materials = new[]
+            var blocks = new SortedDictionary<long, List<VillagePlot>>();
+            foreach (var p in plots)
             {
-                Art.Shared(new Color(.24f, .29f, .13f)),
-                Art.Shared(new Color(.26f, .20f, .12f)),
-                Art.Shared(new Color(.43f, .41f, .35f)),
-                Art.Shared(new Color(.16f, .22f, .10f))
-            };
-            var levels = new Renderer[2];
-            for (int lod = 0; lod < 2; lod++)
+                PaintUse(p);
+                Vector2 c = p.Point(0f, p.depth * .5f);
+                int x = Mathf.FloorToInt(c.x / 96f), z = Mathf.FloorToInt(c.y / 96f);
+                long key = ((long)x << 32) ^ (uint)z;
+                if (!blocks.TryGetValue(key, out var list)) blocks.Add(key, list = new List<VillagePlot>());
+                list.Add(p);
+            }
+            var materials = new[] { Art.Shared(new Color(.24f,.29f,.13f)), Art.Shared(new Color(.26f,.20f,.12f)),
+                Art.Shared(new Color(.39f,.36f,.29f)), Art.Shared(new Color(.16f,.22f,.10f)) };
+            int used = 0;
+            foreach (var block in blocks.Values)
             {
-                var mesh = new VillageMesh();
-                foreach (var p in plots)
+                if (used + 2 > budget) break;
+                var holder = new GameObject("Village 96 m block"); holder.transform.SetParent(root, false);
+                var levels = new Renderer[2];
+                for (int lod = 0; lod < 2; lod++)
                 {
-                    float half = p.frontage * .5f;
-                    // Front lawns, a worn drive and a rear working yard belong to this exact property.
-                    Surface(mesh, p, lod);
-                    if (p.square)
-                        continue;
-                    // Front gates remain open; rear and side boundaries show the complete plot depth.
-                    Edge(mesh, p, -half, 0f, -2f, 0f, lod);
-                    Edge(mesh, p, 2f, 0f, half, 0f, lod);
-                    Edge(mesh, p, -half, 0f, -half, p.depth, lod);
-                    Edge(mesh, p, half, 0f, half, p.depth, lod);
-                    Edge(mesh, p, -half, p.depth, half, p.depth, lod);
-                    // These splats suppress native grass blades on beds, drives and yards.
-                    if (lod == 0)
+                    var mesh = new VillageMesh();
+                    foreach (var p in block)
                     {
-                        Ground.Wear(p.front, p.front + p.outward * (p.setback + 9f), 2.4f, .85f);
-                        Ground.Wear(p.front + p.outward * (p.setback + 8f) - p.along * (half - 2f), p.front + p.outward * (p.setback + 8f) + p.along * (half - 2f), 7f, .8f);
-                        if (!p.church && !p.farm)
-                            for (float row = p.setback + 15f; row < p.depth - 4f; row += 2.8f)
-                            {
-                                Vector2 bed = p.front + p.outward * (row + .8f);
-                                Ground.Wear(bed - p.along * (half - 2f), bed - p.along, 1.6f, 1f);
-                            }
-
-                        Ground.Paint(p.front - p.along * half, p.front - p.along * half + p.outward * p.depth, 1.1f, 1f, 1);
+                        if (lod == 0) Surface(mesh, p);
+                        if (p.square || p.boundary == 0) continue;
+                        var polygon = p.Outline();
+                        for (int edge = 0; edge < polygon.Length; edge++)
+                        {
+                            if (lod == 1 && (edge == 0 || p.boundary == 2)) continue;
+                            Vector2 a = polygon[edge], b = polygon[(edge + 1) % polygon.Length];
+                            // Missing runs leave open neighbouring gardens; the front also has two deliberate gates.
+                            if ((p.identity + edge) % 2 == 0) b = Vector2.Lerp(a, b, .72f);
+                            else a = Vector2.Lerp(a, b, .28f);
+                            Edge(mesh, p, a, b, lod);
+                        }
                     }
+                    levels[lod] = mesh.Finish("Village plots LOD" + lod, holder.transform, materials);
                 }
-
-                levels[lod] = mesh.Finish("Village plots LOD" + lod, root, materials);
+                var group = holder.AddComponent<LODGroup>();
+                group.SetLODs(new[] { new LOD(.3f, new[] { levels[0] }), new LOD(.01f, new[] { levels[1] }) });
+                group.RecalculateBounds();
+                float projected = group.size / (2f * Mathf.Tan(Scale.CameraFov * .5f * Mathf.Deg2Rad));
+                group.SetLODs(new[] { new LOD(Mathf.Min(.9f, projected / 300f), new[] { levels[0] }),
+                    new LOD(Mathf.Min(.1f, projected / 1600f), new[] { levels[1] }) });
+                used += 2;
             }
-
-            var holder = new GameObject("Village plot LOD");
-            holder.transform.SetParent(root, false);
-            foreach (var level in levels)
-                level.transform.SetParent(holder.transform, true);
-            var group = holder.AddComponent<LODGroup>();
-            group.SetLODs(new[] { new LOD(.16f, new[] { levels[0] }), new LOD(.006f, new[] { levels[1] }) });
-            group.RecalculateBounds();
-            float projected = group.size / (2f * Mathf.Tan(Scale.CameraFov * .5f * Mathf.Deg2Rad));
-            group.SetLODs(new[] { new LOD(Mathf.Min(.9f, projected / 220f), new[] { levels[0] }), new LOD(Mathf.Min(.1f, projected / 1800f), new[] { levels[1] }) });
-            return 2;
+            return used;
         }
 
-        // One shared grid partitions lawn, beds and yards. Overlapping terrain sheets intersect on slopes.
-        static void Surface(VillageMesh mesh, VillagePlot p, int lod)
+        // Paint contiguous row runs once, into Ground's existing deferred batch, instead of allocating terrain maps.
+        static void PaintUse(VillagePlot p)
         {
-            float half = p.frontage * .5f;
-            var us = new SortedSet<float>
+            float step = 1.5f;
+            for (float v = step * .5f; v < p.depth; v += step)
             {
-                -half + .5f,
-                -half + 2f,
-                -1.2f,
-                -1f,
-                1.2f,
-                half - 2f,
-                half - .5f
-            };
-            var vs = new SortedSet<float>
-            {
-                0f,
-                p.depth - .5f,
-                p.depth - 2f,
-                p.setback + 4f,
-                p.setback + 8f,
-                Mathf.Min(p.depth - 2f, p.setback + (p.farm ? 25f : 12f))
-            };
-            float step = lod == 0 ? 4f : 8f;
-            for (float u = -half + .5f; u < half - .5f; u += step)
-                us.Add(u);
-            for (float v = 0f; v < p.depth - .5f; v += step)
-                vs.Add(v);
-            if (!p.church && !p.farm)
-                for (float row = p.setback + 15f; row < p.depth - 4f; row += 2.8f)
+                p.Limits(v, out float lo, out float hi);
+                int last = -1; float start = lo + .6f, end = hi - .6f;
+                for (float u = start; u <= end + step; u += step)
                 {
-                    vs.Add(row);
-                    vs.Add(Mathf.Min(row + 1.6f, p.depth - 3f));
+                    int use = u > end ? -1 : p.WorkAt(u, v);
+                    if (use == last) continue;
+                    float finish = Math.Min(end, u - step * .5f);
+                    if (last == 1 || last == 2) Ground.Wear(p.Point(start, v), p.Point(finish, v), step, .85f);
+                    if (last == 3) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .55f, 4);
+                    start = Math.Max(lo + .6f, u - step * .5f); last = use;
                 }
-
-            var xs = new List<float>(us);
-            var zs = new List<float>(vs);
-            for (int j = 1; j < zs.Count; j++)
-                for (int i = 1; i < xs.Count; i++)
-                {
-                    float u = (xs[i - 1] + xs[i]) * .5f, v = (zs[j - 1] + zs[j]) * .5f;
-                    if (v > p.depth - .5f)
-                        continue;
-                    int material = p.GroundMaterial(u, v);
-                    mesh.Quad(material, At(p, xs[i - 1], zs[j - 1], .08f), At(p, xs[i], zs[j - 1], .08f), At(p, xs[i], zs[j], .08f), At(p, xs[i - 1], zs[j], .08f));
-                }
+            }
+            // These exact-width approaches connect the road edge, gate and door; the drive runs beside the house.
+            Ground.Wear(p.Point(0f, -1.8f), p.Point(0f, p.setback), p.pathWidth > 0f ? p.pathWidth : 1.4f, .85f);
+            if (p.farm || p.shed || (p.identity & 1) == 0)
+                Ground.Wear(p.Point(p.DriveU, -1.8f), p.Point(p.DriveU, p.YardEnd), p.driveWidth > 0f ? p.driveWidth : 3f, .85f);
         }
 
-        // Most plots have hedges; stone churchyards and occasional low garden walls give streets a readable rhythm.
-        static void Edge(VillageMesh mesh, VillagePlot p, float u0, float v0, float u1, float v1, int lod)
+        // Only occupied working ground gets geometry; lawns retain the terrain's continuous grass material.
+        static void Surface(VillageMesh mesh, VillagePlot p)
         {
-            Vector2 a = p.front + p.along * u0 + p.outward * v0, b = p.front + p.along * u1 + p.outward * v1;
-            int steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(a, b) / (lod == 0 ? 4f : 8f)));
-            float height = p.church ? 1.15f : p.style == 1 ? .85f : 1.35f, width = p.church ? .55f : p.style == 1 ? .3f : .9f;
-            int material = p.church || p.style == 1 ? 2 : 3;
+            // Worn yards are terrain splats, avoiding stepped polygon islands and duplicate ground sheets.
+            Strip(mesh, p, 0f, 0f, p.setback, p.pathWidth > 0f ? p.pathWidth : 1.4f, 2);
+            if (p.farm || p.shed || (p.identity & 1) == 0)
+                Strip(mesh, p, p.DriveU, 0f, p.YardEnd, p.driveWidth > 0f ? p.driveWidth : 3f, 2);
+            if (!p.cultivated) return;
+            for (float v = p.YardEnd + 1f; v < p.depth - 3f; v += 2.7f)
+            {
+                p.Limits(v + .85f, out float lo, out _);
+                float hi = -1f; lo += 2.5f;
+                if (lo >= hi) continue;
+                mesh.Quad(1, At(p.Point(lo, v), .055f), At(p.Point(hi, v), .055f),
+                    At(p.Point(hi, v + 1.7f), .055f), At(p.Point(lo, v + 1.7f), .055f));
+            }
+        }
+
+        // Access strips preserve their physical widths while following the slope at two-metre intervals.
+        static void Strip(VillageMesh mesh, VillagePlot p, float u, float start, float end, float width, int material)
+        {
+            for (float v = start; v < end; v += 2f)
+            {
+                float back = Math.Min(end, v + 2f), half = width * .5f;
+                mesh.Quad(material, At(p.Point(u-half,v),.055f), At(p.Point(u+half,v),.055f),
+                    At(p.Point(u+half,back),.055f), At(p.Point(u-half,back),.055f));
+            }
+        }
+
+        // Hedges, two-rail wood and low masonry keep distinct silhouettes without adding per-panel renderers.
+        static void Edge(VillageMesh mesh, VillagePlot p, Vector2 a, Vector2 b, int lod)
+        {
+            int n = Math.Max(1, (int)Math.Ceiling((b - a).magnitude / (lod == 0 ? 2f : 6f)));
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 x = Vector2.Lerp(a, b, i / (float)n), y = Vector2.Lerp(a, b, (i + 1f) / n);
+                if (Math.Abs(x.y) < .1f && (Math.Min(Math.Abs(x.x), Math.Abs(y.x)) < 1.3f
+                    || Math.Min(Math.Abs(x.x - p.DriveU), Math.Abs(y.x - p.DriveU)) < 2f)) continue;
+                Vector2 from = p.Point(x.x, x.y), to = p.Point(y.x, y.y);
+                float height = p.boundary == 1 ? 1.1f : .85f, width = p.boundary == 1 ? .75f : .3f;
+                if (p.boundary == 2)
+                {
+                    Box(mesh, from, to, .38f, .16f, .11f, 1);
+                    Box(mesh, from, to, .74f, .13f, .11f, 1);
+                    Box(mesh, from, from + p.outward * .12f, 0f, .95f, .13f, 1);
+                }
+                else Box(mesh, from, to, 0f, height, width, p.boundary == 1 ? 3 : 2);
+                if (lod == 0 && p.boundary == 1) Ground.Paint(from, to, 1f, .7f, 1);
+            }
+        }
+
+        // A closed opaque strip follows both endpoint heights, including on a sloping garden wall.
+        static void Box(VillageMesh mesh, Vector2 a, Vector2 b, float bottom, float height, float width, int material)
+        {
             Vector2 side = new Vector2(-(b - a).y, (b - a).x).normalized * width * .5f;
-            for (int i = 0; i < steps; i++)
-            {
-                Vector2 x = Vector2.Lerp(a, b, i / (float)steps), y = Vector2.Lerp(a, b, (i + 1f) / steps);
-                Vector3 al = Ground.OnGround(new Vector3(x.x - side.x, 0f, x.y - side.y)), ar = Ground.OnGround(new Vector3(x.x + side.x, 0f, x.y + side.y));
-                Vector3 bl = Ground.OnGround(new Vector3(y.x - side.x, 0f, y.y - side.y)), br = Ground.OnGround(new Vector3(y.x + side.x, 0f, y.y + side.y));
-                Vector3 up = Vector3.up * height;
-                mesh.Quad(material, al, bl, bl + up, al + up);
-                mesh.Quad(material, br, ar, ar + up, br + up);
-                mesh.Quad(material, al + up, bl + up, br + up, ar + up);
-                if (lod == 0 && p.style == 1)
-                    mesh.Quad(2, al, ar, ar + up, al + up);
-            }
+            Vector3 al = At(a - side, bottom), ar = At(a + side, bottom), bl = At(b - side, bottom), br = At(b + side, bottom);
+            Vector3 up = Vector3.up * height;
+            mesh.Quad(material, al, bl, bl + up, al + up); mesh.Quad(material, br, ar, ar + up, br + up);
+            mesh.Quad(material, al + up, bl + up, br + up, ar + up);
         }
 
-        // Plot-local positions use the same axes as the world painter and preserve the finished terrain height.
-        static Vector3 At(VillagePlot p, float u, float v, float lift)
-        {
-            Vector2 q = p.front + p.along * u + p.outward * v;
-            return Ground.OnGround(new Vector3(q.x, 0f, q.y)) + Vector3.up * lift;
-        }
+        // Meshes sample the finished terrain rather than a competing height prediction.
+        static Vector3 At(Vector2 q, float lift) => Ground.OnGround(new Vector3(q.x, 0f, q.y)) + Vector3.up * lift;
 
-        // Explicit front-facing triangles keep garden strips and solid hedges in one renderer per LOD.
+        // A handful of opaque materials share each block's vertices and draw lists.
         sealed class VillageMesh
         {
             readonly List<Vector3> vertices = new List<Vector3>();
             readonly List<Vector3> normals = new List<Vector3>();
-            readonly List<int>[] triangles =
-            {
-                new List<int>(),
-                new List<int>(),
-                new List<int>(),
-                new List<int>()
-            };
-            // Flat normals retain low stone walls and hedge crowns without transparent materials.
+            readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>() };
+
+            // Front-facing triangles retain yard and hedge silhouettes without transparent materials.
             public void Quad(int sub, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
             {
-                int first = vertices.Count;
-                Vector3 n = Vector3.Cross(b - a, d - a).normalized;
-                if (n.y < -.5f)
-                {
-                    var t = b;
-                    b = d;
-                    d = t;
-                    n = -n;
-                }
-
-                vertices.AddRange(new[] { a, b, c, d });
-                normals.AddRange(new[] { n, n, n, n });
-                triangles[sub].AddRange(new[] { first, first + 1, first + 2, first, first + 2, first + 3 });
+                int first = vertices.Count; Vector3 n = Vector3.Cross(b - a, d - a).normalized;
+                if (n.y < -.5f) { var t = b; b = d; d = t; n = -n; }
+                vertices.Add(a); vertices.Add(b); vertices.Add(c); vertices.Add(d);
+                for (int i = 0; i < 4; i++) normals.Add(n);
+                var list = triangles[sub]; list.Add(first); list.Add(first + 1); list.Add(first + 2);
+                list.Add(first); list.Add(first + 2); list.Add(first + 3);
             }
 
-            // The Unity API check compiles all mesh and LOD calls against the installed editor assemblies.
+            // Every generated mesh is registered for disposal on the next sector build.
             public Renderer Finish(string name, Transform parent, Material[] materials)
             {
-                var mesh = new Mesh
-                {
-                    name = name,
-                    indexFormat = IndexFormat.UInt32
-                };
-                villageMeshes.Add(mesh);
-                mesh.SetVertices(vertices);
-                mesh.SetNormals(normals);
-                mesh.subMeshCount = 4;
-                for (int i = 0; i < 4; i++)
-                    mesh.SetTriangles(triangles[i], i);
+                var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
+                villageMeshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetNormals(normals); mesh.subMeshCount = 4;
+                for (int i = 0; i < 4; i++) mesh.SetTriangles(triangles[i], i);
                 mesh.RecalculateBounds();
-                var go = new GameObject(name);
-                go.transform.SetParent(parent, false);
+                var go = new GameObject(name); go.transform.SetParent(parent, false);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var renderer = go.AddComponent<MeshRenderer>();
-                renderer.sharedMaterials = materials;
-                return renderer;
+                var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterials = materials; return renderer;
             }
         }
     }
