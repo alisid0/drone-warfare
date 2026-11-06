@@ -47,6 +47,8 @@ namespace DroneSandbox
         public const float WarpMax = 1.8f;
         public static Vector2 Warp(Vector2 p)
         {
+            // World parcels already carry their shared boundaries; a sector-local warp would move them at travel.
+            if (MapLayout.Plan.world != null) return Vector2.zero;
             // Looked up in a 2 m grid of it (the builders ask millions of times), worked out the first time.
             if (warpGrid == null)
             {
@@ -710,7 +712,7 @@ namespace DroneSandbox
             FieldParcels.Districts.Clear();
             fieldCells = null;
             FieldTimings = "";
-            if (Plan.fields <= 0f) return;
+            if (Plan.fields <= 0f && Plan.world == null) return;
             var clock = System.Diagnostics.Stopwatch.StartNew();
             MapBlocked();
             long blockedMs = clock.ElapsedMilliseconds;
@@ -725,12 +727,14 @@ namespace DroneSandbox
         const float BlockCell = 2f;
         static bool[] blocked;
         static int blockCount;
+        static float fieldReach;
 
         static void MapBlocked()
         {
             FieldPlot.Warp(Vector2.zero); // initialise before the parallel orchard queries
             FieldParcels.PrepareTerrain();
-            blockCount = Mathf.CeilToInt(2f * Edge / BlockCell);
+            fieldReach = Plan.world != null ? Ground.Size * .5f + BlockCell : Edge;
+            blockCount = Mathf.CeilToInt(2f * fieldReach / BlockCell);
             blocked = new bool[blockCount * blockCount];
             // A point of a square is up to 1.4 m from its middle, but every limit here already keeps a metre or two in
             // hand (a road's verge, the shore), so half a metre's slack is enough.
@@ -739,8 +743,8 @@ namespace DroneSandbox
             {
                 for (int i = 0; i < blockCount; i++)
                 {
-                    var p = new Vector2(-Edge + (i + 0.5f) * BlockCell, -Edge + (j + 0.5f) * BlockCell);
-                    blocked[j * blockCount + i] = Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack
+                    var p = new Vector2(-fieldReach + (i + 0.5f) * BlockCell, -fieldReach + (j + 0.5f) * BlockCell);
+                    blocked[j * blockCount + i] = (Plan.world == null && (Mathf.Abs(p.x) > Edge - 15f - slack || Mathf.Abs(p.y) > Edge - 15f - slack))
                         || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
@@ -754,7 +758,7 @@ namespace DroneSandbox
 
         static bool Blocked(Vector2 p)
         {
-            int i = Mathf.FloorToInt((p.x + Edge) / BlockCell), j = Mathf.FloorToInt((p.y + Edge) / BlockCell);
+            int i = Mathf.FloorToInt((p.x + fieldReach) / BlockCell), j = Mathf.FloorToInt((p.y + fieldReach) / BlockCell);
             return i < 0 || j < 0 || i >= blockCount || j >= blockCount || blocked[j * blockCount + i];
         }
 
