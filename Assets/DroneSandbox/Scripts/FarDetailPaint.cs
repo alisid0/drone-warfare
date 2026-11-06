@@ -71,9 +71,10 @@ namespace DroneSandbox
             if (cover == Cover.Forest) cover = Cover.Pasture;
             if (this.cover.Forest(x, z) > .5f) cover = Cover.Forest;
             float bank = Bank(x, z, streams ?? rivers, out _);
-            if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
+            float lakeBank = LakeBank(x, z, 2f, out _);
+            if (cover == Cover.Water) cover = Cover.Pasture; // vector water below owns the visible edge
             int layer = cover == Cover.Farmland ? 4 : GroundLayer(cover, x, z); float angle = 0f;
-            byte strength = (byte)Math.Round(255f * (1f - (bank < 64f ? 0f : land.Weight(Cover.Water))));
+            byte strength = 255;
             if (land.Weight(Cover.Farmland) > 0f)
             {
                 var f = FieldAt(x, z); layer = f.layer; angle = f.angle;
@@ -89,6 +90,8 @@ namespace DroneSandbox
             }
             if (bank < 4f) layer = 2;
             if (bank < 0f) strength = 0;
+            if (lakeBank < 5f) layer = 2;
+            if (lakeBank < 0f) strength = 0;
             Road(x, z, lanes ?? roads, out float edge, out int kind, out _);
             if (edge < 0f) { layer = 2; strength = kind == 0 ? (byte)50 : (byte)255; }
             int turn = (int)Math.Round(angle / Math.PI * 65535);
@@ -102,17 +105,21 @@ namespace DroneSandbox
             if (features.SurfaceAt(x, z, out Color feature)) return FarDetailPalette.Decode(feature);
             float bank = Bank(x, z, streams, out float riverWidth);
             var land = cover.At(x, z);
-            Vector3 c = CoverColour(x, z, pixel, land, bank < 64f);
+            Vector3 c = CoverColour(x, z, pixel, land);
             if (villages.At(new Vector2(x,z), out var plot)) c = VillageColour(x, z, plot, pixel);
-            c = Blend(c, FarDetailPalette.Means[2], BandCoverage(3f - bank, riverWidth + 3f, pixel));
-            c = Blend(c, WaterColour, BandCoverage(-bank, riverWidth, pixel));
+            c = PaintRiver(c, bank, riverWidth, pixel);
+            float lakeBank = LakeBank(x, z, pixel, out bool reservoir);
+            Vector3 basin = PaintLake(c, lakeBank, reservoir, pixel);
+            // Inlets and outlets stay open through the shore band; a dry rim must never cross a river mouth.
+            float mouth = BandCoverage(-bank, riverWidth, pixel) * (1f - Coverage(-lakeBank, pixel));
+            c = Blend(basin, c, mouth);
             Road(x, z, lanes, out float edge, out int kind, out float roadWidth);
             c = Blend(c, FarDetailPalette.Means[4], BandCoverage(2f - edge, roadWidth + 2f, pixel));
             Vector3 road = kind == 0 ? RoadColour : FarDetailPalette.Means[2];
             return Blend(c, road, BandCoverage(-edge, roadWidth, pixel));
         }
 
-        static readonly Vector3 WaterColour = FarDetailPalette.Decode(new Color32(54, 82, 78, 255));
+        static readonly Vector3 WaterColour = WaterAppearance.Lake;
         // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
         static readonly Vector3 RoadColour = FarDetailPalette.Decode(C(78, 78, 80));
         static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
@@ -123,19 +130,19 @@ namespace DroneSandbox
         static readonly Vector3 WoodFloor = new Vector3(.0505f, .0665f, .0335f);
 
         // Interpolate memberships, not category numbers; forest litter follows exactly the canopy's visual edge.
-        Vector3 CoverColour(float x, float z, float pixel, FarDetailCover.Sample s, bool river)
+        Vector3 CoverColour(float x, float z, float pixel, FarDetailCover.Sample s)
         {
             float wood = cover.Forest(x, z);
             if (s.a == s.b && s.a == s.c && s.a == s.d)
             {
                 if (s.a == Cover.Farmland) return Blend(FarmColour(x, z, pixel), WoodFloor, wood);
                 if (s.a == Cover.Forest && wood == 1f) return WoodFloor;
-                if (s.a != Cover.Pasture && s.a != Cover.Forest && !(river && s.a == Cover.Water)) return GroundColour(s.a, x, z);
+                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water) return GroundColour(s.a, x, z);
             }
             Vector3 grass = GroundColour(Cover.Pasture, x, z);
             Vector3 farm = s.Weight(Cover.Farmland) > 0f ? FarmColour(x, z, pixel) : grass;
             Vector3 Colour(Cover kind) => kind == Cover.Farmland ? farm
-                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Village || river && kind == Cover.Water ? grass : GroundColour(kind, x, z);
+                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Village || kind == Cover.Water ? grass : GroundColour(kind, x, z);
             Vector3 c;
             if (s.a == s.b && s.a == s.c && s.a == s.d) c = Colour(s.a);
             else c = Blend(Blend(Colour(s.a), Colour(s.b), s.u), Blend(Colour(s.c), Colour(s.d), s.u), s.v);

@@ -42,6 +42,7 @@ namespace DroneSandbox
                     if (visualCover != null && visualCover.At(x + origin.x, z + origin.y).Weight(Cover.Farmland) > 0f) continue;
                     // Garden boundaries also belong to the shared plan, not the terrain's broad grass splat.
                     if (detail != null && detail.villages.At(new Vector2(x + origin.x, z + origin.y), out _)) continue;
+                    if (detail != null && detail.NearWaterPaint(x + origin.x, z + origin.y, pixel)) continue;
                     int side = Mathf.Abs(x) > Mathf.Abs(z) ? (x < 0 ? 0 : 1) : (z < 0 ? 2 : 3);
                     float along = side < 2 ? z : x;
                     float u = Mathf.Clamp01((along + half) / Ground.Size) * (edges[side].Length - 1);
@@ -75,8 +76,10 @@ namespace DroneSandbox
                 for (int i = 0; i < n; i++)
                 {
                     Vector3 sum = Vector3.zero;
-                    for (int b = 0; b < band; b++) for (int layer = 0; layer < Mathf.Min(6, data.alphamapLayers); layer++)
-                            sum += (layer < 5 ? FarDetailPalette.Means[layer] : Ground.LitterMean) * (side < 2 ? strips[side][i, b, layer] : strips[side][b, i, layer]);
+                    for (int b = 0; b < band; b++) for (int layer = 0; layer < Mathf.Min(8, data.alphamapLayers); layer++)
+                            sum += (layer < 5 ? FarDetailPalette.Means[layer] : layer == 5 ? Ground.LitterMean
+                                : layer == 6 ? WaterAppearance.WetMud : WaterAppearance.Gravel)
+                                * (side < 2 ? strips[side][i, b, layer] : strips[side][b, i, layer]);
                     edges[side][i] = sum / band;
                 }
             }

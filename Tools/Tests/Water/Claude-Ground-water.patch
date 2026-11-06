@@ -1,0 +1,125 @@
+--- a/Assets/DroneSandbox/Scripts/Ground.cs
++++ b/Assets/DroneSandbox/Scripts/Ground.cs
+@@ -26,6 +26,7 @@
+         }
+ 
+         static Terrain terrain;
++        static WatercourseProfile watercourse;
+         static float terrainBottom = -Sink, terrainRange = HeightRange;
+         static readonly List<FlatSite> sites = new List<FlatSite>();
+ 
+@@ -245,6 +246,28 @@
+                 if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
+             }
+ 
++            // Real channel sizes and bend shelves, after levels are known. The dam gorge keeps its established shape.
++            watercourse = new WatercourseProfile();
++            if (MapLayout.HasRiver)
++                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
++                {
++                    for (int xi = 0; xi < HeightRes; xi++)
++                    {
++                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
++                        if (MapLayout.HasDam && MapLayout.NearDam(new Vector2(x, z), 60f)) continue;
++                        if (!watercourse.Sample(x, z, out float distance, out float level, out float width,
++                            out float margin, out float depth, out float slope) || distance > width + margin + 14f) continue;
++                        if (MapLayout.LakeDistance(x, z) < 8f) continue;
++                        float edge = distance - width;
++                        // Preserve bridge approaches, graded roads and all flat building sites on dry ground.
++                        if (edge > 0f && roads.Distance(x, z) < MapLayout.RoadWidthAt(x, z) + 3f) continue;
++                        float shape = edge <= 0f ? level - depth
++                            : level + .12f + Mathf.Min(edge, margin) * .045f + Mathf.Max(0f, edge - margin) * slope;
++                        float weight = (1f - WaterAppearance.Smooth((edge - margin) / 14f)) * FlatMask(x, z, out _);
++                        world[zi, xi] = Mathf.Lerp(world[zi, xi], shape, weight);
++                    }
++                });
++
+             terrainBottom = -Sink;
+             terrainRange = HeightRange;
+             if (source != null)
+@@ -705,7 +728,8 @@
+                         float x = -Size / 2f + (x0 + i + 0.5f) * cell, z = -Size / 2f + (band + j + 0.5f) * cell;
+                         float ragged = (Mathf.PerlinNoise(x * 0.11f + 41f, z * 0.11f + 7f) - 0.5f) * 1.4f;
+                         float floor = Mathf.SmoothStep(0f, 1f, (CanopyAt(x, z) + ragged - 1.2f) / 1.8f);
+-                        floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3]) * 1.5f); // tracks, yards, rock
++                        float shore = maps.GetLength(2) > 7 ? maps[j, i, 6] + maps[j, i, 7] : 0f;
++                        floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3] + shore) * 1.5f); // preserve exposed banks too
+                         if (floor <= 0.001f) continue;
+                         // Litter under the trees that stand (about 1.5 at 10 m spacing, 0.4 at the 17 m of a thinned wood),
+                         // with moss and damp grass in patches 10-25 m across; shaded grass in the rest.
+@@ -868,6 +892,10 @@
+                 // Fallen leaves, needles and twigs (Tools/make_forest_floor.py), toned from its orange-brown to the
+                 // dull grey-brown litter seen between trees from the air (66, 58, 42); warmer read as rust halos (hd141).
+                 Layer("litter", "litter", 6f, new Color(0.59f, 0.88f, 1.55f), new Color(0.30f, 0.23f, 0.15f), new Color(0.18f, 0.14f, 0.09f)),
++                // Reuse the dirt photo: wet mud and pale gravel occupy the two unused slots of HDRP's existing
++                // eight-layer pass. Linear tints match WaterAppearance's filtered distant colours.
++                Layer("wet mud", "dirt", 5f, new Color(.53001f, .66905f, .72861f), new Color(.34f, .32f, .26f), new Color(.27f, .25f, .20f)),
++                Layer("shore gravel", "dirt", 4f, new Color(1.99341f, 2.47628f, 2.89197f), new Color(.62f, .59f, .50f), new Color(.54f, .51f, .43f)),
+             };
+         }
+ 
+@@ -897,7 +925,7 @@
+             var river = MapLayout.RiverField;
+             var roads = MapLayout.RoadField;
+             float hw = MapLayout.RiverHalfWidth;
+-            var splat = new float[SplatRes, SplatRes, 6]; // the litter layer waits for the woods (PaintForestFloor)
++            var splat = new float[SplatRes, SplatRes, 8]; // the litter layer waits for the woods (PaintForestFloor)
+             var junctions = MapLayout.Junctions;
+             var tracks = MapLayout.TrackField;
+             System.Threading.Tasks.Parallel.For(0, SplatRes, zi =>
+@@ -979,6 +1007,17 @@
+                     float edgeStones = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRiver - hw - 0.8f) / 1.6f);
+                     if (edgeStones > 0f)
+                         rock = Mathf.Max(rock, edgeStones * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 5f) * 1.8f - 0.8f));
++                    float wetMud = 0f, gravel = 0f;
++                    if (!(MapLayout.HasDam && MapLayout.NearDam(new Vector2(x, z), 60f)) && watercourse != null && watercourse.Sample(x, z, out float riverDistance,
++                        out _, out float waterWidth, out float margin, out _, out _) && riverDistance < waterWidth + margin + 1f)
++                    {
++                        float edge = riverDistance - waterWidth;
++                        float bank = 1f - WaterAppearance.Smooth((edge - margin + .5f) / 1f);
++                        float wetFringe = WaterAppearance.WetEdge(edge);
++                        // The submerged shelf is pale enough to read through shallow water; mud stays on land.
++                        wetMud = bank * wetFringe * WaterAppearance.Smooth((edge + .3f) / .6f);
++                        gravel = bank * (1f - wetMud) * (.75f + .25f * Mathf.PerlinNoise(x * .14f, z * .14f + 9f));
++                    }
+                     // The lake: a stony shore just above the water, and a rocky bed you see through the shallows.
+                     float lake = MapLayout.LakeDistance(x, z);
+                     if (lake < 3f)
+@@ -999,6 +1038,25 @@
+                         }
+                         else dirt = Mathf.Max(dirt, shore * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.18f + 7f, z * 0.18f + 3f) - 0.5f) * 4f));
+                     }
++                    // Draw-down and wet margins follow the signed shore, including islands and world lakes.
++                    if (lake > -7f && lake < 7f)
++                    {
++                        bool reservoir = plan.world != null ? false : MapLayout.ReservoirDistance(x, z) <= lake + .01f;
++                        if (plan.world != null)
++                            foreach (var basin in plan.world.lakes)
++                                if (basin.reservoir && WorldSectorData.ShoreDistance(new Vector2(x, z), basin.shore) <= lake + .01f)
++                                { reservoir = true; break; }
++                        float band = reservoir ? 5f : 2.5f;
++                        float shore = 1f - WaterAppearance.Smooth((lake - band + .5f) / 1f);
++                        // Keep the spillway abutments and their weathering exactly as authored.
++                        float keep = MapLayout.NearDam(new Vector2(x, z), 12f) ? 0f : 1f;
++                        float wetFringe = WaterAppearance.WetEdge(lake) * WaterAppearance.Smooth((lake + .3f) / .6f);
++                        wetMud = Mathf.Max(wetMud, shore * wetFringe * keep);
++                        gravel = Mathf.Max(gravel, shore * (1f - wetFringe) * keep);
++                    }
++                    // Roads, yards and field margins keep ownership of their dry ground.
++                    float shoreKeep = bare || dRoad < roadHw + 1f || MapLayout.InField(new Vector2(x, z), 0f) ? 0f : 1f;
++                    wetMud *= shoreKeep; gravel *= shoreKeep;
+                     // A few worn patches.
+                     dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
+                     // Bare soil under the fields, in case the terrain shows through a crop from far off (Farmland.Lift).
+@@ -1034,6 +1092,11 @@
+                     splat[zi, xi, 2] = w2 / sum;
+                     splat[zi, xi, 3] = w3 / sum;
+                     splat[zi, xi, 4] = w4 / sum;
++                    float shoreCover = Mathf.Clamp01(wetMud + gravel);
++                    for (int layer = 0; layer < 6; layer++) splat[zi, xi, layer] *= 1f - shoreCover;
++                    float shoreSum = Mathf.Max(.0001f, wetMud + gravel);
++                    splat[zi, xi, 6] = shoreCover * wetMud / shoreSum;
++                    splat[zi, xi, 7] = shoreCover * gravel / shoreSum;
+                 }
+             });
+             return splat;

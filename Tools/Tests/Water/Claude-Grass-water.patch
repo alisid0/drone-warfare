@@ -1,0 +1,39 @@
+--- a/Assets/DroneSandbox/Scripts/Grass.cs
++++ b/Assets/DroneSandbox/Scripts/Grass.cs
+@@ -37,6 +37,8 @@
+             float size = Ground.Size, cell = size / resolution;
+             var roads = MapLayout.RoadField;
+             var river = MapLayout.RiverField;
++            var watercourse = new WatercourseProfile();
++            Vector2 waterOrigin = MapLayout.Plan.world != null ? MapLayout.Plan.world.center : Vector2.zero;
+             // Rows in parallel: every question here only reads the finished layout and land.
+             System.Threading.Tasks.Parallel.For(0, resolution, zi =>
+             {
+@@ -45,15 +47,23 @@
+                     float x = -size / 2f + (xi + 0.5f) * cell, z = -size / 2f + (zi + 0.5f) * cell;
+                     var p = new Vector2(x, z);
+                     // Reeds in beds along the lake's edge and the riverbanks.
+-                    float lake = MapLayout.LakeDistance(x, z), bank = river.Distance(x, z) - MapLayout.RiverWidthAt(x, z);
+-                    bool waterside = (lake > -3f && lake < 1f) || (bank > -1.5f && bank < 1f && !MapLayout.InGorge(p, 0f));
++                    float lake = MapLayout.LakeDistance(x, z), riverDistance = river.Distance(x, z);
++                    float bank = 100000f, margin = 0f;
++                    bool slow = false;
++                    if (riverDistance < MapLayout.RiverHalfWidth + 6f && watercourse.Sample(x, z, out float distance,
++                        out _, out float width, out margin, out _, out _))
++                    {
++                        bank = distance - width;
++                        slow = margin > 2.3f && WaterAppearance.Pool(x + waterOrigin.x, z + waterOrigin.y) > .45f;
++                    }
++                    bool waterside = (lake > -3f && lake < 1f) || (slow && bank > -1.5f && bank < 1f && !MapLayout.InGorge(p, 0f));
+                     bool pond = lake < 1f && MapLayout.ReservoirDistance(x, z) > lake + 0.01f; // ponds are mostly ringed with reeds
+                     if (waterside && Mathf.PerlinNoise(x * 0.06f + 90f, z * 0.06f + 30f) > (pond ? 0.55f : 0.56f) && !MapLayout.NearDam(p, 2f)) // a third of the shore, in clumps
+                         reeds[zi, xi] = Mathf.PerlinNoise(x * 0.4f, z * 0.4f) > 0.45f ? 2 : 1;
+                     if (Ground.SteepnessAt(x, z) > 30f) continue;
+                     if (roads.Distance(x, z) < MapLayout.RoadHalfWidth + 0.3f || MapLayout.TrackField.Distance(x, z) < 1.3f) continue;
+-                    if (river.Distance(x, z) < MapLayout.RiverHalfWidth + 1f) continue;
+-                    if (MapLayout.LakeDistance(x, z) < 1f || MapLayout.NearDam(p, 0f)) continue;
++                    if (riverDistance < MapLayout.RiverHalfWidth + 1f || bank < margin + .5f) continue;
++                    if (lake < (MapLayout.HasDam ? 5f : 2.5f) || MapLayout.NearDam(p, 0f)) continue;
+                     if (MapLayout.NearFlatSite(p, -1f) || MapLayout.InField(p, 0.3f) || MapLayout.OnWorks(p, -2f) || Ground.Worn(p)) continue;
+                     // Under a closed canopy the forest floor shows; in the wood's thinner edge, sparser tufts.
+                     float shade = Ground.CanopyAt(x, z);
