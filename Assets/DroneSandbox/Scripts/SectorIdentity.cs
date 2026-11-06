@@ -66,6 +66,7 @@ namespace DroneSandbox
                             foreach (var q in rails) if (a.Contains(q, 12f)) { clear = false; break; }
                         }
                         if (!clear) continue;
+                        if (p.world != null && !WorldGround(p, a, forest)) continue;
                         if (!forest && rails.Count > 0)
                         {
                             Vector2 entry = a.Point(-a.halfLength - 8f, p.kind == SectorKind.RailJunction ? -30f : -104f);
@@ -80,6 +81,26 @@ namespace DroneSandbox
             // A failed recipe must be visible in seed validation, never silently become another farmland sector.
             if (score == float.MaxValue) throw new System.InvalidOperationException("No clear landmark footprint for " + p.kind + " seed " + p.seed);
             return best;
+        }
+
+        // In a sector cut from the world: no water, wetland or town anywhere in the footprint (sampled every 40 m),
+        // and for a built landmark no more than 18 m between its highest and lowest ground, so the levelled pads
+        // don't become cliffs. The forest core only has to stay off the water.
+        static bool WorldGround(SectorPlan p, FeatureArea a, bool forest)
+        {
+            float low = float.MaxValue, high = float.MinValue;
+            for (float v = -a.halfWidth; v <= a.halfWidth + 0.1f; v += 40f)
+                for (float u = -a.halfLength; u <= a.halfLength + 0.1f; u += 40f)
+                {
+                    Vector2 q = a.Point(u, v);
+                    if (p.world.NearWater(q, 15f)) return false;
+                    if (forest) continue;
+                    if (p.world.CoverAt(q.x, q.y) == Cover.Town) return false;
+                    float h = p.world.Height(q.x, q.y);
+                    low = Mathf.Min(low, h);
+                    high = Mathf.Max(high, h);
+                }
+            return forest || high - low <= 18f;
         }
 
         // A mature core, two glades and a through forestry track; ordinary woods fill the unreserved surroundings.

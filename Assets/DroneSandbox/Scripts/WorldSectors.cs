@@ -34,8 +34,31 @@ namespace DroneSandbox
             plan.ridges = 0f;
             if (plan.world.townShare > 0.35f) plan.kind = SectorKind.MarketTown;
             else if (plan.world.townShare > 0.02f) plan.kind = SectorKind.TownOutskirts;
+            // The landmark (airfield, works, rail yard, town grid, forest core, marsh) was planned round the
+            // generator's own river and roads, which the world has just replaced; moved site by site afterwards, a
+            // compound's buildings scattered over the sector while its yards stayed behind. Take it out, buildings and
+            // all, and plan it again once the base, the HQ and the world's roads stand.
+            bool landmark = plan.reservedFeatures.Count > 0 || plan.wetland != null;
+            if (landmark) ClearLandmark(plan);
             PlaceMission(plan);
+            if (landmark) SectorIdentity.Plan(plan);
             return plan;
+        }
+
+        // Removes everything SectorIdentity added: its reserved areas and their buildings, yards, fences, streets,
+        // levelled pads, glades and wetland.
+        static void ClearLandmark(SectorPlan plan)
+        {
+            for (int i = plan.sites.Count - 1; i >= 0; i--)
+                foreach (var area in plan.reservedFeatures)
+                    if (area.Contains(plan.sites[i].position, 40f)) { plan.sites.RemoveAt(i); break; }
+            plan.reservedFeatures.Clear();
+            plan.featureSurfaces.Clear();
+            plan.featureFences.Clear();
+            plan.featureStreets.Clear();
+            plan.featureFlats.Clear();
+            plan.woodlandGlades.Clear();
+            plan.wetland = null;
         }
 
         // Settlement centres retain their names; a town extending into the square contributes occupied blocks

@@ -754,7 +754,7 @@ namespace DroneSandbox
             {
                 Vector3 chosen = near;
                 float best = float.MaxValue;
-                for (int z = -24; z <= 24; z++) for (int x = -24; x <= 24; x++)
+                for (int z = -48; z <= 48; z++) for (int x = -48; x <= 48; x++) // 3 km round the flight: forest isn't always nearer
                 {
                     Vector3 local = near + new Vector3(x * 64f, 0f, z * 64f);
                     Vector2 world = new Vector2(local.x, local.z) + FarTerrain.Origin;
