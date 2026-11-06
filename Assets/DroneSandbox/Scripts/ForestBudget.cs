@@ -57,7 +57,8 @@ namespace DroneSandbox
         }
 
         // Inverse projected pixels put large crowns first; 25/83/333 mean 40/12/3 px before budget pressure.
-        public static Vector4 SelectProjected(Bucket[] bins, int guard)
+        public static Vector4 SelectProjected(Bucket[] bins, int guard, int triangleLimit = TriangleLimit,
+            int cardLimit = CardLimit, int fullLimit = FullLimit, int reducedLimit = ReducedLimit)
         {
             for (int i = 1; i < bins.Length; i++)
             {
@@ -71,21 +72,21 @@ namespace DroneSandbox
             while (full > 0)
             {
                 var a = Range(bins, 0, full + guard);
-                if (a.full <= FullLimit && a.fullTriangles <= TriangleLimit / 2) break;
+                if (a.full <= fullLimit && a.fullTriangles <= triangleLimit / 2) break;
                 full--;
             }
             int fullCost = full > 0 ? Range(bins, 0, full + guard).fullTriangles : 0;
             while (reduced > full)
             {
                 var a = Range(bins, Mathf.Max(0, full - Mathf.CeilToInt(full * 0.1f) - guard), reduced + guard);
-                if (a.reduced <= ReducedLimit && fullCost + a.reducedTriangles <= TriangleLimit - CardLimit * 8) break;
+                if (a.reduced <= reducedLimit && fullCost + a.reducedTriangles <= triangleLimit - cardLimit * 8) break;
                 reduced--;
             }
             int meshCost = fullCost + (reduced > 0 ? Range(bins, Mathf.Max(0, full - Mathf.CeilToInt(full * 0.1f) - guard), reduced + guard).reducedTriangles : 0);
             while (card > reduced)
             {
                 var a = Range(bins, Mathf.Max(0, reduced - Mathf.CeilToInt(reduced * 0.1f) - guard), card + guard);
-                if (a.cards <= CardLimit && meshCost + a.cardTriangles <= TriangleLimit) break;
+                if (a.cards <= cardLimit && meshCost + a.cardTriangles <= triangleLimit) break;
                 card--;
             }
             return new Vector4(full, reduced, card, 700f);

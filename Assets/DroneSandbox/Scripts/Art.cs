@@ -142,8 +142,9 @@ namespace DroneSandbox
                 lods[0].screenRelativeTransitionHeight = Mathf.Clamp(projected / 65f, 0.002f, 0.9f);
                 lods[1].screenRelativeTransitionHeight = Mathf.Min(lods[0].screenRelativeTransitionHeight * 0.9f, projected / (heavyTree ? 200f : 250f));
                 lods[2].screenRelativeTransitionHeight = Mathf.Min(lods[1].screenRelativeTransitionHeight * 0.9f, projected / Scale.D(480f));
-                foreach (var renderer in lods[2].renderers)
-                    if (renderer != null) renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                for (int tier = 1; tier < lods.Length; tier++)
+                    foreach (var renderer in lods[tier].renderers)
+                        if (renderer != null) renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
             else if (lods.Length == 2)
             {
