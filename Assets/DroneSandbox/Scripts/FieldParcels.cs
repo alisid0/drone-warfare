@@ -85,23 +85,8 @@ namespace DroneSandbox
                 int first = lots.Count;
                 Divide(district, 0);
                 Consolidate(first);
-                // Keep a connected patch of pasture/wood at a district corner, not holes between every parcel.
-                float land = 0f;
-                for (int k = first; k < lots.Count; k++) land += Area(lots[k]);
                 districtLand += usable;
-                float reserve = Mathf.Max(0f, land - usable * Range(0.82f, 0.86f)), removed = 0f;
-                Vector2 corner = district.center + district.along * district.halfLength + district.Across * district.halfWidth;
-                while (removed < reserve && lots.Count > first + 2)
-                {
-                    int nearest = first;
-                    for (int k = first + 1; k < lots.Count; k++)
-                        if ((lots[k].center - corner).sqrMagnitude < (lots[nearest].center - corner).sqrMagnitude) nearest = k;
-                    if (removed + Area(lots[nearest]) > reserve * 1.5f) break;
-                    removed += Area(lots[nearest]);
-                    lots.RemoveAt(nearest);
-                }
             }
-            CullIslands();
             foreach (var lot in lots)
             {
                 var crop = Trim(lot);
@@ -123,35 +108,6 @@ namespace DroneSandbox
                 for (int u = 0; u < 30; u++)
                     if (!blocked(f.Point(f.halfLength * ((u + 0.5f) / 15f - 1f), f.halfWidth * ((v + 0.5f) / 15f - 1f)))) clear++;
             return Area(f) * clear / 900f;
-        }
-
-        // Small remnants at a road bend or woodland corner stay meadow unless they belong to the parcel fabric.
-        // Otherwise a technically valid 600 m2 field would recreate the old isolated coloured blocks.
-        static void CullIslands()
-        {
-            var remove = new bool[lots.Count];
-            for (int i = 0; i < lots.Count; i++)
-            {
-                var f = lots[i];
-                if (Area(f) >= 3000f) continue;
-                float shared = 0f, perimeter = 0f;
-                var corners = new[] { Corner(f, -1f, -1f), Corner(f, 1f, -1f), Corner(f, 1f, 1f), Corner(f, -1f, 1f) };
-                for (int e = 0; e < 4; e++)
-                {
-                    Vector2 a = corners[e], b = corners[(e + 1) % 4], dir = (b - a).normalized;
-                    float length = Vector2.Distance(a, b);
-                    int samples = Mathf.Max(1, Mathf.CeilToInt(length / 10f));
-                    for (int s = 0; s < samples; s++)
-                    {
-                        Vector2 p = Vector2.Lerp(a, b, (s + 0.5f) / samples) + new Vector2(dir.y, -dir.x) * 2f;
-                        perimeter += length / samples;
-                        for (int j = 0; j < lots.Count; j++)
-                            if (i != j && lots[j].ContainsUnwarped(p, 0f)) { shared += length / samples; break; }
-                    }
-                }
-                remove[i] = shared < perimeter * 0.4f;
-            }
-            for (int i = lots.Count - 1; i >= 0; i--) if (remove[i]) lots.RemoveAt(i);
         }
 
         const float TerrainCell = 16f;
@@ -315,7 +271,7 @@ namespace DroneSandbox
         }
 
         // Only joins full matching ends or sides, with collinear outside edges: the union cannot cover a blocked gap.
-        static bool Join(FieldPlot a, FieldPlot b, out FieldPlot joined)
+        internal static bool Join(FieldPlot a, FieldPlot b, out FieldPlot joined)
         {
             joined = default;
             Vector2 d = b.center - a.center;

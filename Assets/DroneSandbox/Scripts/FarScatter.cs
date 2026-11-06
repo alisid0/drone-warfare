@@ -16,7 +16,7 @@ namespace DroneSandbox
         const int Batch = 511, CellLimit = 192, MovementGuard = 16; // non-uniform scales also need inverse matrices
         static readonly string[] Trees = { "Scenery_Tree", "Scenery_Birch", "Scenery_Spruce", "Scenery_Pine" };
         static readonly string[] Houses = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_C", "Scenery_House_D",
-            "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop" };
+            "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop", "Scenery_Church", "Scenery_OfficeBlock", "Scenery_Warehouse" };
 
         // A model may have several renderers at one LOD; retain every piece and its imported transform.
         sealed class Part
@@ -481,7 +481,7 @@ namespace DroneSandbox
         // Keep the photo material path used by Art, with three reusable tint variants for each tree tier.
         void LoadModels()
         {
-            models = new Model[43];
+            models = new Model[36 + Houses.Length]; // 36 tree tiers, then the house kinds SettlementPattern places
             for (int tier = 0; tier < 3; tier++)
                 for (int species = 0; species < 4; species++)
                     for (int shade = 0; shade < 3; shade++)

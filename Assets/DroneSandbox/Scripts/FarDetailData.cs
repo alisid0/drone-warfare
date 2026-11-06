@@ -18,6 +18,7 @@ namespace DroneSandbox
         readonly Dictionary<long, Segment[]> riverCells = new Dictionary<long, Segment[]>();
         public readonly FarFieldPlan fields;
         public readonly FarDetailCover cover;
+        public readonly VillagePlan villages;
         public readonly float[][] coarse;
 
         // A vector segment carries real widths, avoiding the world's deliberately exaggerated road pixels.
@@ -40,11 +41,13 @@ namespace DroneSandbox
         }
 
         // Called during world setup, before streaming starts; the native noise table is sampled on the main thread.
-        public FarDetailData(int seed, float[] heights, Cover[] covers, int count, Segment[] roads, Segment[] rivers, float[][] coarse)
+        public FarDetailData(int seed, float[] heights, Cover[] covers, int count, Segment[] roads, Segment[] rivers, float[][] coarse, VillagePlan villages = null)
         {
             this.seed = seed; this.heights = heights; this.covers = covers; this.count = count;
             features = WorldPlan.CaptureFeatureMap(); // immutable, so workers can read it
-            this.roads = roads; this.rivers = rivers; this.coarse = coarse;
+            this.villages = villages ?? new VillagePlan(seed, roads, WorldPlan.Settlements);
+            var streets = new List<Segment>(roads); streets.AddRange(this.villages.lanes);
+            this.roads = streets.ToArray(); this.rivers = rivers; this.coarse = coarse;
             cover = new FarDetailCover(seed, covers, count);
             fields = new FarFieldPlan(seed, roads, cover, Height);
             var cells = new Dictionary<long, List<Segment>>();
@@ -267,7 +270,12 @@ namespace DroneSandbox
             }
             foreach (var river in Rivers) for (int k = 1; k < river.points.Count; k++)
                     rivers.Add(new FarDetailData.Segment { ax = river.points[k - 1].x, az = river.points[k - 1].y, bx = river.points[k].x, bz = river.points[k].y, widthA = river.halfWidths[k - 1], widthB = river.halfWidths[k] });
-            return new FarDetailData(Seed, (float[])heights.Clone(), (Cover[])cover.Clone(), GridCount, roads.ToArray(), rivers.ToArray(), coarse);
+            var lanes = roads.ToArray();
+            if (villageCover != cover) { villageSnapshot = new VillagePlan(Seed, lanes, Settlements); villageCover = cover; }
+            return new FarDetailData(Seed, (float[])heights.Clone(), (Cover[])cover.Clone(), GridCount, lanes, rivers.ToArray(), coarse, villageSnapshot);
         }
+
+        static Cover[] villageCover;
+        static VillagePlan villageSnapshot;
     }
 }
