@@ -7,12 +7,32 @@ using UnityEngine.Rendering;
 namespace DroneSandbox
 {
     // Recipe woods retain a 4 m surface; world tiles use 16/32 m interiors and 8 m rims in 2 km draw blocks.
-    // Generation is sliced between small sampling batches on the main thread, so changing WorldPlan cannot race a worker.
+    // Flight generation stays in timed main-thread slices; sector loading joins its workers before play can resume.
     public sealed class ForestHlod
     {
         public const int BlockSize = 2048, TileSize = 256;
         const int BlockCount = 28;
         const double BuildMilliseconds = 0.85;
+        const int SampleSide = (BlockSize + 16) / 4 + 1, SampleCount = SampleSide * SampleSide;
+
+        // The default long hash XORs x and z into the same few buckets on a regular grid; mix both axes instead.
+        sealed class CoordinateComparer : IEqualityComparer<long>
+        {
+            // Keep exact coordinate identity, including negative normal samples outside a block.
+            public bool Equals(long a, long b) => a == b;
+
+            // Avalanche the packed coordinates so grid spacing cannot create long dictionary chains.
+            public int GetHashCode(long value)
+            {
+                unchecked
+                {
+                    uint h = (uint)(value >> 32) * 0x9e3779b9u ^ (uint)value;
+                    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+                    return (int)h;
+                }
+            }
+        }
+        static readonly CoordinateComparer Coordinates = new CoordinateComparer();
 
         // The same plain mesh data goes to Unity and the offline harness; no substitute forest recipe.
         public sealed class Data
@@ -26,6 +46,7 @@ namespace DroneSandbox
             public float[] ground, crown;
             public int[] triangles;
             public Color32[] pixels;
+            internal float[] sampledGround;
         }
 
         // Shader fades keep surfaces immutable, so uploaded blocks need no retained CPU vertex copy.
@@ -312,33 +333,41 @@ namespace DroneSandbox
         sealed class Surface
         {
             readonly Data data;
-            readonly Dictionary<long, int> indices = new Dictionary<long, int>();
-            readonly Dictionary<long, float> heights = new Dictionary<long, float>();
-            readonly Dictionary<long, float> covers = new Dictionary<long, float>();
-            readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>();
-            readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>();
+            readonly int[] indices;
+            readonly Vector2[] heights;
+            readonly bool[] sampled;
+            readonly bool[] samples;
+            readonly float[] covers;
+            readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>(Coordinates);
+            readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>(Coordinates);
             public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
             public readonly List<Vector2> uv = new List<Vector2>();
             public readonly List<float> ground = new List<float>(), crown = new List<float>();
             public readonly List<int> triangles = new List<int>();
 
             // Temporary sampling caches belong to one block and disappear after its immutable arrays are uploaded.
-            public Surface(Data target) { data = target; }
+            public Surface(Data target, bool[] groundSamples = null)
+            {
+                data = target; samples = groundSamples;
+                if (samples != null) return;
+                indices = new int[SampleCount]; heights = new Vector2[SampleCount]; sampled = new bool[SampleCount];
+                if (!data.local && data.step <= 32) covers = new float[SampleCount];
+            }
 
             // Use one height function for all tiers; averaging coarse vertices used to split shared block edges.
             float Height(int x, int z)
             {
-                long key = ((long)x << 32) ^ (uint)z;
-                if (heights.TryGetValue(key, out float height)) return height;
+                int key = SampleIndex(x, z);
+                if (sampled[key]) return heights[key].y;
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
                 float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.wood) * 1.7f;
-                float floor = FarScatter.GroundAt(world - FarTerrain.Origin);
-                height = floor + relief - 0.3f;
+                float floor = data.sampledGround != null ? data.sampledGround[key] : FarScatter.GroundAt(world - FarTerrain.Origin);
+                float height = floor + relief - 0.3f;
                 // Support a narrow wood's floor without raising opaque crown-shaped walls around every grove.
                 if (data.local) height = Mathf.Max(height, Mathf.Min(floor + 2.5f, SectorForest.CrownSupport(world - SectorForest.Origin)));
-                heights.Add(key, height);
-                if (!data.local && data.step <= 32) covers.Add(key, stand.cover);
+                heights[key] = new Vector2(floor, height); sampled[key] = true;
+                if (covers != null) covers[key] = stand.cover;
                 return height;
             }
 
@@ -354,7 +383,7 @@ namespace DroneSandbox
                     int px = x + (i == 4 ? step / 2 : (i & 1) * step);
                     int pz = z + (i == 4 ? step / 2 : (i >> 1) * step);
                     Height(px, pz);
-                    float cover = covers[((long)px << 32) ^ (uint)pz];
+                    float cover = covers[SampleIndex(px, pz)];
                     low = Mathf.Min(low, cover); high = Mathf.Max(high, cover);
                 }
                 // Keep the shared block perimeter at its fixed 8 m spacing, regardless of refinement order.
@@ -389,15 +418,23 @@ namespace DroneSandbox
             // Central differences use the same world-space surface on both sides of every tile and block boundary.
             public int Vertex(int x, int z)
             {
-                long key = ((long)x << 32) ^ (uint)z;
-                if (indices.TryGetValue(key, out int index)) return index;
+                int key = SampleIndex(x, z);
+                const int d = 8;
+                if (samples != null)
+                {
+                    samples[key] = true;
+                    samples[SampleIndex(x + d, z)] = samples[SampleIndex(x - d, z)] = true;
+                    samples[SampleIndex(x, z + d)] = samples[SampleIndex(x, z - d)] = true;
+                    return 0;
+                }
+                int index = indices[key] - 1;
+                if (index >= 0) return index;
                 Vector2 p = data.corner + new Vector2(x, z) - FarTerrain.Origin;
-                float top = Height(x, z), floor = FarScatter.GroundAt(p);
-                index = vertices.Count; indices.Add(key, index);
+                float top = Height(x, z), floor = heights[key].x;
+                index = vertices.Count; indices[key] = index + 1;
                 vertices.Add(new Vector3(p.x, top, p.y)); ground.Add(floor); crown.Add(top - floor);
                 float pixel = TexelSize(data), padding = pixel * 2f;
                 uv.Add(new Vector2((x + padding) / (BlockSize + padding * 2f), (z + padding) / (BlockSize + padding * 2f)));
-                const int d = 8;
                 float dx = Height(x + d, z) - Height(x - d, z), dz = Height(x, z + d) - Height(x, z - d);
                 normals.Add(new Vector3(-dx, 2f * d, -dz).normalized);
                 return index;
@@ -406,6 +443,7 @@ namespace DroneSandbox
             // Entirely empty triangles disappear, while young margins descend gently into the actual ground.
             public void Face(int a, int b, int c)
             {
+                if (samples != null) return;
                 if (Mathf.Max(crown[a], Mathf.Max(crown[b], crown[c])) < 0.25f) return;
                 triangles.Add(a); triangles.Add(b); triangles.Add(c);
             }
@@ -457,6 +495,44 @@ namespace DroneSandbox
                 yield break;
             }
             var surface = new Surface(data);
+            var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
+            var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
+            if (data.triangles.Length == 0) yield break;
+            int core = Mathf.RoundToInt(BlockSize / TexelSize(data));
+            int size = data.textureSize = core + 4;
+            float pixel = BlockSize / (float)core;
+            data.pixels = new Color32[size * size];
+            // The two-texel gutter uses the neighbour's world coordinates; UVs address identical boundary colours.
+            for (int j = 0; j < size; j++)
+                for (int i = 0; i < size; i++)
+                {
+                    float x = data.corner.x + (i - 1.5f) * pixel, z = data.corner.y + (j - 1.5f) * pixel;
+                    var stand = SectorForest.At(x, z);
+                    data.pixels[j * size + i] = ForestPalette.Surface(stand, x, z, pixel);
+                    if ((i & 7) == 7) yield return null;
+                }
+        }
+
+        // Snapshot exactly the recipe mesh's terrain queries on the main thread before independent block workers run.
+        internal static void SampleGround(Data data)
+        {
+            var samples = new bool[SampleCount];
+            var geometry = Geometry(data, new Surface(data, samples)); while (geometry.MoveNext()) { }
+            data.sampledGround = new float[SampleCount];
+            for (int key = 0; key < samples.Length; key++)
+            {
+                if (!samples[key]) continue;
+                Vector2 p = data.corner + new Vector2(key % SampleSide * 4 - 8, key / SampleSide * 4 - 8) - FarTerrain.Origin;
+                data.sampledGround[key] = FarScatter.GroundAt(p);
+            }
+        }
+
+        // Every stitched node lies on the 4 m lattice; an 8 m border also stores central-difference normal samples.
+        static int SampleIndex(int x, int z) => (z + 8) / 4 * SampleSide + (x + 8) / 4;
+
+        // Sampling and construction traverse identical stitched quads, so workers never need a native terrain fallback.
+        static IEnumerator Geometry(Data data, Surface surface)
+        {
             for (int tz = 0; tz < BlockSize; tz += TileSize)
                 for (int tx = 0; tx < BlockSize; tx += TileSize)
                 {
@@ -469,6 +545,12 @@ namespace DroneSandbox
                     for (int z = tz; z < tz + TileSize; z += step)
                         for (int x = tx; x < tx + TileSize; x += step)
                         {
+                            // Empty recipe quads emit no faces; avoid their native terrain calls and crown searches too.
+                            if (data.local && !SectorForest.MayHaveCanopy(data.corner + new Vector2(x, z) - SectorForest.Origin, step))
+                            {
+                                yield return null;
+                                continue;
+                            }
                             if (data.local || data.step >= 64)
                             {
                                 Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
@@ -488,21 +570,6 @@ namespace DroneSandbox
                                     yield return null;
                                 }
                         }
-                }
-            var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
-            if (data.triangles.Length == 0) yield break;
-            int core = Mathf.RoundToInt(BlockSize / TexelSize(data));
-            int size = data.textureSize = core + 4;
-            float pixel = BlockSize / (float)core;
-            data.pixels = new Color32[size * size];
-            // The two-texel gutter uses the neighbour's world coordinates; UVs address identical boundary colours.
-            for (int j = 0; j < size; j++)
-                for (int i = 0; i < size; i++)
-                {
-                    float x = data.corner.x + (i - 1.5f) * pixel, z = data.corner.y + (j - 1.5f) * pixel;
-                    var stand = SectorForest.At(x, z);
-                    data.pixels[j * size + i] = ForestPalette.Surface(stand, x, z, pixel);
-                    if ((i & 7) == 7) yield return null;
                 }
         }
 
