@@ -294,11 +294,7 @@ namespace DroneSandbox
             texture.Apply(true, true); yield return null;
             var material = ForestMaterials.Create("Canopy", null, 3);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
-            if (ForestMaterials.Fades(material))
-            {
-                material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
-                material.SetTexture("_ForestDetailB", Resources.Load<Texture2D>("Textures/ForestDetailB"));
-            }
+            if (ForestMaterials.Fades(material)) material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
             block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
             block.triangles = data.triangles.Length / 3;
             data.vertices = data.normals = null; data.uv = null;

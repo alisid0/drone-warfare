@@ -8,9 +8,8 @@ Shader "DroneSandbox/ForestLit"
         _ForestProjection("Forest forward and focal pixels", Vector) = (0,0,1,0)
         _ForestCrown("Forest local crown center", Vector) = (0,0,0,0)
         _ForestRadius("Forest local radius axis", Vector) = (1,0,0,0)
-        _ForestOrigin("Forest world origin", Vector) = (0,0,0,0)
-        _ForestDetail("Shared world crown relief", 2D) = "gray" {}
-        _ForestDetailB("Alternate world crown relief", 2D) = "gray" {}
+        _ForestOrigin("Forest world origin (xy) and sun shadow shift per metre (zw)", Vector) = (0,0,0,0)
+        _ForestDetail("Crown foliage clumps", 2D) = "gray" {}
         _ForestEnabled("Forest fade enabled", Float) = 0
         _ForestTier("Forest tier", Float) = 0
         _ForestBuild("Forest refinement", Float) = 1
