@@ -51,6 +51,9 @@ static class Harness
         if (logical.Count > 0)
         {
             Canopy.Build(new GameObject("Logical canopy test").transform);
+#if CANDIDATE
+            Save(output + "/crown-queries.json", CrownChecks.Run());
+#endif
             for (int k = 0; k < SectorForest.Stems.Count; k += 317)
             {
                 var stem = SectorForest.Stems[k]; var p = stem.position;
@@ -109,19 +112,33 @@ static class Harness
             foreach (var stem in SectorForest.Stems)
             {
                 float distance = Vector3.Distance(camera, stem.position);
-                if (distance > 350f) continue;
+                if (distance > 366f) continue;
                 entries.Add(new ForestBudget.Entry { distance = distance, fullTriangles = fullCost[stem.stand.species], reducedTriangles = 3000, cardTriangles = 8 });
                 Require(Undergrowth.UnderTrees(new Vector2(stem.position.x, stem.position.z), 0.1f), "Logical occupancy");
                 Require(SectorForest.Tree(stem.i, stem.j, out _, out var stand) && stand.height == stem.stand.height, "Render/logical identity");
             }
+            int guard = 0;
+#if CANDIDATE
+            guard = 16;
+            var bins = new ForestBudget.Bucket[400];
+            foreach (var entry in entries)
+            {
+                int k = Mathf.FloorToInt(entry.distance); var b = bins[k];
+                b.full++; b.reduced++; b.cards++;
+                b.fullTriangles += entry.fullTriangles; b.reducedTriangles += entry.reducedTriangles; b.cardTriangles += entry.cardTriangles;
+                bins[k] = b;
+            }
+            Vector4 ranges = ForestBudget.SelectBuckets(bins, 350f, guard);
+#else
             entries.Sort((a, b) => a.distance.CompareTo(b.distance));
             Vector4 ranges = ForestBudget.Select(entries);
+#endif
             int full = 0, reduced = 0, cards = 0, triangles = 0;
             foreach (var entry in entries)
             {
-                if (entry.distance <= ranges.x) { full++; triangles += entry.fullTriangles; }
-                if (entry.distance >= ranges.x - 10f && entry.distance <= ranges.y) { reduced++; triangles += entry.reducedTriangles; }
-                if (entry.distance >= ranges.y - 20f && entry.distance <= ranges.z) { cards++; triangles += 8; }
+                if (ranges.x > 0f && entry.distance <= ranges.x + guard) { full++; triangles += entry.fullTriangles; }
+                if (ranges.y > 0f && entry.distance >= ranges.x - 10f - guard && entry.distance <= ranges.y + guard) { reduced++; triangles += entry.reducedTriangles; }
+                if (ranges.z > 0f && entry.distance >= ranges.y - 20f - guard && entry.distance <= ranges.z + guard) { cards++; triangles += 8; }
             }
             Require(full <= ForestBudget.FullLimit && reduced <= ForestBudget.ReducedLimit && cards <= ForestBudget.CardLimit && triangles <= ForestBudget.TriangleLimit, "Camera submission budgets");
             fullPeak = Math.Max(fullPeak, full); reducedPeak = Math.Max(reducedPeak, reduced);

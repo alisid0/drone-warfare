@@ -61,6 +61,9 @@ write(temp / 'CanopyBake.cs', 'using System.Collections; using System.Collection
 runtime += [temp / 'CanopyBake.cs']
 if phase != 'before':
     runtime += [root / 'Tools/DistantForest/Checks.cs']
+    reference = subprocess.check_output(['git', '-c', 'safe.directory=' + str(root).replace(chr(92), '/'), 'show', '9f8a34b:Assets/DroneSandbox/Scripts/Canopy.cs'], text=True)
+    write(temp / 'ReferenceCanopy.cs', reference.replace('public static class Canopy', 'public static class ReferenceCanopy'))
+    runtime += [temp / 'ReferenceCanopy.cs', root / 'Tools/DistantForest/CrownChecks.cs']
 if phase == 'before':
     baseline = temp / 'baseline'; baseline.mkdir(exist_ok=True)
     for name in ['ForestPattern', 'ForestPalette', 'SectorForest', 'ForestBudget']:

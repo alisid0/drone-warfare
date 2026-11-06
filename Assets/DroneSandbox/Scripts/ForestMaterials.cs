@@ -40,14 +40,18 @@ namespace DroneSandbox
             material.SetVector(CameraPosition, camera); material.SetVector(Distances, distances);
             var probe = new MaterialPropertyBlock();
             SetCamera(probe, camera, distances, 1f);
-            return material.GetFloat(Tier) == tier && material.GetFloat(Build) == 1f && material.GetFloat(Enabled) == 1f
+            bool valid = material.GetFloat(Tier) == tier && material.GetFloat(Build) == 1f && material.GetFloat(Enabled) == 1f
                 && material.GetVector(CameraPosition) == camera && material.GetVector(Distances) == distances
                 && probe.GetVector(CameraPosition) == camera && probe.GetVector(Distances) == distances && probe.GetFloat(Build) == 1f;
+            // If a render backend ignores the property block, the material defaults must draw woods without clipping.
+            material.SetVector(CameraPosition, Vector4.zero); material.SetVector(Distances, Vector4.zero);
+            return valid;
         }
 
         // Explicit draws carry camera state in their own property block; they do not depend on the GPU Resident Drawer.
         public static void SetCamera(MaterialPropertyBlock properties, Vector4 camera, Vector4 distances, float build = 1f)
         {
+            camera.w = 1f;
             properties.SetVector(CameraPosition, camera); properties.SetVector(Distances, distances);
             properties.SetFloat(Build, build);
         }

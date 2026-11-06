@@ -56,6 +56,8 @@ namespace DroneSandbox
         public static float BuildMs { get; private set; }
         public static int CompletedBuilds { get; private set; }
         public static bool Building { get; private set; }
+        public static int MissingBlocks { get; private set; }
+        public static int CoarseBlocks { get; private set; }
 
         // Destroy all native allocations as well as a partially built block when the terrain origin changes.
         public void Clear()
@@ -99,7 +101,7 @@ namespace DroneSandbox
         // Draw only camera-visible blocks and spend a bounded slice filling the nearest missing coverage first.
         public void Update(Camera camera, Plane[] planes)
         {
-            BlocksDrawn = TrianglesDrawn = 0; frame++;
+            BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = 0; frame++;
             if (!FarTerrain.ForestCanopyHlod) return;
             if (!WorldPlan.Ready)
             {
@@ -133,16 +135,24 @@ namespace DroneSandbox
                     {
                         block.lastSeen = frame;
                         if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
-                        if (block.data.step == step) continue;
+                        if (block.data.step == 256) CoarseBlocks++;
+                        if (block.data.step <= step) continue;
                         // First give every visible block a coarse shape before refining any of them.
                         distance += 2e9f;
                     }
-                    if (builder == null && distance < best)
+                    else MissingBlocks++;
+                    if ((builder == null || key != pendingKey) && distance < best)
                     {
                         best = distance; wantedKey = key;
                         wantedStep = block == null ? 256 : step;
                     }
                 }
+            // Turning a camera can expose missing districts without a teleport; those also preempt expensive refinement.
+            if (builder != null && pending.step < 256 && wantedKey >= 0 && wantedStep == 256)
+            {
+                if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
+                builder = null; pending = null;
+            }
             if (builder == null && wantedKey >= 0)
             {
                 pendingKey = wantedKey; buildingFrom = world; buildingCamera = camera;
@@ -341,6 +351,12 @@ namespace DroneSandbox
         // Construct in 256 m tiles, retaining one batched draw per 2 km district rather than a draw per tile.
         public static IEnumerator Build(Data data, byte[] unused)
         {
+            // Bootstrap coverage must not pay for a 1,024-vertex seam or thousands of fine crown texels.
+            if (data.step == 256)
+            {
+                var coverage = Coverage(data); while (coverage.MoveNext()) yield return null;
+                yield break;
+            }
             int step = data.step;
             var surface = new Surface(data);
             for (int tz = 0; tz < BlockSize; tz += TileSize)
@@ -367,6 +383,57 @@ namespace DroneSandbox
                     data.pixels[j * size + i] = ForestPalette.Surface(stand, x, z, pixel);
                     if ((i & 7) == 7) yield return null;
                 }
+        }
+
+        // A regular low-cost mass arrives first; temporary skirts hide mixed edges until stitched refinement replaces it.
+        static IEnumerator Coverage(Data data)
+        {
+            const int n = BlockSize / 256 + 1;
+            var vertices = new List<Vector3>(n * n + n * 4);
+            var normals = new List<Vector3>(n * n + n * 4);
+            var uv = new List<Vector2>(n * n + n * 4);
+            var ground = new List<float>(n * n + n * 4);
+            var crown = new List<float>(n * n + n * 4);
+            var triangles = new List<int>();
+            const int core = n - 1, size = core + 4;
+            for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
+            {
+                Vector2 world = data.corner + new Vector2(x * 256f, z * 256f), p = world - FarTerrain.Origin;
+                var stand = SectorForest.At(world.x, world.y);
+                float floor = FarScatter.GroundAt(p), height = ForestPattern.Canopy(stand, world.x, world.y);
+                vertices.Add(new Vector3(p.x, floor + height - 0.3f, p.y));
+                normals.Add(Vector3.up); ground.Add(floor); crown.Add(height);
+                uv.Add(new Vector2((x + 2f) / size, (z + 2f) / size));
+                yield return null;
+            }
+            for (int z = 0; z < n - 1; z++) for (int x = 0; x < n - 1; x++)
+            {
+                int a = z * n + x, b = a + 1, c = a + n, d = c + 1;
+                if (Mathf.Max(crown[a], Mathf.Max(crown[b], Mathf.Max(crown[c], crown[d]))) < 0.25f) continue;
+                triangles.Add(a); triangles.Add(c); triangles.Add(b);
+                triangles.Add(b); triangles.Add(c); triangles.Add(d);
+            }
+            for (int side = 0; side < 4; side++) for (int k = 0; k < n - 1; k++)
+            {
+                int a = side == 0 ? k * n : side == 1 ? (n - 1) * n + k : side == 2 ? (n - 1 - k) * n + n - 1 : n - 1 - k;
+                int b = side == 0 ? a + n : side == 1 ? a + 1 : side == 2 ? a - n : a - 1;
+                if (Mathf.Max(crown[a], crown[b]) < 0.25f) continue;
+                int c = vertices.Count;
+                vertices.Add(vertices[a] - Vector3.up * 32f); vertices.Add(vertices[b] - Vector3.up * 32f);
+                normals.Add(normals[a]); normals.Add(normals[b]); uv.Add(uv[a]); uv.Add(uv[b]);
+                ground.Add(ground[a]); ground.Add(ground[b]); crown.Add(crown[a]); crown.Add(crown[b]);
+                triangles.Add(a); triangles.Add(c); triangles.Add(b); triangles.Add(b); triangles.Add(c); triangles.Add(c + 1);
+            }
+            data.vertices = vertices.ToArray(); data.normals = normals.ToArray(); data.uv = uv.ToArray();
+            data.ground = ground.ToArray(); data.crown = crown.ToArray(); data.triangles = triangles.ToArray();
+            if (triangles.Count == 0) yield break;
+            data.textureSize = size; data.pixels = new Color32[size * size];
+            for (int z = 0; z < size; z++) for (int x = 0; x < size; x++)
+            {
+                Vector2 p = data.corner + new Vector2((x - 1.5f) * 256f, (z - 1.5f) * 256f);
+                data.pixels[z * size + x] = ForestPalette.Surface(SectorForest.At(p.x, p.y), p.x, p.y, 256f);
+                if ((x & 3) == 3) yield return null;
+            }
         }
 
         // Find the largest connected forest district, then its densest neighbourhood for the autotest shot.

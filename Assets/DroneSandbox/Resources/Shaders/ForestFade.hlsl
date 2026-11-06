@@ -2,7 +2,7 @@
 void ForestFade(float3 positionRWS)
 {
     // Invalid/unbound draw parameters fail open. Material properties live in UnityPerMaterial in every pass.
-    if (_ForestEnabled < 0.5 || _ForestDistances.w < 1.0 || _ForestDistances.z < _ForestDistances.y
+    if (_ForestEnabled < 0.5 || _ForestCamera.w < 0.5 || _ForestDistances.w < 1.0 || _ForestDistances.z < _ForestDistances.y
         || _ForestDistances.y < _ForestDistances.x) return;
     float3 world = GetAbsolutePositionWS(positionRWS);
     // HDRP applies camera translation to UNITY_MATRIX_M in ordinary, instanced AND DOTS variants.

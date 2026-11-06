@@ -14,7 +14,7 @@ static class Checks
             Mathf.FloorToInt((origin.y + WorldPlan.Half) / 2048f) * 2048f - WorldPlan.Half);
         var fine = Build(corner, 16);
         int matches = 0;
-        foreach (int step in new[] { 8, 16, 64, 128, 256 })
+        foreach (int step in new[] { 8, 16, 64, 128 })
         {
             var neighbour = Build(corner + new Vector2(2048f, 0f), step);
             foreach (var p in Boundary(fine, corner.x + 2048f - origin.x))
@@ -31,12 +31,12 @@ static class Checks
                 if (!found) throw new Exception("Missing HLOD perimeter sample");
             }
         }
-        // A jump exposes nine nearby coarse districts. Count generation-only 0.30 ms slices at 60 Hz.
+        // A jump exposes 49 districts in a wide view. The temporary 256 m coverage has skirts, not refined 8 m seams.
         var times = new List<double>(); int frames = 0, firstFrames = 0, worstFrames = 0;
         double longest = 0, total = 0;
-        for (int block = 0; block < 9; block++)
+        for (int block = 0; block < 49; block++)
         {
-            var data = new ForestHlod.Data { corner = corner + new Vector2((block % 3 - 1) * 2048f, (block / 3 - 1) * 2048f), step = 256 };
+            var data = new ForestHlod.Data { corner = corner + new Vector2((block % 7 - 3) * 2048f, (block / 7 - 3) * 2048f), step = 256 };
             var work = ForestHlod.Build(data, null); bool done = false; int count = 0;
             while (!done)
             {
@@ -52,7 +52,7 @@ static class Checks
         double tierRatio = coarseLum / fineLum;
         if (tierRatio < .90 || tierRatio > 1.10) throw new Exception("HLOD luminance hand-over exceeds 10 percent");
         Console.WriteLine($"SEAMS {matches} matching vertices/normals; tier luminance {tierRatio:F4}; coarse first {firstFrames} frames; generation slices mean {total / frames:F3}, max {longest:F3} ms");
-        return new { boundaryMatches = matches, coarseFineLuminance = tierRatio, generationOnly = new { firstFrames, allNineFrames = frames,
+        return new { boundaryMatches = matches, coarseFineLuminance = tierRatio, generationOnly = new { firstFrames, all49Frames = frames,
             worstBlockFrames = worstFrames, meanMs = total / frames, worstMs = longest, slices = times }, nativeUploadAndGpuMeasured = false };
     }
 
