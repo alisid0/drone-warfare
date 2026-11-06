@@ -273,7 +273,11 @@ namespace DroneSandbox
             texture.Apply(true, true); yield return null;
             var material = ForestMaterials.Create("Canopy", null, 3);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
-            if (ForestMaterials.Fades(material)) material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
+            if (ForestMaterials.Fades(material))
+            {
+                material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
+                material.SetTexture("_ForestDetailB", Resources.Load<Texture2D>("Textures/ForestDetailB"));
+            }
             block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
             block.triangles = data.triangles.Length / 3;
             data.vertices = data.normals = null; data.uv = null;
@@ -328,8 +332,9 @@ namespace DroneSandbox
                 if (heights.TryGetValue(key, out float height)) return height;
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
-                float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.cover) * 1.7f;
+                float relief = ForestPattern.Canopy(stand, world.x, world.y) - (1f - stand.wood) * 1.7f;
                 height = FarScatter.GroundAt(world - FarTerrain.Origin) + relief - 0.3f;
+                if (data.local) height = Mathf.Max(height, SectorForest.CrownSupport(world - SectorForest.Origin));
                 heights.Add(key, height);
                 if (!data.local && data.step <= 32) covers.Add(key, stand.cover);
                 return height;
@@ -443,7 +448,7 @@ namespace DroneSandbox
         // Construct in 256 m tiles, retaining one batched draw per 2 km district rather than a draw per tile.
         public static IEnumerator Build(Data data, byte[] unused)
         {
-            // Bootstrap coverage must not pay for a 1,024-vertex seam or thousands of fine crown texels.
+            // Bootstrap carries stand silhouettes without fine rim stitching or the refined macro texture.
             if (data.step == 256)
             {
                 var coverage = Coverage(data); while (coverage.MoveNext()) yield return null;
@@ -513,16 +518,16 @@ namespace DroneSandbox
             float px = Mathf.Clamp(data.focus.x, corner.x, corner.x + TileSize);
             float pz = Mathf.Clamp(data.focus.z, corner.y, corner.y + TileSize);
             float distance = Vector3.Distance(data.focus, new Vector3(px, WorldPlan.Height(px, pz) + 16f, pz));
-            return Mathf.Max(data.step, distance < 900f ? 16 : distance < 2200f ? 32 : 64);
+            return Mathf.Max(data.step, distance < 900f ? 16 : distance < 4000f ? 32 : 64);
         }
 
-        // Small block textures carry soft species districts; the shared world detail resolves crowns at every tier.
-        static float TexelSize(Data data) => data.step <= 32 ? 32f : Mathf.Max(32f, data.step * 0.25f);
+        // The macro map carries stand colour and glade coverage; stochastic world detail resolves individual crowns.
+        static float TexelSize(Data data) => data.local || data.step <= 32 ? 16f : 32f;
 
         // A regular low-cost mass arrives first; temporary skirts hide mixed edges until stitched refinement replaces it.
         static IEnumerator Coverage(Data data)
         {
-            const int n = BlockSize / 256 + 1;
+            const int stride = 64, n = BlockSize / stride + 1;
             var vertices = new List<Vector3>(n * n + n * 4);
             var normals = new List<Vector3>(n * n + n * 4);
             var uv = new List<Vector2>(n * n + n * 4);
@@ -532,13 +537,22 @@ namespace DroneSandbox
             const int core = n - 1, size = core + 4;
             for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
             {
-                Vector2 world = data.corner + new Vector2(x * 256f, z * 256f), p = world - FarTerrain.Origin;
+                Vector2 world = data.corner + new Vector2(x * stride, z * stride), p = world - FarTerrain.Origin;
                 var stand = SectorForest.At(world.x, world.y);
                 float floor = FarScatter.GroundAt(p), height = ForestPattern.Canopy(stand, world.x, world.y);
                 vertices.Add(new Vector3(p.x, floor + height - 0.3f, p.y));
                 normals.Add(Vector3.up); ground.Add(floor); crown.Add(height);
                 uv.Add(new Vector2((x + 2f) / size, (z + 2f) / size));
                 yield return null;
+            }
+            // Reuse sampled heights for stand normals; bootstrap must not resample five recipes per vertex.
+            for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
+            {
+                int left = Mathf.Max(0, x - 1), right = Mathf.Min(n - 1, x + 1);
+                int south = Mathf.Max(0, z - 1), north = Mathf.Min(n - 1, z + 1);
+                float dx = (vertices[z * n + right].y - vertices[z * n + left].y) / ((right - left) * stride);
+                float dz = (vertices[north * n + x].y - vertices[south * n + x].y) / ((north - south) * stride);
+                normals[z * n + x] = new Vector3(-dx, 1f, -dz).normalized;
             }
             for (int z = 0; z < n - 1; z++) for (int x = 0; x < n - 1; x++)
             {
@@ -564,8 +578,8 @@ namespace DroneSandbox
             data.textureSize = size; data.pixels = new Color32[size * size];
             for (int z = 0; z < size; z++) for (int x = 0; x < size; x++)
             {
-                Vector2 p = data.corner + new Vector2((x - 1.5f) * 256f, (z - 1.5f) * 256f);
-                data.pixels[z * size + x] = ForestPalette.Surface(SectorForest.At(p.x, p.y), p.x, p.y, 256f);
+                Vector2 p = data.corner + new Vector2((x - 1.5f) * stride, (z - 1.5f) * stride);
+                data.pixels[z * size + x] = ForestPalette.Surface(SectorForest.At(p.x, p.y), p.x, p.y, stride);
                 if ((x & 3) == 3) yield return null;
             }
         }

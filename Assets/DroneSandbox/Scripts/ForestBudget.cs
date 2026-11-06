@@ -56,10 +56,13 @@ namespace DroneSandbox
             return new Vector4(full, reduced, card, 700f);
         }
 
-        // Inverse projected pixels put large crowns first; 25/83/333 mean 40/12/3 px before budget pressure.
+        // Earlier reduced/card hand-over spends the saved geometry on stand relief; 25/67/250 mean 40/15/4 px.
         public static Vector4 SelectProjected(Bucket[] bins, int guard, int triangleLimit = TriangleLimit,
             int cardLimit = CardLimit, int fullLimit = FullLimit, int reducedLimit = ReducedLimit)
         {
+            // Reserve one third for the richer stand surface and its extra crown-map sample, including fast flight.
+            triangleLimit = triangleLimit * 2 / 3;
+            cardLimit = cardLimit * 4 / 5;
             for (int i = 1; i < bins.Length; i++)
             {
                 var a = bins[i - 1]; var b = bins[i];
@@ -67,8 +70,8 @@ namespace DroneSandbox
                 b.fullTriangles += a.fullTriangles; b.reducedTriangles += a.reducedTriangles; b.cardTriangles += a.cardTriangles;
                 bins[i] = b;
             }
-            int card = 333;
-            int full = Mathf.Min(25, card), reduced = Mathf.Min(83, card);
+            int card = 250;
+            int full = Mathf.Min(25, card), reduced = Mathf.Min(67, card);
             while (full > 0)
             {
                 var a = Range(bins, 0, full + guard);

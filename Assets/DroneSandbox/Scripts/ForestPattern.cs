@@ -11,7 +11,7 @@ namespace DroneSandbox
         public struct Stand
         {
             public int species, shade, neighbour;
-            public float height, width, radius, cover, blend;
+            public float height, width, radius, cover, blend, age, wood;
         }
 
         // Stable integer noise avoids changing the forest when another cell is generated first.
@@ -84,7 +84,7 @@ namespace DroneSandbox
         // Cover is categorical in WorldPlan; interpolation belongs only to this visual forest mask.
         static float Wood(float x, float z) => WorldPlan.Inside(x, z) && WorldPlan.CoverAt(x, z) == Cover.Forest ? 1f : 0f;
 
-        // Warped 240 m districts keep species in 100-400 m patches while smaller stands vary in age.
+        // Warped species districts have soft ecotones; the age lattice below makes correlated 40-120 m stands.
         public static Stand At(float x, float z) => At(x, z, Edge(x, z));
 
         // Sector reserves supply their own boundary, but share species, ages and glades with the world.
@@ -114,19 +114,18 @@ namespace DroneSandbox
             float blend = 0.5f * (1f - Mathf.SmoothStep(0f, 1f, (Mathf.Sqrt(second) - Mathf.Sqrt(best)) / 50f));
             float ax = x + (Noise(x, z, 67f, 19) - 0.5f) * 26f;
             float az = z + (Noise(x, z, 71f, 20) - 0.5f) * 26f;
-            float age = Noise(ax, az, 30f, 14);
-            age = Mathf.Clamp01((age - 0.15f) / 0.7f);
+            float age = Mathf.Clamp01((Noise(ax, az, 64f, 14) - 0.22f) / 0.56f);
             float glade = Glade(x, z), margin = Mathf.Min(edge, glade);
-            float height = Mathf.Lerp(5f, 8f + 16f * age, margin);
-            return new Stand { species = species, neighbour = neighbour, blend = blend, shade = (patch >> 20) % 3, height = height,
-                width = 1f, radius = Mathf.Lerp(2f, 3.1f + 1.2f * age, margin), cover = edge * glade };
+            float height = Mathf.Lerp(5f, 12f + 12f * age, margin);
+            float tint = Noise(x, z, 80f, 83) * 0.7f + Noise(x, z, 12f, 84) * 0.3f;
+            return new Stand { species = species, neighbour = neighbour, blend = blend,
+                shade = Mathf.Clamp(Mathf.FloorToInt(tint * 3f), 0, 2), height = height, age = age, wood = edge,
+                width = 1f, radius = Mathf.Lerp(2f, 2.8f + 1.8f * age, margin), cover = edge * glade };
         }
 
-        // Keep the stand surface below the photo crown caps (0.72 height for broadleaf), so arriving cards retain their crowns.
-        public static float Canopy(Stand stand, float x, float z) => stand.cover * Mathf.Max(2f,
-            stand.height * 0.55f + (Noise(x, z, 31f, 31) - 0.5f) * 5f
-            + (Noise(x + 17f, z - 9f, 53f, 32) - 0.5f) * 2f
-            + (Noise(x, z, 13f, 33) - 0.5f) * 7f);
+        // Age raises whole stands, while smaller crown domes sit below card caps; glades retain shaded understorey.
+        public static float Canopy(Stand stand, float x, float z) => stand.wood * Mathf.Lerp(2.5f,
+            Mathf.Max(2f, stand.height * 0.70f + (Noise(x, z, 11f, 33) - 0.5f) * 4f), stand.cover);
 
         // The same species districts drive a soft canopy mixture and individual trees along the ecotone.
         static int Species(int patch, float conifer)
@@ -163,14 +162,15 @@ namespace DroneSandbox
             float individual = Unit(i, j, 49);
             if (Unit(i, j, 47) < stand.blend) stand.species = stand.neighbour;
             stand.neighbour = stand.species; stand.blend = 0f;
-            stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 7f, 5f, 24f);
-            stand.radius = Mathf.Clamp(stand.radius * (0.85f + individual * 0.3f), 2f, 4.6f);
+            stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 5f, 5f, 26f);
+            // The canopy fade uses a conservative two-metre crown, including the youngest edge trees.
+            stand.radius = Mathf.Max(2f, stand.radius * (0.78f + individual * 0.44f));
             // Isolated old trees and groups of saplings interrupt the stand's average silhouette.
             if (Unit(i, j, 50) > 0.97f && stand.cover > 0.95f) { stand.radius = 4.6f; stand.height = 23f; }
             stand.width = stand.radius / (stand.height * ForestPalette.RadiusPerHeight[stand.species]);
             return true;
         }
         // A subtle stand-wide tint is shared by photo materials and the derived canopy palette.
-        public static float Tint(int shade) => 0.96f + shade * 0.04f;
+        public static float Tint(int shade) => 0.90f + shade * 0.09f;
     }
 }

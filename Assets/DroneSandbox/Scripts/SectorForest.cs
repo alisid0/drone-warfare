@@ -101,7 +101,7 @@ namespace DroneSandbox
             BuildMilliseconds = timer.Elapsed.TotalMilliseconds;
         }
 
-        // A cheap coarse surface is ready with the sector, so the first frame never shows an empty plantation.
+        // Stand-scale relief is ready with the sector, so its first frame has the same age zones as its trees.
         static List<ForestHlod.Data> PrepareCanopy()
         {
             var result = new List<ForestHlod.Data>();
@@ -111,9 +111,9 @@ namespace DroneSandbox
             int z1 = Mathf.FloorToInt((Origin.y + Ground.Size * 0.5f + WorldPlan.Half) / ForestHlod.BlockSize);
             for (int j = z0; j <= z1; j++) for (int i = x0; i <= x1; i++)
             {
-                // A 128 m grid can miss an entire recipe grove. Resolve the local crop before its floor is painted.
+                // World stands start at 32 m; recipe groves still resolve at 4 m before their floor is painted.
                 var data = new ForestHlod.Data { corner = new Vector2(i * ForestHlod.BlockSize - WorldPlan.Half, j * ForestHlod.BlockSize - WorldPlan.Half),
-                    step = 128, local = MapLayout.Plan.world == null };
+                    step = 32, local = MapLayout.Plan.world == null };
                 var build = ForestHlod.Build(data, null); while (build.MoveNext()) { }
                 result.Add(data);
             }
@@ -133,6 +133,45 @@ namespace DroneSandbox
             int index = x >= 0 && z >= 0 && x < columns && z < rows ? indices[z * columns + x] : 0;
             stand = index > 0 ? stems[index - 1].stand : default;
             return index > 0;
+        }
+
+        // Only logical stems have continuous canopy coverage; decorative bank/garden trees can cull independently.
+        public static bool HasFloorCoverage(Vector2 local)
+        {
+            if (!Contains(local)) return false;
+            int x = Mathf.FloorToInt((local.x + Origin.x) / ForestPattern.TreeStep) - firstX;
+            int z = Mathf.FloorToInt((local.y + Origin.y) / ForestPattern.TreeStep) - firstZ;
+            // At distant world coordinates a jittered candidate can round onto the next five-metre cell edge.
+            for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+            {
+                int i = x + dx, j = z + dz;
+                int index = i >= 0 && i < columns && j >= 0 && j < rows ? indices[j * columns + i] : 0;
+                if (index <= 0) continue;
+                Vector3 p = stems[index - 1].position;
+                if ((local - new Vector2(p.x, p.z)).sqrMagnitude < 0.01f) return true;
+            }
+            return false;
+        }
+
+        // Narrow recipe woods can fall between four-metre surface nodes; actual crowns support those boundary nodes.
+        public static float CrownSupport(Vector2 local)
+        {
+            if (!Contains(local)) return float.MinValue;
+            int x = Mathf.FloorToInt((local.x + Origin.x) / ForestPattern.TreeStep) - firstX;
+            int z = Mathf.FloorToInt((local.y + Origin.y) / ForestPattern.TreeStep) - firstZ;
+            float top = float.MinValue;
+            for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
+            {
+                int i = x + dx, j = z + dz;
+                int index = i >= 0 && i < columns && j >= 0 && j < rows ? indices[j * columns + i] : 0;
+                if (index <= 0) continue;
+                var stem = stems[index - 1];
+                float distance = (local - new Vector2(stem.position.x, stem.position.z)).sqrMagnitude;
+                float radius = stem.stand.radius;
+                if (distance >= radius * radius) continue;
+                top = Mathf.Max(top, stem.position.y + stem.stand.height * 0.65f * Mathf.Sqrt(1f - distance / (radius * radius)));
+            }
+            return top;
         }
 
         // HLOD uses the same glades, local reserves and species as its individual crowns.
