@@ -226,7 +226,7 @@ namespace DroneSandbox
                     {
                         float angle = Range(rng, 0f, 6.283185f), distance = settlement.radius + Range(rng, 700f, 1900f);
                         Vector2 p = new Vector2(settlement.center.x + distance * (float)Math.Cos(angle), settlement.center.y + distance * (float)Math.Sin(angle));
-                        if (!DryFlat(p, 0.04f, 90f) || !AwayFromSettlements(p, 220f)) continue;
+                        if (FeatureReserved(p, 220f) || !DryFlat(p, 0.04f, 90f) || !AwayFromSettlements(p, 220f)) continue;
                         bool close = false;
                         foreach (var f in Farms) if (Distance(f.position, p) < 450f) close = true;
                         if (close) continue;

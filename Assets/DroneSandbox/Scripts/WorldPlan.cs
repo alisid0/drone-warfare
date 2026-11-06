@@ -99,7 +99,7 @@ namespace DroneSandbox
         public const float CellSize = 1000f;
         public const int CellCount = 56;
         public const float HeightStep = 32f;
-        public const int GeneratorVersion = 2;
+        public const int GeneratorVersion = 3;
 
         public static int Seed { get; private set; }
         public static bool Ready { get { return ready; } private set { ready = value; } }
@@ -153,6 +153,7 @@ namespace DroneSandbox
                 PlanSettlements(rng);
                 PlanRoads(rng);
                 PlanSites(rng);
+                PlanFeatures();
                 PlanFarms(rng);
                 ExportBridges();
                 PlanCover();
