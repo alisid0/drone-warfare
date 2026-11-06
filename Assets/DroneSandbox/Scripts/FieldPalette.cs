@@ -22,7 +22,10 @@ namespace DroneSandbox
         // Crop vigour drifts over the same 12-35 m, as a fraction of linear albedo either way.
         public const float GrowthContrast = .5f;
         // Each field's own value, either way, in linear albedo.
-        public const float FieldValue = .12f;
+        public const float FieldValue = .10f;
+        // Neighbouring crops differ a little less than their textures' own means: each crop is drawn this far toward the
+        // mean of all five (from 2.5 km ploughland against ripe wheat read as a chequerboard).
+        public const float CropPull = .16f;
         // A lighter, poorer soil band grows a slightly paler crop.
         public const float SoilVigour = .06f;
         // A damp hollow in a crop at its wettest: a darker, slightly greener, taller crop (linear multiplier), and the
@@ -42,6 +45,10 @@ namespace DroneSandbox
             new Vector3(1.08f, .98f, .96f), new Vector3(1.12f, 1.01f, .84f), new Vector3(1.16f, 1.23f, 1.34f),
             new Vector3(1.06f, 1f, .9f), new Vector3(1.07f, .98f, 1f) };
 
+        // The plain mean of the five crop layers, which CropPull draws every crop toward.
+        static readonly Vector3 CropMean = (FarDetailPalette.Means[5] + FarDetailPalette.Means[6] + FarDetailPalette.Means[7]
+            + FarDetailPalette.Means[8] + FarDetailPalette.Means[9]) / 5f;
+
         // The grass strip and rough margin as linear colours, for the sector's flat margin meshes and the painters.
         public static Vector3 Strip => Grass(StripWet, 0f, 0f);
         public static Vector3 Rough => Grass(RoughWet, RoughDry, RoughSoil);
@@ -55,8 +62,8 @@ namespace DroneSandbox
             return c + (m[2] - c) * soil;
         }
 
-        // One field's linear multiplier for crop layer 5-9: its hue within the crop's range, its own value and the
-        // soil band (0 dark and heavy, 1 light and grey) under it.
+        // One field's linear multiplier for crop layer 5-9: its hue within the crop's range, its own value, the soil
+        // band (0 dark and heavy, 1 light and grey) under it, and the shared pull toward the crops' mean.
         public static Vector3 CropTint(int layer, float shade, float soil)
         {
             int k = Math.Max(0, Math.Min(4, layer - 5));
@@ -64,7 +71,10 @@ namespace DroneSandbox
             Vector3 hue = From[k] + (To[k] - From[k]) * t;
             float value = 1f + FieldValue * (2f * Frac(shade * 7.31f) - 1f);
             if (k != 2) value *= 1f + SoilVigour * (soil - .5f);
-            return hue * value;
+            Vector3 own = FarDetailPalette.Means[5 + k];
+            Vector3 pull = new Vector3(1f + CropPull * (CropMean.x / own.x - 1f), 1f + CropPull * (CropMean.y / own.y - 1f),
+                1f + CropPull * (CropMean.z / own.z - 1f));
+            return Apply(hue, pull) * value;
         }
 
         // Channel-by-channel product of a linear colour and a tint (Vector3.Scale without the engine dependency).

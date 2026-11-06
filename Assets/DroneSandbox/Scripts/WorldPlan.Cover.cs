@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using Random = System.Random; // System and UnityEngine both have one; the plan uses the seeded kind
@@ -63,6 +64,60 @@ namespace DroneSandbox
             foreach (var farm in Farms) ClearGround(farm.position, 180f, Cover.Farmland);
             foreach (var site in Sites) if (site.kind != WorldSiteKind.Landmark) ClearGround(site.position, site.kind == WorldSiteKind.Airbase ? 650f : 140f, Cover.Pasture);
             foreach (var feature in Features) StampFeature(feature, true);
+        }
+
+        // Small woods and copses in open country, 50-170 m across: on steep field corners, along stream gullies, and
+        // as the odd farm wood. They keep off roads, railways, settlements, farms, sites and landmarks. Planned after
+        // the sector kinds (PlanCells), so the campaign's sectors stay as they were; trees, canopy and paint follow the
+        // cover as for any wood.
+        static void PlanCopses()
+        {
+            var keep = new bool[cover.Length];
+            void Line(List<Vector2> points, float pad)
+            {
+                for (int i = 1; i < points.Count; i++)
+                {
+                    Vector2 a = points[i - 1], b = points[i];
+                    int steps = Math.Max(1, (int)Math.Ceiling(Distance(a, b) / 16f));
+                    for (int s = 0; s <= steps; s++)
+                    {
+                        Vector2 p = Mix(a, b, s / (float)steps);
+                        for (int j = GridIndex(p.y - pad); j <= GridIndex(p.y + pad); j++)
+                            for (int k = GridIndex(p.x - pad); k <= GridIndex(p.x + pad); k++) keep[j * GridCount + k] = true;
+                    }
+                }
+            }
+            foreach (var road in Roads) Line(road.points, 48f);
+            foreach (var rail in Railways) Line(rail.points, 40f);
+            const float step = 260f;
+            int cells = (int)(Size / step);
+            for (int iz = 0; iz < cells; iz++)
+                for (int ix = 0; ix < cells; ix++)
+                {
+                    float U(int salt) => (Hash(ix, iz, 700 + salt) & 0xffff) / 65536f;
+                    var c = new Vector2(-Half + (ix + U(1)) * step, -Half + (iz + U(2)) * step);
+                    Cover here = CoverAt(c.x, c.y);
+                    if (here != Cover.Farmland && here != Cover.Pasture) continue;
+                    float river = RiverDistance(c.x, c.y);
+                    float chance = .1f + .35f * Smooth((Grade(c.x, c.y) - .035f) / .06f) + (river > 25f && river < 220f ? .2f : 0f);
+                    if (U(3) > chance || FeatureReserved(c, 140f)) continue;
+                    bool near = false;
+                    foreach (var s in Settlements) near |= Distance(c, s.center) < s.radius * 1.35f + 220f;
+                    foreach (var farm in Farms) near |= Distance(c, farm.position) < 260f;
+                    foreach (var site in Sites) near |= Distance(c, site.position) < (site.kind == WorldSiteKind.Airbase ? 800f : 260f);
+                    if (near) continue;
+                    float rx = 26f + 58f * U(4), rz = rx * (.45f + .45f * U(5)), angle = U(6) * 3.14159f;
+                    float ca = (float)Math.Cos(angle), sa = (float)Math.Sin(angle), reach = rx + 32f;
+                    for (int j = GridIndex(c.y - reach); j <= GridIndex(c.y + reach); j++)
+                        for (int i = GridIndex(c.x - reach); i <= GridIndex(c.x + reach); i++)
+                        {
+                            int k = j * GridCount + i;
+                            if (keep[k] || cover[k] != Cover.Farmland && cover[k] != Cover.Pasture) continue;
+                            float dx = -Half + i * HeightStep - c.x, dz = -Half + j * HeightStep - c.y;
+                            float u = (dx * ca + dz * sa) / rx, v = (-dx * sa + dz * ca) / rz;
+                            if (u * u + v * v < .8f + .5f * Noise(i * .37f, j * .37f, 701)) cover[k] = Cover.Forest;
+                        }
+                }
         }
 
         // Bilinear district influence is sufficient at 250 m and avoids millions of settlement searches.

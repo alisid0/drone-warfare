@@ -158,6 +158,7 @@ namespace DroneSandbox
                 ExportBridges();
                 PlanCover();
                 PlanCells();
+                PlanCopses();
                 routeHeights = null;
                 Ready = true;
             }
