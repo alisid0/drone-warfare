@@ -97,14 +97,15 @@ namespace DroneSandbox
         // Ten-to-25-metre crowns ride on 40-to-120-metre masses; coarse texels integrate away the small crowns.
         public static Color Surface(ForestPattern.Stand stand, float x, float z, float footprint)
         {
-            Color colour = Linear(stand).gamma;
+            Color colour = Color.Lerp(Ground, Linear(stand), Mathf.SmoothStep(0f, 1f, stand.cover)).gamma;
             float fine = Mathf.Clamp01((32f - footprint) / 24f);
             float light = ((ForestPattern.Noise(x, z, 13f, 33) - 0.5f) * 24f
                 + (ForestPattern.Noise(x + 8f, z - 3f, 23f, 82) - 0.5f) * 8f) * fine
                 + (ForestPattern.Noise(x, z, 57f, 83) - 0.5f) * 12f
                 + (ForestPattern.Noise(x - 21f, z, 113f, 84) - 0.5f) * 8f;
             colour.r += light / 255f; colour.g += light / 255f; colour.b += light * 0.8f / 255f;
-            colour.a = 1f;
+            // Preserve understorey only in glades; ordinary grove rims must fade when their crowns are ready.
+            colour.a = stand.wood > 0f ? stand.cover / stand.wood : 1f;
             return colour;
         }
 
