@@ -400,14 +400,14 @@ namespace DroneSandbox
             {
                 var c = changed[chunkIndex]; var data = ready.chunks[chunkIndex];
                 if (ReferenceEquals(data, c.source)) { chunkIndex++; return; }
-                if (c.back == null) { c.back = new Mesh { indexFormat = IndexFormat.UInt32 }; c.back.MarkDynamic(); }
-                switch (chunkStage++)
+                long started = Stopwatch.GetTimestamp();
+                bool copying = FarChunkUpload.IsCopy(chunkStage, data);
+                for (int slices = 0; slices < 6; slices++)
                 {
-                    case 0: c.back.Clear(); c.back.SetVertices(data.vertices); break;
-                    case 1: c.back.SetNormals(data.normals); break;
-                    case 2: c.back.SetUVs(0, data.uv); break;
-                    case 3: c.back.SetIndices(data.triangles, MeshTopology.Triangles, 0, false); c.back.bounds = c.original.bounds; break;
-                    case 4: c.back.UploadMeshData(false); chunkIndex++; chunkStage = 0; break;
+                    if (FarChunkUpload.Step(c, data, ref chunkStage)) { chunkIndex++; chunkStage = 0; break; }
+                    // Avoid trading the old upload spike for dozens of extra streaming frames per tile.
+                    if (!copying || !FarChunkUpload.IsCopy(chunkStage, data)
+                        || (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency >= .20) break;
                 }
                 return;
             }
@@ -450,7 +450,7 @@ namespace DroneSandbox
                     default: return Stage.TileMesh;
                 }
             }
-            return chunkIndex < changed.Count ? (chunkStage == 4 ? Stage.MeshUpload : Stage.ChunkMesh) : Stage.Publish;
+            return chunkIndex < changed.Count ? (FarChunkUpload.IsUpload(chunkStage, ready.chunks[chunkIndex]) ? Stage.MeshUpload : Stage.ChunkMesh) : Stage.Publish;
         }
 
         // Swap every ready surface in the same LateUpdate; there is never a frame with a hole but no tile.
