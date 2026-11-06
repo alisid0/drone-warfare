@@ -1,0 +1,155 @@
+Forest from above — codex/forest-from-above, based on 6611380
+
+Code commits:
+  3f59209 Restore inner woodland allocation in recipe sectors
+  231fc64 Render strategy forests by crown pixels and shared canopy detail
+  cbb1135 Bound canopy refinement during accelerated flight
+
+What changed and why
+
+FarScatter now measures crown diameter in vertical render pixels using the camera
+projection and each stem's actual radius. Nominal thresholds are 40/12/3 px.
+Per-crown frustum tests prevent invisible trees in large cells from consuming the
+visible budget. Full/reduced/card caps remain 200/1000/5000, with 1.8M submitted
+triangles including fade overlap. Only full meshes cast shadows. The 3600 m value
+is a bounded streaming-cache extent, not a distance LOD. Earlier distance-selector
+APIs in ForestBudget remain only for the older offline comparison tools.
+
+Selection and shader projection stay together while new batches are built. A
+completed-cell radius and the selection's frustum constrain canopy removal; a
+camera jump cannot reuse an old hole. Cached crowns remain visible during normal
+movement. Tree reach in the old log now reports the farthest submitted tree;
+TierPixels reports the effective thresholds after budget pressure. In dense
+Deep Forest the measured thresholds were 40/29.4/17.2 px; Varrow achieved
+40/12.05/3 px. Larger dense stands necessarily use the shared canopy detail beyond
+the card allowance. No GPU evidence was available to justify increasing that cap.
+
+The canopy was at 0.80 of stand height while broadleaf photo caps are at 0.72.
+That hid arriving crowns behind the sheet. The stand surface is now at 0.55,
+retaining the existing stand/cluster relief and normals. A single 512-square
+linear, mipmapped texture supplies photo-derived crown light and normal slopes,
+including on bootstrap blocks. Its 8 m crowns and second 21 m sampling scale give
+both crown and stand variation. Species still blend through ForestPalette.
+Mature-stand linear luminance versus the 105/126/86 reference pasture measures
+0.626/0.675 for broadleaf and 0.427/0.462 for conifers, before illumination/fog.
+The new texture occupies about 1.33 MiB on the GPU with uncompressed mipmaps.
+
+Refinement now uses 16/32 m nearby geometry with the existing shared 8 m seams;
+small species maps replace the old 260-square crown bakes. The shared texture
+supplies detail at all levels. Stationary building gets a bounded 0.85 ms slice;
+movement above 80 m/s retains the prior 0.30 ms slice. This matters because the
+native 4x Swift flight moves about 240 m/s. Missing coverage still preempts fine
+work. CoarseBlocks now includes any under-resolved visible block, not just step
+256; NearCoarseBlocks counts those wanted at 16/32 m, including outdated focus.
+
+World.BuildWoods already called SectorForest for both world and recipe maps.
+The non-world regression was in PlanGroves: the replacement had lost the old
+inner/outer quotas and sampled the whole sector. It could place all useful woods
+away from the base. The logical generator again allocates inner and outer groves,
+finishing the inner quota first, with the existing road/base/field exclusions.
+World.cs did not need an edit. The distance-tier problem also hid Varrow's
+remaining individual trees from the strategy camera.
+
+The reduced pine FBX contains BarkPine.001, verified by importing all eight
+full/reduced forest FBXs in headless Blender. Only BarkPine.mat exists in Forest.
+Its three tint clones account for the three missing material lookups. Known
+Blender numeric suffixes now resolve only when the canonical serialized forest
+asset exists. One remap message names that asset. Any actual fallback logs the
+original material, tier and observed cause: forced test, missing resource, missing
+shader, unsupported shader, serialized shader mismatch, missing property, or
+failed material/property-block readback. LastFallback retains that reason.
+
+Evidence and limits
+
+Review/deep_300m_before.png and Review/deep_300m_after.png
+Review/varrow_300m_before.png and Review/varrow_300m_after.png
+
+These are matched Blender structure reviews: camera 300 m above the focus,
+45-degree downward angle, the game's 45-degree vertical FOV, 1600x900, fixed sun
+and exposure. Both revisions use the same simplified ground/pasture reference.
+They use production-generated terrain, logical stems, actual scheduler selections
+and canopy meshes; repository FBXs replace the recording meshes. Shader fading
+is shown at its midpoint, not rendered by HDRP. Buildings, water, atmospheric
+lighting and the full ground shader are not reproduced. The managed terrain uses
+the existing harness's Perlin substitute, so its stem counts differ from Unity.
+The views are not native screenshots or proof of GPU/shader performance.
+
+The independent screen audit divides the nearer half into 32 cells. In Deep
+Forest all 30 wooded cells now contain at least four submitted crowns (9 before).
+Varrow passes all 3 wooded cells (0 of 4 before; the grove plan changed).
+The scheduler submitted 13 full, 398 reduced and 4740 cards in Deep Forest;
+Varrow submitted 0 full, 524 reduced and 115 cards.
+
+Final managed 60 Hz scheduling results:
+  Deep Forest: initial missing zero at frame 6; near refinement at frame 522
+  Varrow:      initial missing zero at frame 3; near refinement at frame 472
+  2.5 km jumps: missing zero within 6 frames; near refinement within 116 frames
+  240 m/s flight forest CPU p95: 0.776 ms Deep Forest, 0.751 ms Varrow
+  40 m/s strategy flights: no frames without individual-tree submissions
+  240 m/s flights: 0 such frames in Deep Forest, 4/360 in Varrow; the canopy
+  coverage path remains enabled. Inspect the native Varrow flight for gaps.
+
+These timings exclude native uploads, GPU work, and the rest of a player frame.
+They do not establish native frame p95 <=16.7 ms or native forest mean <=1 ms.
+Simulated frame counts establish scheduler progress in the harness, not a native
+wall-clock guarantee. Review/*-metrics.json and Review/audit.json hold the data.
+
+Both C# 9 projects compile against Unity 6000.6.7f1 assemblies with zero warnings
+and errors. The second includes FarTerrain and all current FarDetail*/FarField*
+dependencies, including the new villages/landmark partial classes. Shader inputs,
+constant-buffer declarations, texture import settings, serialized instancing,
+projection/viewport math, budgets, material remapping and five fallback causes
+were checked. Native shader compilation and runtime binding remain for Claude.
+No Unity Editor/player was launched. No integration-checkout files, settlements,
+ground, FarDetail/FarField, atmosphere, or protected gameplay files were edited.
+
+Build checklist for Claude
+
+1. Integrate this branch, build HDRP, and inspect the player/shader compiler log.
+   Expect BarkPine.001 -> BarkPine, three remapped variants, and no normal-run
+   forest fallback. Verify crown detail is present in opaque depth and color.
+2. Run the sector tour with the existing MissingBlocks == 0 wait. Check 02a_base,
+   Deep Forest, river valley, town outskirts, industrial, lake and lakeshore.
+   Inspect 300 m / 45-degree views and a 100-400 m camera sweep: individual crowns
+   should cover the near half where there are woods, with stable hand-overs.
+3. After sector loading and a 2.5 km jump, measure missing zero within 3 seconds
+   and NearCoarseBlocks zero within about 10 seconds after stopping. Check 81/88
+   both immediately and after refinement. Coarse geometry must already have
+   crown light/normal detail; inspect 1/2.5/4 km species and cluster variation.
+4. Repeat High/Medium/Low and the existing 4x Swift flight. Keep frame p95 <=16.7 ms,
+   forest mean <=1 ms, and the existing instance/triangle caps. Inspect card fill
+   cost, shadows, native uploads and the Varrow zero-submission interval. Exercise
+   gameplay/photo/feed cameras and a rapid turn/jump; no stale canopy holes.
+5. In a separate run set ForestMaterials.ForceFallback = true, confirm named
+   reasons and visible Lit coverage, then restore false. No test override is
+   enabled by this branch.
+
+Exact optional lines to add beside ForestLine() after sector shots and 81/88:
+
+log.WriteLine($"forest screen: full/reduced/card {FarScatter.FullTreesDrawn}/{FarScatter.ReducedTreesDrawn}/{FarScatter.CardTreesDrawn}, effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, crown reach {FarScatter.CrownReach:F0} m, ready radius {FarScatter.ReadyRadius:F0} m; missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, near coarse {ForestHlod.NearCoarseBlocks}, build {ForestHlod.BuildMs:F3} ms");
+log.WriteLine($"forest materials: fallbacks {ForestMaterials.FallbackCount}, remapped variants {ForestMaterials.RemappedCount}; last fallback {ForestMaterials.LastFallback}");
+
+Exact optional flight line (the existing World forest over the flight line stays):
+
+log.WriteLine($"forest flight screen: effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, near coarse {ForestHlod.NearCoarseBlocks}, CPU mean {FarScatter.MeanMs:F3} ms, worst {FarScatter.WorstMs:F3} ms, samples {FarScatter.Samples}");
+
+Reproduce locally, one process at a time
+
+Use C:/Users/ali10/AppData/Local/Programs/Python/Python313/python.exe -I for:
+  Tools/ForestAbove/prepare.py
+  Tools/ForestAbove/run.py before deep
+  Tools/ForestAbove/run.py before varrow
+  Tools/ForestAbove/run.py after deep
+  Tools/ForestAbove/run.py after varrow
+  Tools/ForestAbove/audit.py
+
+The baseline is read from git object 6611380; there is no branch switch or second
+checkout. Generated scene/mesh data stays under ignored Temp/forest-above.
+Tools/ForestAbove/make_detail.py rebuilds the committed shared texture using the
+existing photo-derived crown stamps. It requires only Python's standard library.
+
+For each of "before deep", "after deep", "before varrow", "after varrow":
+  "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --factory-startup --threads 2 --python Tools/ForestAbove/render.py -- <phase> <sector>
+
+Do not run these renders concurrently with each other or a Unity build. Observed
+Blender working sets were roughly 0.9-1.0 GB; no Library import is needed.
