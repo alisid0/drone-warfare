@@ -122,7 +122,8 @@ namespace DroneSandbox
         {
             int hash = Hash(x, z);
             var d = new District { x = x, z = z, site = Site(x, z), width = 58f + (hash >> 13 & 63) * .7f };
-            d.angle = Direction(d.site);
+            // Use the control texture's exact angle grid so mesh rows and shader rows cannot drift in world metres.
+            d.angle = (float)(Math.Round(Direction(d.site) / Math.PI * 65535) * Math.PI / 65535);
             d.along = new Vector2((float)Math.Cos(d.angle), (float)Math.Sin(d.angle));
             var polygon = new List<Vector2> { new Vector2(-1400, -1400), new Vector2(1400, -1400), new Vector2(1400, 1400), new Vector2(-1400, 1400) };
             for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++)

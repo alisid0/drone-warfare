@@ -10,6 +10,7 @@ namespace DroneSandbox
         // Only districts touching the 2 km crop are requested. Legacy sectors continue through FieldParcels.Plan.
         public static float Plan(Func<Vector2, bool> blocked)
         {
+            FarFieldSurface.Clear();
             var source = MapLayout.Plan.world;
             var roads = new List<FarDetailData.Segment>();
             foreach (var road in WorldPlan.Roads) for (int k = 1; k < road.points.Count; k++)
@@ -96,7 +97,7 @@ namespace DroneSandbox
                 if (!blocked(p) && source.CoverAt(p.x, p.y) == Cover.Farmland) clear++;
             }
             if (clear == 0) return;
-            if (clear == total) { MapLayout.Fields.Add(f); AddEdges(f, original); return; }
+            if (clear == total) { MapLayout.Fields.Add(f); FarFieldSurface.Register(f, original); AddEdges(f, original); return; }
             if (depth >= 10 || f.halfLength * f.halfWidth < FarFieldPlan.MinimumArea * .5f) return;
             bool along = f.halfLength > f.halfWidth;
             var a = Slice(f, along, false); var b = Slice(f, along, true);
