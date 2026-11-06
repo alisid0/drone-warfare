@@ -19,6 +19,8 @@ namespace DroneSandbox
         public readonly List<LandmarkBuilding> buildings = new List<LandmarkBuilding>();
         public readonly List<LandmarkSurface> surfaces = new List<LandmarkSurface>();
         public readonly List<Vector2[]> rails = new List<Vector2[]>();
+        public readonly List<Vector2[]> fences = new List<Vector2[]>();
+        public readonly List<LandmarkProp> props = new List<LandmarkProp>();
         public FeatureArea Area => new FeatureArea { center = center, along = along, halfLength = halfLength, halfWidth = halfWidth };
         public SectorKind SectorKind => kind == WorldFeatureKind.Airfield ? SectorKind.Airfield
             : kind == WorldFeatureKind.RailJunction ? SectorKind.RailJunction : SectorKind.IndustrialZone;
@@ -69,7 +71,7 @@ namespace DroneSandbox
                 var f = nearby[index];
                 if (!f.Area.Contains(p, f.clearance)) continue;
                 for (int i = f.surfaces.Count - 1; i >= 0; i--)
-                    if (f.surfaces[i].area.Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(f.surfaces[i].kind); return true; }
+                    if (f.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(f.surfaces[i].kind); return true; }
             }
             color = default; return false;
         }

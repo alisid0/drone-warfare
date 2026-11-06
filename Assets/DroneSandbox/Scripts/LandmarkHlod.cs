@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Permanent roofs, tanks and runway slabs: at most nine material submissions per feature, no scene objects.
+    // Permanent roofs, tanks and yard surfaces: at most twelve material submissions per feature, no scene objects.
     public sealed class LandmarkHlod
     {
         // Native resources live until FarScatter clears its origin/seed cache or the owner is destroyed.
