@@ -57,6 +57,7 @@ namespace DroneSandbox
             var river = MapLayout.HasRiver ? MapLayout.RiverField : null;
             float riverHalf = MapLayout.RiverHalfWidth, roadHalf = MapLayout.RoadHalfWidth;
             var pixels = new Color32[Size * Size];
+            var fieldAt = FieldIndex(fields, half, step);
             for (int j = 0; j < Size; j++)
             {
                 for (int i = 0; i < Size; i++)
@@ -78,14 +79,12 @@ namespace DroneSandbox
                     else
                     {
                         c = Land;
-                        var p = FieldPlot.Unwarp(new Vector2(x, z));
-                        foreach (var field in fields)
+                        if (fieldAt[k] >= 0)
                         {
-                            if (!field.ContainsUnwarped(p, 0f)) continue;
+                            var field = fields[fieldAt[k]];
                             // A darker edge round each field, but not round narrow strips, where at this scale the
                             // edges would be all there is.
-                            c = field.halfWidth < 7f || field.ContainsUnwarped(p, -0.8f) ? CropColour(field.crop) : Verge;
-                            break;
+                            c = field.halfWidth < 7f || field.ContainsUnwarped(FieldPlot.Unwarp(new Vector2(x, z)), -0.8f) ? CropColour(field.crop) : Verge;
                         }
                         // Woods: the canopy grid is 4 m square, so it's sampled a little off each pixel to fray the edges.
                         int hash = ((i * 73856093) ^ (j * 19349663)) & 0x7fffffff;
@@ -114,6 +113,36 @@ namespace DroneSandbox
             Picture.SetPixels32(pixels);
             Picture.Apply(false);
             Debug.Log($"Battle map drawn in {(Time.realtimeSinceStartup - started) * 1000f:0} ms");
+        }
+
+        // Which field (the first in the list, as the old per-pixel search found it) covers each pixel, or -1. Each field
+        // tests only the pixels of its own box: asking every field at every pixel took up to 8 s per sector (hd166).
+        static int[] FieldIndex(IReadOnlyList<FieldPlot> fields, float half, float step)
+        {
+            var index = new int[Size * Size];
+            for (int k = 0; k < index.Length; k++) index[k] = -1;
+            for (int f = 0; f < fields.Count; f++)
+            {
+                var field = fields[f];
+                Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
+                for (int c = 0; c < 4; c++)
+                {
+                    Vector2 corner = field.Point((c & 1) == 0 ? -field.halfLength : field.halfLength, c < 2 ? -field.halfWidth : field.halfWidth);
+                    lo = Vector2.Min(lo, corner); hi = Vector2.Max(hi, corner);
+                }
+                float pad = FieldPlot.WarpMax + step;
+                int i0 = Mathf.Max(0, Mathf.FloorToInt((lo.x - pad + half) / step)), i1 = Mathf.Min(Size - 1, Mathf.CeilToInt((hi.x + pad + half) / step));
+                int j0 = Mathf.Max(0, Mathf.FloorToInt((lo.y - pad + half) / step)), j1 = Mathf.Min(Size - 1, Mathf.CeilToInt((hi.y + pad + half) / step));
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                    {
+                        int k = j * Size + i;
+                        if (index[k] >= 0) continue;
+                        var p = FieldPlot.Unwarp(new Vector2(-half + (i + 0.5f) * step, -half + (j + 0.5f) * step));
+                        if (field.ContainsUnwarped(p, 0f)) index[k] = f;
+                    }
+            }
+            return index;
         }
 
         // Which pixels are covered by a building (and its outline) or a bridge deck, from each one's meshes.

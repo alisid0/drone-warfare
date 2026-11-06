@@ -41,6 +41,7 @@ namespace DroneSandbox
         public void Update(Camera camera, Plane[] planes)
         {
             DrawCalls = TrianglesDrawn = 0;
+            instances.Warm(); // the compounds' models and photo materials, loading in the background
             // One compound is meshed at a time, a slice per frame, so neither a sector change nor a large soft-edged yard
             // turns into one long stage.
             bool meshed = building != null;

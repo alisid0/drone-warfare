@@ -30,6 +30,49 @@ namespace DroneSandbox
         public int DrawCalls { get; private set; }
         public int Triangles { get; private set; }
 
+        // Every model and photo material the world's compounds use, loaded in the background from the first frame the
+        // world draws, so the first sight of a works or a rail yard doesn't stall while meshes and textures come off disk
+        // (hd166's continuous flight froze 3.2 s nearing a rail junction). Held here, so unloading unused assets keeps them.
+        readonly List<ResourceRequest> warming = new List<ResourceRequest>();
+        readonly List<Object> warmed = new List<Object>();
+        readonly HashSet<string> warmPaths = new HashSet<string>();
+        bool warmStarted;
+
+        // Starts the loads once, then each call takes in the finished ones; a model's own materials name the photo
+        // materials that replace them (Load), so those follow it.
+        public void Warm()
+        {
+            if (!warmStarted)
+            {
+                warmStarted = true;
+                foreach (var f in WorldPlan.Features)
+                {
+                    if (!f.valid) continue;
+                    foreach (var b in f.buildings) WarmLoad<GameObject>("Models/" + b.model);
+                    foreach (var p in f.props) WarmLoad<GameObject>("Models/" + p.model);
+                }
+                foreach (var roof in new[] { "RoofMetal", "RoofBarn", "RustySteel", "Galvanized" }) WarmLoad<Material>("Materials/PBR/" + roof);
+            }
+            for (int i = warming.Count - 1; i >= 0; i--)
+            {
+                var request = warming[i];
+                if (!request.isDone) continue;
+                warming.RemoveAt(i);
+                if (request.asset == null) continue;
+                warmed.Add(request.asset);
+                if (request.asset is GameObject prefab)
+                    foreach (var renderer in prefab.GetComponentsInChildren<MeshRenderer>(true))
+                        foreach (var slot in renderer.sharedMaterials)
+                            if (slot != null) WarmLoad<Material>("Materials/PBR/" + slot.name);
+            }
+        }
+
+        // One background load per path.
+        void WarmLoad<T>(string path) where T : Object
+        {
+            if (warmPaths.Add(path)) warming.Add(Resources.LoadAsync<T>(path));
+        }
+
         // Borrowed FBX meshes remain resource-owned; only material adapters belong to this cache.
         public void Clear()
         {
