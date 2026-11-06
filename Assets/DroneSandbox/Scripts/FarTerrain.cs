@@ -87,11 +87,12 @@ namespace DroneSandbox
                 BuildCanopy();
                 PaintWorld();
             }
+            FarDetailEdge.Apply(worldTexture, Origin);
             SampleEdge();
             if (material == null)
             {
                 material = Art.NewMaterial(Color.white);
-                material.SetFloat("_Smoothness", 0.05f);
+                material.SetFloat("_Smoothness", 0f);
             }
             material.mainTexture = worldTexture;
             for (int cz = 0; cz < ChunkCount; cz++)
@@ -325,72 +326,11 @@ namespace DroneSandbox
 
         // ---- The world picture ----
 
-        // One 4096 x 4096 picture of the whole world from WorldPlan: every cover its colour (those of the detailed
-        // terrain, so the two match at the seam), farmland as a patchwork of 150-300 m fields in crop colours with
-        // darker hedges on some edges, woods mottled, towns as roofs and streets, then rivers and roads drawn over.
+        // The same area-filtered palette and vector masks as the tiles, sampled at the world's pixel footprint.
         static void PaintWorld()
         {
             Art.Discard(worldTexture);
-            var pixels = new Color32[TextureSize * TextureSize];
-            float pixel = WorldPlan.Size / TextureSize;
-            // The detailed fields' crops (ripe and ripening wheat, young and green crops, ploughed soil, hay), a
-            // little nearer the meadow's colour, as distance evens them out.
-            Color32[] crops =
-            {
-                new Color32(170, 146, 90, 255), new Color32(156, 138, 84, 255), new Color32(98, 114, 62, 255),
-                new Color32(86, 104, 58, 255), new Color32(104, 82, 62, 255), new Color32(138, 132, 86, 255),
-            };
-            System.Threading.Tasks.Parallel.For(0, TextureSize, y =>
-            {
-                for (int x = 0; x < TextureSize; x++)
-                {
-                    float wx = -WorldPlan.Half + (x + 0.5f) * pixel, wz = -WorldPlan.Half + (y + 0.5f) * pixel;
-                    float mottle = Mathf.PerlinNoise(wx / 180f + 3f, wz / 180f + 7f) - 0.5f + 0.6f * (Mathf.PerlinNoise(wx / 45f + 11f, wz / 45f) - 0.5f);
-                    // The cover is looked up a little off the point, by up to 22 m in drifts, so the edges of woods and
-                    // farmland wander instead of following the plan's 32 m squares.
-                    float jx = 44f * (Mathf.PerlinNoise(wx / 70f, wz / 70f + 31f) - 0.5f), jz = 44f * (Mathf.PerlinNoise(wx / 70f + 57f, wz / 70f) - 0.5f);
-                    Color32 c;
-                    switch (WorldPlan.CoverAt(wx + jx, wz + jz))
-                    {
-                        case Cover.Farmland:
-                            c = Field(wx, wz, crops);
-                            break;
-                        case Cover.Forest:
-                            // Crowns in clumps and gaps: dark between them, lighter tops in the sun.
-                            c = Shade(new Color32(54, 70, 42, 255), 0.95f + 0.45f * mottle + 0.35f * (Mathf.PerlinNoise(wx / 16f, wz / 16f + 9f) - 0.5f));
-                            break;
-                        case Cover.Wetland:
-                            c = Shade(new Color32(80, 98, 72, 255), 1f + 0.3f * mottle);
-                            break;
-                        case Cover.Water:
-                            c = new Color32(48, 66, 74, 255);
-                            break;
-                        case Cover.Town:
-                            c = (Mathf.PerlinNoise(wx / 40f, wz / 40f) > 0.55f) ? new Color32(140, 84, 66, 255) : new Color32(118, 114, 108, 255);
-                            break;
-                        case Cover.Village:
-                            c = (Mathf.PerlinNoise(wx / 30f + 5f, wz / 30f) > 0.62f) ? new Color32(146, 88, 70, 255) : new Color32(98, 116, 74, 255);
-                            break;
-                        case Cover.Rock:
-                            c = Shade(new Color32(122, 118, 108, 255), 1f + 0.3f * mottle);
-                            break;
-                        default:
-                            c = Shade(new Color32(96, 118, 72, 255), 1f + 0.16f * mottle + 0.08f * (Mathf.PerlinNoise(wx / 600f + 5f, wz / 600f) - 0.5f));
-                            break;
-                    }
-                    // Rivers narrower than a pixel still show, as far as their width covers it.
-                    float river = WorldPlan.RiverDistance(wx, wz);
-                    if (river < pixel) c = Color32.Lerp(c, new Color32(48, 66, 74, 255), Mathf.Clamp01(1.2f - river / pixel));
-                    pixels[y * TextureSize + x] = c;
-                }
-            });
-            foreach (var road in WorldPlan.Roads)
-            {
-                var colour = road.kind == RoadClass.Highway ? new Color32(78, 78, 80, 255) : road.kind == RoadClass.Road ? new Color32(120, 112, 98, 255) : new Color32(130, 116, 92, 255);
-                float width = road.kind == RoadClass.Highway ? 1.5f : 1f;
-                for (int k = 1; k < road.points.Count; k++)
-                    DrawLine(pixels, road.points[k - 1], road.points[k], width, colour, pixel);
-            }
+            var pixels = WorldPlan.CaptureDetail(null).WorldPixels(TextureSize);
             worldTexture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, true)
             {
                 name = "World picture",
@@ -398,91 +338,12 @@ namespace DroneSandbox
                 anisoLevel = 8,
             };
             worldTexture.SetPixels32(pixels);
-            worldTexture.Apply(true, true); // no longer readable: keeps 64 MB of pixels out of memory
+            worldTexture.Apply(true, false); // a small collar is restored/repainted at each sector change
             textureSeed = WorldPlan.Seed;
         }
 
         // The world picture, for the near ring round the sector (Backdrop) to paint itself with.
         public static Texture2D WorldTexture => worldTexture;
 
-        // A field's colour, as farmland looks from the air: districts (the cells of a jittered 700 m grid) each
-        // ploughed its own way and cut into strips 35-110 m wide that bend a little, every strip divided along its
-        // length into fields of 150-400 m with their own crops. About half the strip edges carry a hedge; the rest,
-        // and the ends of fields, a paler uncut margin. Districts are edged with hedges.
-        static Color32 Field(float x, float z, Color32[] crops)
-        {
-            const float cell = 700f;
-            float fx = x / cell, fz = z / cell;
-            int gx = Mathf.FloorToInt(fx), gz = Mathf.FloorToInt(fz);
-            float best = float.MaxValue, second = float.MaxValue;
-            int district = 0;
-            for (int oz = -1; oz <= 1; oz++)
-                for (int ox = -1; ox <= 1; ox++)
-                {
-                    int cx = gx + ox, cz = gz + oz;
-                    int h = Hash(cx, cz);
-                    float sx = cx + 0.15f + 0.7f * ((h & 1023) / 1023f), sz = cz + 0.15f + 0.7f * (((h >> 10) & 1023) / 1023f);
-                    float d = (sx - fx) * (sx - fx) + (sz - fz) * (sz - fz);
-                    if (d < best) { second = best; best = d; district = h; }
-                    else if (d < second) second = d;
-                }
-            float angle = ((district >> 3) & 1023) / 1023f * Mathf.PI;
-            float ca = Mathf.Cos(angle), sa = Mathf.Sin(angle);
-            float u = x * ca + z * sa, v = -x * sa + z * ca;
-            v += 30f * (Mathf.PerlinNoise(u / 600f + (district & 63), 3.7f) - 0.5f);
-            float width = 35f + ((district >> 13) & 63) / 63f * 75f;
-            int strip = Mathf.FloorToInt(v / width);
-            float across = v / width - strip;
-            int hs = Hash(strip, district);
-            float length = 150f + (hs & 255) / 255f * 250f;
-            float along = u + ((hs >> 8) & 1023);
-            float segment = along / length;
-            var c = crops[Hash(Mathf.FloorToInt(segment), hs) % crops.Length];
-            var margin = new Color32(126, 128, 86, 255);
-            var hedge = new Color32(46, 62, 36, 255);
-            float side = Mathf.Min(across, 1f - across) * width;
-            float end = Mathf.Min(segment - Mathf.Floor(segment), Mathf.Ceil(segment) - segment) * length;
-            if (side < 3f) c = ((hs >> 20) & 1) == 0 ? Color32.Lerp(c, hedge, 0.6f) : Color32.Lerp(c, margin, 0.45f);
-            else if (end < 2.5f) c = Color32.Lerp(c, margin, 0.45f);
-            if ((Mathf.Sqrt(second) - Mathf.Sqrt(best)) * cell < 4f) c = Color32.Lerp(c, hedge, 0.6f);
-            return c;
-        }
-
-        static int Hash(int x, int z)
-        {
-            unchecked
-            {
-                int h = x * 73856093 ^ z * 19349663 ^ WorldPlan.Seed * 83492791;
-                h ^= h >> 13;
-                h *= 0x5bd1e995;
-                return h & 0x7fffffff;
-            }
-        }
-
-        static Color32 Shade(Color32 c, float f) =>
-            new Color32((byte)Mathf.Clamp(c.r * f, 0f, 255f), (byte)Mathf.Clamp(c.g * f, 0f, 255f), (byte)Mathf.Clamp(c.b * f, 0f, 255f), 255);
-
-        static void DrawLine(Color32[] pixels, Vector2 a, Vector2 b, float width, Color32 colour, float pixel)
-        {
-            float length = Vector2.Distance(a, b);
-            int steps = Mathf.Max(1, Mathf.CeilToInt(length / (pixel * 0.5f)));
-            int reach = Mathf.CeilToInt(width);
-            for (int s = 0; s <= steps; s++)
-            {
-                Vector2 p = Vector2.Lerp(a, b, s / (float)steps);
-                float px = (p.x + WorldPlan.Half) / pixel - 0.5f, pz = (p.y + WorldPlan.Half) / pixel - 0.5f;
-                for (int oy = -reach; oy <= reach; oy++)
-                    for (int ox = -reach; ox <= reach; ox++)
-                    {
-                        int x = Mathf.RoundToInt(px) + ox, y = Mathf.RoundToInt(pz) + oy;
-                        if (x < 0 || y < 0 || x >= TextureSize || y >= TextureSize) continue;
-                        float d = Mathf.Sqrt((x - px) * (x - px) + (y - pz) * (y - pz));
-                        float cover = Mathf.Clamp01(width - d + 0.5f);
-                        if (cover <= 0f) continue;
-                        int k = y * TextureSize + x;
-                        pixels[k] = Color32.Lerp(pixels[k], colour, cover);
-                    }
-            }
-        }
     }
 }
