@@ -25,7 +25,7 @@ namespace DroneSandbox
             BuildIdentity(root);
             foreach (var line in MapLayout.RailLines) Railway(root, line);
             if (plan.powerLine != null) PowerLine(root, plan.powerLine);
-            if (plan.Has(SectorFeature.Airstrip)) Airstrip(root, plan);
+            if (plan.Has(SectorFeature.Airstrip) && plan.world == null) Airstrip(root, plan);
             foreach (var orchard in plan.orchards) Orchard(root, orchard, rng);
             foreach (var clearing in plan.clearings) Clearing(root, clearing, rng);
             if (plan.fortLine != null) DragonTeeth(root, plan.fortLine);
@@ -142,6 +142,7 @@ namespace DroneSandbox
             for (float t = 0f; t <= Vector2.Distance(a, b); t += 55f)
             {
                 Vector2 p = a + dir * t;
+                if (MapLayout.Plan.world != null && MapLayout.Plan.world.FeatureReserved(p, 12f)) continue;
                 if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) continue;
                 if (MapLayout.LakeDistance(p.x, p.y) < 4f || MapLayout.RoadField.Distance(p.x, p.y) < 5f) continue;
                 if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 4f) continue;

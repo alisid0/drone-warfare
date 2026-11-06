@@ -54,6 +54,7 @@ namespace DroneSandbox
         readonly Plane[] planes = new Plane[6];
         readonly ForestHlod forest = new ForestHlod();
         readonly SettlementHlod settlements = new SettlementHlod();
+        readonly LandmarkHlod landmarks = new LandmarkHlod();
         Vector2 builtOrigin;
         int builtSeed = -1;
 
@@ -66,7 +67,7 @@ namespace DroneSandbox
         // Release generated resources on sector/seed changes, not just their dictionary entries.
         public void Clear()
         {
-            cells.Clear(); forest.Clear(); settlements.Clear();
+            cells.Clear(); forest.Clear(); settlements.Clear(); landmarks.Clear();
             MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
         }
 
@@ -133,6 +134,7 @@ namespace DroneSandbox
             }
             foreach (long key in stale) cells.Remove(key);
             forest.Update(cam, planes);
+            landmarks.Update(cam, planes);
             settlements.Update(cam, planes, this);
             Draw(cam);
         }

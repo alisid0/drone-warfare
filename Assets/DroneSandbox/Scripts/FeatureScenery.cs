@@ -11,6 +11,7 @@ namespace DroneSandbox
         static void BuildIdentity(Transform root)
         {
             var p = MapLayout.Plan;
+            BuildWorldSurfaces(root);
             var yards = new MeshBuilder(2);
             foreach (var surface in p.featureSurfaces)
             {
@@ -28,6 +29,29 @@ namespace DroneSandbox
             FeatureFences(root);
             if (p.kind == SectorKind.DeepForest && p.reservedFeatures.Count > 0) WoodlandCore(root, p.reservedFeatures[0]);
             if (p.wetland != null) Wetland(root, p.wetland);
+        }
+
+        // Permanent flat slabs use the same clipped polygons as LandmarkHlod, keeping both sides of a seam aligned.
+        static void BuildWorldSurfaces(Transform root)
+        {
+            var data = MapLayout.Plan.world;
+            if (data == null) return;
+            foreach (var f in data.features)
+            {
+                var source = LandmarkMesh.Build(f, data.center, true);
+                if (source.vertices.Count == 0) continue;
+                var mesh = new Mesh { name = "World landmark surfaces", indexFormat = IndexFormat.UInt32 };
+                mesh.SetVertices(source.vertices); mesh.SetNormals(source.normals);
+                var materials = new List<Material>();
+                for (int i = 0; i < 5; i++) if (source.triangles[i].Count > 0) materials.Add(Art.Shared(LandmarkMesh.Color(i)));
+                mesh.subMeshCount = materials.Count;
+                int sub = 0;
+                for (int i = 0; i < 5; i++) if (source.triangles[i].Count > 0) mesh.SetTriangles(source.triangles[i], sub++);
+                mesh.RecalculateBounds();
+                var go = new GameObject("World landmark " + f.id + " surfaces"); go.transform.SetParent(root, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterials = materials.ToArray();
+            }
         }
 
         // Samples finished terrain so dressings neither float on hills nor cut through flattened building sites.

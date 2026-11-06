@@ -47,8 +47,8 @@ namespace DroneSandbox
             return order;
         }
 
-        // Prefer matching cells, then explicit related kinds. Within the best available kind, minimize map
-        // displacement and distance from the intended front depth; a rare airfield must still be an airfield.
+        // Allocate a permanent landmark first. If none is free, choose related geography; PlanAt removes any
+        // unsupported built-landmark identity instead of inventing a second airfield or an empty rail yard.
         static Vector2 ChooseSpot(Hotspot spot, List<Vector2> used)
         {
             float z = Mathf.Lerp(WorldPlan.Half - 6000f, -WorldPlan.Half + 6000f, Mathf.Clamp01(spot.mapPosition.x));
