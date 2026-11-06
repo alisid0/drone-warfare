@@ -48,3 +48,18 @@ refs = ''.join('<Reference Include="UnityEngine.' + name + '"><HintPath>' + str(
 includes = ''.join('<Compile Include="' + str(p) + '" />' for p in files)
 write(temp / 'api.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><LangVersion>9</LangVersion><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup><ItemGroup>' + includes + refs + '</ItemGroup></Project>')
 subprocess.run([str(dotnet), 'build', str(temp / 'api.csproj'), '-c', 'Release', '--nologo', '--configfile', str(temp / 'NuGet.Config')], env=env, check=True)
+
+# Compile the complete terrain/scatter integration as well, so future FarDetail*/FarField* additions cannot hide behind a stub.
+integration = remove_class(services, 'public static class FarTerrain')
+integration += '''
+namespace DroneSandbox {
+public sealed class Drone : UnityEngine.MonoBehaviour { public bool IsAlive => false; }
+public sealed class DroneFeed { public static DroneFeed Instance => null; public Drone Source => null; }
+}'''
+write(temp / 'IntegrationServices.cs', integration)
+complete = [temp / 'IntegrationServices.cs' if p.name == 'Services.cs' else p for p in files if p.name != 'DetailStub.cs']
+complete += [scripts / 'FarTerrain.cs'] + sorted(scripts.glob('FarDetail*.cs')) + sorted(scripts.glob('FarField*.cs'))
+complete = list(dict.fromkeys(complete))
+includes = ''.join('<Compile Include="' + str(p) + '" />' for p in complete)
+write(temp / 'integration-api.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><LangVersion>9</LangVersion><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup><ItemGroup>' + includes + refs + '</ItemGroup></Project>')
+subprocess.run([str(dotnet), 'build', str(temp / 'integration-api.csproj'), '-c', 'Release', '--nologo', '--configfile', str(temp / 'NuGet.Config')], env=env, check=True)

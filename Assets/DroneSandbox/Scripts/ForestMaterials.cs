@@ -24,9 +24,11 @@ namespace DroneSandbox
             }
             FallbackCount++;
             var photo = Resources.Load<Material>(name == "Canopy" ? "Materials/BaseLit" : "Materials/PBR/" + name);
-            return photo != null ? new Material(photo) { enableInstancing = true }
-                : imported != null && imported.shader != null && imported.shader.isSupported
-                    ? new Material(imported) { enableInstancing = true } : Art.NewMaterial(Color.white);
+            var fallback = photo != null ? new Material(photo)
+                : imported != null && imported.shader != null && imported.shader.name == "HDRP/Lit" && imported.shader.isSupported
+                    ? new Material(imported) : Art.NewMaterial(Color.white);
+            fallback.enableInstancing = true;
+            return fallback;
         }
 
         // Verify both material and draw-property storage before enabling a shader whose default is full coverage.

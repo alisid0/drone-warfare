@@ -32,6 +32,9 @@ namespace DroneSandbox
         public static long Queries { get; private set; }
         public static long Samples { get; private set; }
         public static long SkippedSamples { get; private set; }
+        static long queryTicks;
+        static int queryFrame = -1;
+        public static float QueryMs => queryFrame == Time.frameCount ? (float)(queryTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency) : 0f;
 
         // Index both logical woodland and decorative tree crowns once after the sector is built.
         public static void Build(Transform world)
@@ -119,9 +122,10 @@ namespace DroneSandbox
         // round each crown, so lines passing well clear of the trees counted as blocked.)
         public static bool Blocks(Vector3 from, Vector3 to)
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             Queries++;
             int steps = Mathf.CeilToInt(Vector3.Distance(from, to)), run = 0;
-            if (Mathf.Min(from.y, to.y) >= highest) { SkippedSamples += Mathf.Max(0, steps - 3); return false; }
+            if (Mathf.Min(from.y, to.y) >= highest) { SkippedSamples += Mathf.Max(0, steps - 3); return Timed(false, started); }
             Vector3 delta = (to - from) / Mathf.Max(1, steps);
             for (int i = 1; i < steps - 2;)
             {
@@ -142,10 +146,19 @@ namespace DroneSandbox
                     Samples++;
                     p = Vector3.Lerp(from, to, i / (float)steps);
                     run = InColumn(column, p).HasValue ? run + 1 : 0;
-                    if (run >= 2) return true;
+                    if (run >= 2) return Timed(true, started);
                 }
             }
-            return false;
+            return Timed(false, started);
+        }
+
+        // Include gameplay crown queries in the forest's per-frame CPU counter, outside the render callback itself.
+        static bool Timed(bool result, long started)
+        {
+            int frame = Time.frameCount;
+            if (queryFrame != frame) { queryFrame = frame; queryTicks = 0; }
+            queryTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
+            return result;
         }
 
         // For the tests: where along the line, and in which crown, Blocks found its 2 m of foliage ("" if none).

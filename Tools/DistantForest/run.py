@@ -37,6 +37,7 @@ engine = engine.replace('GetComponentsInChildren<T>()', 'GetComponentsInChildren
 engine = engine.replace('public class Renderer : Component {', 'public class Renderer : Component { public Bounds bounds;')
 engine += '''
 namespace UnityEngine {
+public static class Time { public static int frameCount; public static float unscaledTime; }
 public class LODGroup : Component { public LOD[] GetLODs()=>new LOD[0]; }
 public struct LOD { public Renderer[] renderers; }
 public struct Bounds { public Vector3 center,size; public Bounds(Vector3 c,Vector3 s){center=c;size=s;}

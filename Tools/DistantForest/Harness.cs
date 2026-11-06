@@ -128,7 +128,7 @@ static class Harness
                 b.fullTriangles += entry.fullTriangles; b.reducedTriangles += entry.reducedTriangles; b.cardTriangles += entry.cardTriangles;
                 bins[k] = b;
             }
-            Vector4 ranges = ForestBudget.SelectBuckets(bins, 350f, guard);
+            Vector4 ranges = ForestBudget.SelectBuckets(bins, 350f + guard, guard);
 #else
             entries.Sort((a, b) => a.distance.CompareTo(b.distance));
             Vector4 ranges = ForestBudget.Select(entries);

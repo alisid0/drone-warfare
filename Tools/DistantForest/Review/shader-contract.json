@@ -1,0 +1,9 @@
+{
+  "installedHdrp": "com.unity.render-pipelines.high-definition@49ad9dd6ab9a",
+  "serializedInstancingMaterials": 12,
+  "depthWorldPosition": true,
+  "unityPerMaterial": true,
+  "absolutePivotInBothInstancePaths": true,
+  "invalidParametersFailOpen": true,
+  "shaderCompilerOrGpuExecuted": false
+}

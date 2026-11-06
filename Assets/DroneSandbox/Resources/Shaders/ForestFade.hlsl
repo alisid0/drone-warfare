@@ -14,6 +14,8 @@ void ForestFade(float3 positionRWS)
     float card = 1.0 - smoothstep(max(0.0, _ForestDistances.z - 35.0), max(0.01, _ForestDistances.z), d);
     float low = _ForestTier < 0.5 ? 0.0 : _ForestTier < 1.5 ? full : _ForestTier < 2.5 ? mesh : card;
     float high = _ForestTier < 0.5 ? full : _ForestTier < 1.5 ? mesh : _ForestTier < 2.5 ? card : 1.0;
+    // Most foliage pixels are outside a transition; skip dither hashing in colour, depth and shadow passes there.
+    if (_ForestBuild >= 1.0 && low <= 0.0 && high >= 1.0) return;
     // Quantized world noise remains attached to foliage during a flight and is shared by the depth/shadow passes.
     uint3 cell = asuint((int3)floor(world * 20.0));
     uint hash = cell.x * 73856093u ^ cell.y * 19349663u ^ cell.z * 83492791u;

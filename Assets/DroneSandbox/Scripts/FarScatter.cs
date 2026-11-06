@@ -220,11 +220,11 @@ namespace DroneSandbox
             forest.Update(cam, planes);
             if (timingFrame != Time.frameCount)
             {
-                if (timingFrame >= 0) { totalMs += frameMs; Samples++; MeanMs = (float)(totalMs / Samples); }
+                if (timingFrame >= 0) { totalMs += MainThreadMs; Samples++; MeanMs = (float)(totalMs / Samples); }
                 timingFrame = Time.frameCount; frameMs = 0;
             }
             frameMs += renderTimer.Elapsed.TotalMilliseconds;
-            MainThreadMs = (float)frameMs; WorstMs = Mathf.Max(WorstMs, MainThreadMs);
+            MainThreadMs = (float)frameMs + Canopy.QueryMs; WorstMs = Mathf.Max(WorstMs, MainThreadMs);
             // Settlement accounting remains outside the forest timer and retains its existing model submission path.
             for (int i = 36; i < models.Length; i++) if (models[i] != null) models[i].instances.Clear();
             if (FarTerrain.Active) { landmarks.Update(cam, planes); settlements.Update(cam, planes, this); }
@@ -388,7 +388,7 @@ namespace DroneSandbox
         float ReadyReach(Vector2 world)
         {
             int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
-            float reach = TreeReach;
+            float reach = TreeReach + MovementGuard;
             for (int j = cj - 4; j <= cj + 4; j++)
                 for (int i = ci - 4; i <= ci + 4; i++)
                 {
