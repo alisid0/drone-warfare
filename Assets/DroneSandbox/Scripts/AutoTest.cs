@@ -762,6 +762,7 @@ namespace DroneSandbox
                           $"forest blocks {ForestHlod.BlocksDrawn}, triangles {ForestHlod.TrianglesDrawn}, town blocks {SettlementHlod.BlocksDrawn}, " +
                           $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
                           $"forest build {ForestHlod.BuildMs:F2} ms");
+            yield return LandmarkViews(rts);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
@@ -2071,6 +2072,26 @@ namespace DroneSandbox
             log.WriteLine(cost.ToString());
             Set(bounceOn, true, microOn, true, 2048);
             Atmosphere.ApplyQuality(Camera.main);
+        }
+
+        // One permanent landmark of each kind as the world draws it outside a sector (streamed ground, far masses), from
+        // the strategy camera's 300 m and from 2.5 km, so its look can be judged and matched to the sector's own detail.
+        IEnumerator LandmarkViews(RtsController rts)
+        {
+            var seen = new HashSet<WorldFeatureKind>();
+            foreach (var f in WorldPlan.Features)
+            {
+                if (!f.valid || !seen.Add(f.kind)) continue;
+                Vector2 p = f.center - FarTerrain.Origin;
+                foreach (var (name, distance) in new[] { ("300m", 300f), ("2500m", 2500f) })
+                {
+                    rts.LookAt(new Vector3(p.x, 0f, p.y), distance, 35f);
+                    yield return new WaitForSecondsRealtime(3f); // streamed tiles round the new view
+                    yield return ForestMassesSettle($"89_landmark_{f.kind}_{name}");
+                    yield return Shot($"89_landmark_{f.kind}_{name}");
+                }
+            }
+            log.WriteLine($"Landmark views: {seen.Count} kinds, tiles live {FarDetail.Live}, landmark draws {LandmarkHlod.DrawCalls}, triangles {LandmarkHlod.TrianglesDrawn}");
         }
 
         // The far forest's canopy for the view: hd144's forest shot caught 3 blocks after 6 s and showed bare ground for
