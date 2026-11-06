@@ -1,0 +1,26 @@
+Validation recorded 2026-11-06 on codex/lived-in, base cb49269.
+
+prepare.py:
+  Unity 6000.6.7f1 assembly API compile, C# 9: 0 warnings, 0 errors.
+  Managed review executable compile, C# 9: 0 warnings, 0 errors.
+  Exact patched Farmland and SettlementHlod sources included in the API compile.
+
+Harness Checks:
+  All planned town/village street anchors within 0.05 m of a world road or connected lane.
+  20 villages, 318 properties, zero plot intersections.
+  Old-core and shaped-plot proportions within requested bounds in every village.
+  Door/drive widths and uniform scale bounds passed.
+  Cultivated and untended properties do not overlap.
+  Repeated seed and retained snapshot fingerprint checks passed.
+
+Field geometry:
+  233 blocks, 65,534 triangles, 76.3 ms in bounded managed review.
+  All exported field-use vertices finite.
+
+audit.py and Git:
+  Both integration patches passed git apply --check --ignore-space-change.
+  Source CRLF, no LINQ, protected-file and World non-village scope checks passed.
+  git diff --check on game-source changes passed.
+
+Twelve 1280 x 800 Blender 5.2 review renders completed, one job at a time, two threads.
+Unity, HDRP GPU timings, complete sector builds and the game autotest were not run here.

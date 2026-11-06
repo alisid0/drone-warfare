@@ -532,7 +532,7 @@ namespace DroneSandbox
             if (model == null) return;
             Vector2 p = house.world - FarTerrain.Origin;
             model.instances.Add(Matrix4x4.TRS(new Vector3(p.x, GroundAt(p) - 0.2f, p.y),
-                Quaternion.Euler(0f, house.yaw, 0f), Vector3.one));
+                Quaternion.Euler(0f, house.yaw, 0f), Vector3.one * house.Scale));
             HousesDrawn++;
         }
 

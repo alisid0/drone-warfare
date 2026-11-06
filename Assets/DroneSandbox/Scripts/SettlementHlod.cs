@@ -153,7 +153,7 @@ namespace DroneSandbox
                 Vector2 p = house.world - FarTerrain.Origin;
                 Vector3 size = SettlementPattern.Size[house.kind];
                 float w = size.x * 0.5f, d = size.z * 0.5f, h = size.y, r = SettlementPattern.Roof[house.kind];
-                var matrix = Matrix4x4.TRS(new Vector3(p.x, FarScatter.GroundAt(p) - 0.2f, p.y), Quaternion.Euler(0f, house.yaw, 0f), Vector3.one);
+                var matrix = Matrix4x4.TRS(new Vector3(p.x, FarScatter.GroundAt(p) - 0.2f, p.y), Quaternion.Euler(0f, house.yaw, 0f), Vector3.one * house.Scale);
                 Vector3 a = new Vector3(-w, 0f, -d), b = new Vector3(w, 0f, -d), c = new Vector3(w, 0f, d), e = new Vector3(-w, 0f, d);
                 Vector3 at = a + Vector3.up * h, bt = b + Vector3.up * h, ct = c + Vector3.up * h, et = e + Vector3.up * h;
                 Vector3 ridgeA = new Vector3(-w, h + r, 0f), ridgeB = new Vector3(w, h + r, 0f);

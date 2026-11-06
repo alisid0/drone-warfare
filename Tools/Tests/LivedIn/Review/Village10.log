@@ -1,0 +1,2 @@
+geometry: 4146 near / 540 far triangles
+Village10: 13 houses, 37 resident prop renderers; layout+world 1.35s, height 0.08s, village 0.044s; peak 241 MiB

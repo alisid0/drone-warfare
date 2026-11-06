@@ -11,6 +11,8 @@ namespace DroneSandbox
         public Vector2 a, b;
         public FieldBoundaryKind kind;
         public int first, second;
+        public bool hasGate;
+        public Vector2 gate;
 
         // Bends a boundary exactly as the crops on either side are bent.
         public Vector2 Point(float t)
