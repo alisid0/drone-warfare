@@ -37,6 +37,7 @@ namespace DroneSandbox
         public void Update(Camera camera, Plane[] planes)
         {
             DrawCalls = TrianglesDrawn = 0;
+            bool meshed = false; // one new compound per frame keeps a sector change from meshing every yard in one stage
             foreach (var f in WorldPlan.Features)
             {
                 Vector2 p = f.center - FarTerrain.Origin;
@@ -45,6 +46,8 @@ namespace DroneSandbox
                 if (bounds.SqrDistance(camera.transform.position) > 22000f * 22000f || !GeometryUtility.TestPlanesAABB(planes, bounds)) continue;
                 if (!batches.TryGetValue(f.id, out Batch batch))
                 {
+                    if (meshed) continue;
+                    meshed = true;
                     batch = Upload(LandmarkMesh.Build(f, FarTerrain.Origin, false)); batches.Add(f.id, batch);
                 }
                 if (batch.mesh == null) continue;

@@ -45,11 +45,16 @@ namespace DroneSandbox
         public static Data Build(WorldFeature f, Vector2 origin, bool sector, bool clip = true)
         {
             var mesh = new Data();
+            // Most compounds lie wholly inside or wholly outside the sector square; those need no clipping at all.
+            Vector2 c = f.center - origin; float reach = f.halfLength + f.halfWidth + f.clearance;
+            bool whole = !clip || (sector ? Mathf.Abs(c.x) + reach < 1000f && Mathf.Abs(c.y) + reach < 1000f
+                : Mathf.Abs(c.x) - reach > 1000f || Mathf.Abs(c.y) - reach > 1000f);
+            var outlines = new List<Vector2>[f.surfaces.Count]; // read-only once made, shared by every cut
             for (int index = 0; index < f.surfaces.Count; index++)
             {
                 var s = f.surfaces[index];
                 var a = s.area;
-                var pieces = new List<List<Vector2>> { Outline(s, origin) };
+                var pieces = new List<List<Vector2>> { outlines[index] ?? (outlines[index] = Outline(s, origin)) };
                 // Each cut can split every piece once per mask edge, so many overlapping wear patches multiplied the pieces
                 // without bound and hung the main thread when a works came into view (hd147). Raised decals no longer cut
                 // the slabs below them, so only level neighbours split a slab; past 96 pieces the rest are left to overlap:
@@ -61,13 +66,13 @@ namespace DroneSandbox
                     Vector2 d = later.area.center - a.center;
                     // Cheap oriented separating axes reject almost all unrelated wear and paint patches.
                     if (Separated(a, later.area, d) || Separated(later.area, a, d)) continue;
-                    var mask = Outline(later, origin); var remaining = new List<List<Vector2>>();
+                    var mask = outlines[next] ?? (outlines[next] = Outline(later, origin)); var remaining = new List<List<Vector2>>();
                     foreach (var piece in pieces) Subtract(piece, mask, remaining);
                     pieces = remaining;
                 }
                 foreach (var polygon in pieces)
                 {
-                    if (!clip) Slab(mesh, polygon, s, f.elevation, origin);
+                    if (whole) Slab(mesh, polygon, s, f.elevation, origin);
                     else if (sector) Slab(mesh, Clip(Clip(Clip(Clip(polygon, 0, -1000f, true), 0, 1000f, false), 1, -1000f, true), 1, 1000f, false), s, f.elevation, origin);
                     else
                     {
