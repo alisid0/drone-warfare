@@ -37,6 +37,7 @@ namespace DroneSandbox.EditorTools
             CreatePostProcessingProfile();
             CreatePhotoFocusProfile();
             ImportTerrainTextures();
+            FarDetailShaderSetup.Build();
             ImportNightSky();
             CreateWhiteWater();
             CreateDamConcrete();

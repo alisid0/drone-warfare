@@ -5,9 +5,9 @@ using UnityEngine;
 namespace DroneSandbox
 {
     // Immutable world inputs keep tile workers independent of Unity and of the next sector/world rebuild.
-    public sealed class FarDetailData
+    public sealed partial class FarDetailData
     {
-        public const int Quads = 128, Samples = Quads + 1, Pixels = 256;
+        public const int Quads = 128, Samples = Quads + 1, Pixels = 256, TextureSize = Pixels + 2;
         public const float Size = 512f, Step = 4f;
         public readonly int seed;
         readonly float[] heights;
@@ -32,7 +32,8 @@ namespace DroneSandbox
             public Vector3[] vertices, normals, collision;
             public Vector2[] uv;
             public int[] triangles, collisionTriangles;
-            public Color32[] pixels;
+            public Color32[] pixels, controls;
+            public Vector4[] tangents;
             public double generationMs;
         }
 
@@ -144,10 +145,23 @@ namespace DroneSandbox
             tile.collision = new Vector3[33 * 33];
             for (int j = 0; j < 33; j++) for (int i = 0; i < 33; i++) tile.collision[j * 33 + i] = tile.vertices[j * 4 * n + i * 4];
             triangles.Clear(); Grid(triangles, 32); tile.collisionTriangles = triangles.ToArray();
-            tile.pixels = new Color32[Pixels * Pixels];
+            tile.tangents = new Vector4[length];
+            for (int k = 0; k < length; k++)
+            {
+                Vector3 normal = tile.normals[k];
+                float inv = 1f / (float)Math.Sqrt(normal.y * normal.y + normal.x * normal.x);
+                tile.tangents[k] = new Vector4(normal.y * inv, -normal.x * inv, 0f, -1f);
+            }
+            tile.pixels = new Color32[TextureSize * TextureSize];
+            tile.controls = new Color32[tile.pixels.Length];
             var localRoads = Nearby(roads, x0, z0); var localRivers = Nearby(rivers, x0, z0);
-            for (int j = 0; j < Pixels; j++) for (int i = 0; i < Pixels; i++)
-                    tile.pixels[j * Pixels + i] = Paint(x0 + (i + 0.5f) * 2f, z0 + (j + 0.5f) * 2f, coverPositions[j * Pixels + i], localRoads, localRivers);
+            for (int j = 0; j < TextureSize; j++) for (int i = 0; i < TextureSize; i++)
+                {
+                    float wx = x0 + (i - 0.5f) * 2f, wz = z0 + (j - 0.5f) * 2f;
+                    int k = j * TextureSize + i;
+                    tile.pixels[k] = Paint(wx, wz, coverPositions[k], localRoads, localRivers);
+                    tile.controls[k] = Control(wx, wz, coverPositions[k], localRoads, localRivers);
+                }
             tile.generationMs = timer.Elapsed.TotalMilliseconds;
             return tile;
         }
@@ -171,14 +185,14 @@ namespace DroneSandbox
         static int Edge(int side, int t) => side == 0 ? t : side == 1 ? t * Samples + Quads : side == 2 ? Quads * Samples + t : t * Samples;
 
         // Cull vector features once per tile, rather than searching the whole theatre per pixel.
-        static Segment[] Nearby(Segment[] source, float x, float z)
+        static Segment[] Nearby(Segment[] source, float x, float z, float size = Size)
         {
             var list = new List<Segment>();
             foreach (var s in source)
             {
-                float pad = Math.Max(s.widthA, s.widthB) + 8f;
-                if (Math.Max(s.ax, s.bx) + pad < x || Math.Min(s.ax, s.bx) - pad > x + Size ||
-                    Math.Max(s.az, s.bz) + pad < z || Math.Min(s.az, s.bz) - pad > z + Size) continue;
+                float pad = Math.Max(s.widthA, s.widthB) + 32f;
+                if (Math.Max(s.ax, s.bx) + pad < x || Math.Min(s.ax, s.bx) - pad > x + size ||
+                    Math.Max(s.az, s.bz) + pad < z || Math.Min(s.az, s.bz) - pad > z + size) continue;
                 list.Add(s);
             }
             return list.ToArray();
@@ -193,84 +207,6 @@ namespace DroneSandbox
                 foreach (var river in nearby) if (Distance(river, x, z, out float width) <= width) return true;
             return false;
         }
-
-        // Ground's pasture/damp/rough palette gains metre-scale variation, true-width roads, banks and yards.
-        public Color32 Paint(float x, float z, Vector2 coverPosition, Segment[] lanes = null, Segment[] streams = null)
-        {
-            var cover = CoverAt(coverPosition.x, coverPosition.y);
-            float bank = float.MaxValue, riverWidth = 0f;
-            foreach (var s in streams ?? rivers)
-            {
-                float distance = Distance(s, x, z, out float width) - width;
-                if (distance < bank) { bank = distance; riverWidth = width; }
-            }
-            // The coarse water cover is 32 m wide in places; vector rivers own their exact wet footprint here.
-            if (cover == Cover.Water && bank < 64f) cover = Cover.Pasture;
-            float drift = Noise(x / 80f + 70f, z / 80f + 20f) * 0.65f + Noise(x / 25f + 9f, z / 25f + 4f) * 0.35f;
-            var pasture = C(96, 118, 72); var damp = C(74, 100, 70); var rough = C(122, 124, 84);
-            Color32 c = Lerp(pasture, drift < 0.5f ? damp : rough, Math.Abs(drift - 0.5f));
-            if (cover == Cover.Farmland) c = Field(x, z);
-            else if (cover == Cover.Forest) c = Lerp(C(54, 70, 42), C(86, 94, 62), Noise(x / 18f, z / 18f));
-            else if (cover == Cover.Wetland) c = damp;
-            else if (cover == Cover.Rock) c = C(122, 118, 108);
-            else if (cover == Cover.Water) c = C(54, 82, 78);
-            else if (cover == Cover.Village || cover == Cover.Town)
-            {
-                // Street blocks and planted yards remain ground, not painted roofs underneath the real houses.
-                float u = Repeat(x, 90f), v = Repeat(z, 90f);
-                if (Math.Min(u, v) < 4f) c = C(120, 112, 98);
-                else if (Repeat(x, 30f) < 19f && Repeat(z, 30f) < 22f) c = Lerp(C(115, 99, 76), pasture, cover == Cover.Town ? 0.2f : 0.55f);
-            }
-            float variation = (Noise(x / 15f + 11f, z / 15f) - 0.5f) * 14f + (Noise(x / 4f, z / 4f + 17f) - 0.5f) * 6f;
-            c = C(c.r + variation, c.g + variation, c.b + variation);
-            if (bank < 5f)
-            {
-                c = Lerp(c, C(115, 109, 88), Clamp((4f - bank) / 3f, 0, 1));
-                c = Lerp(c, Lerp(C(91, 117, 103), C(54, 82, 78), Clamp(-bank / Math.Min(4f, riverWidth), 0, 1)), Clamp((1f - bank) / 2f, 0, 1));
-            }
-            float roadEdge = float.MaxValue; int roadKind = 0;
-            foreach (var s in lanes ?? roads)
-            {
-                float outside = Distance(s, x, z, out float width) - width;
-                if (outside < roadEdge) { roadEdge = outside; roadKind = s.kind; }
-            }
-            if (roadEdge < 3f)
-            {
-                c = Lerp(c, rough, Clamp(2.5f - roadEdge, 0, 1));
-                var road = roadKind == 0 ? C(78, 78, 80) : roadKind == 1 ? C(120, 112, 98) : C(130, 116, 92);
-                c = Lerp(c, road, Clamp((1f - roadEdge) / 2f, 0, 1));
-            }
-            return c;
-        }
-
-        // FarTerrain.Field's district, crop and boundary arithmetic, with a main-thread native-noise lookup table.
-        public Color32 Field(float x, float z)
-        {
-            float fx = x / 700f, fz = z / 700f, best = float.MaxValue, second = float.MaxValue;
-            int gx = (int)Math.Floor(fx), gz = (int)Math.Floor(fz), district = 0;
-            for (int oz = -1; oz <= 1; oz++) for (int ox = -1; ox <= 1; ox++)
-                {
-                    int cx = gx + ox, cz = gz + oz, h = Hash(cx, cz);
-                    float sx = cx + 0.15f + 0.7f * ((h & 1023) / 1023f), sz = cz + 0.15f + 0.7f * (((h >> 10) & 1023) / 1023f);
-                    float d = (sx - fx) * (sx - fx) + (sz - fz) * (sz - fz);
-                    if (d < best) { second = best; best = d; district = h; } else if (d < second) second = d;
-                }
-            float angle = ((district >> 3) & 1023) / 1023f * (float)Math.PI, ca = (float)Math.Cos(angle), sa = (float)Math.Sin(angle);
-            float u = x * ca + z * sa, v = -x * sa + z * ca;
-            float lookup = Clamp((u / 600f + (district & 63) + 68f) / 200f * (warp.Length - 1), 0, warp.Length - 1.001f);
-            v += 30f * (Mix(warp[(int)lookup], warp[(int)lookup + 1], lookup - (int)lookup) - 0.5f);
-            float width = 35f + ((district >> 13) & 63) / 63f * 75f;
-            int strip = (int)Math.Floor(v / width), hs = Hash(strip, district);
-            float across = v / width - strip, length = 150f + (hs & 255) / 255f * 250f, segment = (u + ((hs >> 8) & 1023)) / length;
-            var c = Crops[Hash((int)Math.Floor(segment), hs) % Crops.Length];
-            float side = Math.Min(across, 1f - across) * width, end = Math.Min(segment - (float)Math.Floor(segment), (float)Math.Ceiling(segment) - segment) * length;
-            if (side < 3f) c = ((hs >> 20) & 1) == 0 ? Lerp(c, C(46, 62, 36), 0.6f) : Lerp(c, C(126, 128, 86), 0.45f);
-            else if (end < 2.5f) c = Lerp(c, C(126, 128, 86), 0.45f);
-            if (((float)Math.Sqrt(second) - (float)Math.Sqrt(best)) * 700f < 4f) c = Lerp(c, C(46, 62, 36), 0.6f);
-            return c;
-        }
-
-        static readonly Color32[] Crops = { C(170, 146, 90), C(156, 138, 84), C(98, 114, 62), C(86, 104, 58), C(104, 82, 62), C(138, 132, 86) };
 
         // Vector distance includes an interpolated river half-width at bends and junctions.
         static float Distance(Segment s, float x, float z, out float width)
