@@ -4,10 +4,10 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Renders reserved sector land uses; SectorForest supplies the logical trees for woodland reserves.
+    // Renders reserved sector land uses with shared meshes and the existing World's tree and spacing budget.
     public static partial class Features
     {
-        // Keeps surfaces cheap regardless of area; the shared woodland pass fills forest reserves afterwards.
+        // Keeps surfaces cheap regardless of their area; forest planting runs before World's ordinary woods.
         static void BuildIdentity(Transform root)
         {
             var p = MapLayout.Plan;
@@ -27,6 +27,7 @@ namespace DroneSandbox
             }
             yards.Finish("Feature yards", root, new[] { Pbr("Gravel", new Color(0.42f, 0.40f, 0.36f)), Pbr("Concrete", new Color(0.55f, 0.55f, 0.51f)) });
             FeatureFences(root);
+            if (p.kind == SectorKind.DeepForest && p.reservedFeatures.Count > 0) WoodlandCore(root, p.reservedFeatures[0]);
             if (p.wetland != null) Wetland(root, p.wetland);
         }
 
@@ -79,6 +80,42 @@ namespace DroneSandbox
                     }
                 }
             mesh.Finish("Compound fence", root, new[] { Pbr("Galvanized", new Color(0.36f, 0.38f, 0.37f)) });
+        }
+
+        // A bounded mature stand, denser inside and feathered at its perimeter, with glades and a clear forestry track.
+        static void WoodlandCore(Transform root, FeatureArea a)
+        {
+            var rng = new System.Random(MapLayout.Plan.worldSeed ^ 0x4f21);
+            var candidates = new List<Vector2>();
+            const float spacing = 7.4f;
+            for (float u = -a.halfLength; u <= a.halfLength; u += spacing)
+                for (float v = -a.halfWidth; v <= a.halfWidth; v += spacing)
+                {
+                    float x = u / a.halfLength, z = v / a.halfWidth;
+                    float edge = Mathf.Sqrt(Mathf.Sqrt(x * x * x * x + z * z * z * z));
+                    Vector2 p = a.Point(u + Range(rng, -1.2f, 1.2f), v + Range(rng, -1.2f, 1.2f));
+                    if (!a.Contains(p) || edge > 1f) continue;
+                    if (edge > 0.86f && rng.NextDouble() < (edge - 0.86f) * 4f) continue;
+                    if (!FeatureOpen(p, 4f)) continue;
+                    bool glade = false;
+                    foreach (var g in MapLayout.Plan.woodlandGlades) if (Vector2.Distance(p, g.center) < g.radius) glade = true;
+                    if (!glade) candidates.Add(p);
+                }
+            // Shuffle across the entire reserve; a budget must never slice the last rows off a wood.
+            int count = 0, renderers = 0;
+            for (int i = candidates.Count - 1; i >= 0 && count < 6800; i--)
+            {
+                int index = rng.Next(i + 1);
+                Vector2 p = candidates[index]; candidates[index] = candidates[i];
+                double roll = rng.NextDouble();
+                string model = roll < 0.55 ? "Scenery_Spruce" : roll < 0.8 ? "Scenery_Pine" : roll < 0.9 ? "Scenery_Pine_B" : "Scenery_Tree";
+                Vector3 at = new Vector3(p.x, 0f, p.y);
+                int cost = Art.ModelRendererCount(model, at);
+                if (renderers + cost > 20400) break; // within the existing 8000-tree woods allowance, counting all LODs
+                if (World.Place(model, at, Range(rng, 0f, 360f), Range(rng, 1.02f, 1.18f), 0.25f, root) == null) continue;
+                renderers += cost;
+                count++;
+            }
         }
 
         // Feature vegetation owns its reserve but respects all the ordinary water, road, building and unit clearances.

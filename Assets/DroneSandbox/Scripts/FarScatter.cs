@@ -8,10 +8,9 @@ namespace DroneSandbox
     // to ForestHlod and SettlementHlod, so a high camera never submits thousands of sub-pixel tree cards.
     public class FarScatter : MonoBehaviour
     {
-        public const float FullReach = 45f, MeshReach = 125f, TreeReach = 350f, HouseReach = 1500f;
-        public const int FullLimit = ForestBudget.FullLimit, ReducedLimit = ForestBudget.ReducedLimit, CardLimit = ForestBudget.CardLimit, TriangleLimit = ForestBudget.TriangleLimit;
+        public const float MeshReach = 120f, TreeReach = 700f, HouseReach = 1500f;
         const float CellSize = 120f;
-        const int Batch = 511, CellsPerFrame = 4, CellLimit = 192; // non-uniform scales also need inverse matrices
+        const int Batch = 511, CellsPerFrame = 4; // non-uniform crown scales also need inverse instance matrices
         static readonly string[] Trees = { "Scenery_Tree", "Scenery_Birch", "Scenery_Spruce", "Scenery_Pine" };
         static readonly string[] Houses = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_C", "Scenery_House_D",
             "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop" };
@@ -29,7 +28,6 @@ namespace DroneSandbox
         {
             public Part[] parts;
             public float height;
-            public int triangles, tier;
             public readonly List<Matrix4x4> instances = new List<Matrix4x4>();
         }
 
@@ -38,7 +36,7 @@ namespace DroneSandbox
         {
             public Vector3 position;
             public ForestPattern.Stand stand;
-            public Matrix4x4 mesh, reduced, card;
+            public Matrix4x4 mesh, card;
         }
 
         // Small cells bound generation work and culling without creating scenery GameObjects.
@@ -54,55 +52,23 @@ namespace DroneSandbox
         readonly List<Material> ownedMaterials = new List<Material>();
         readonly Matrix4x4[] batch = new Matrix4x4[Batch];
         readonly Plane[] planes = new Plane[6];
-        readonly List<Visible> visible = new List<Visible>();
-        readonly List<ForestBudget.Entry> costs = new List<ForestBudget.Entry>();
-        readonly Dictionary<Camera, float> readyByCamera = new Dictionary<Camera, float>();
-        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
         readonly ForestHlod forest = new ForestHlod();
         readonly SettlementHlod settlements = new SettlementHlod();
         readonly LandmarkHlod landmarks = new LandmarkHlod();
         Vector2 builtOrigin;
         int builtSeed = -1;
-        int builtVersion = -1, generatedFrame = -1;
-
-        // Sort by distance with a stable tie-break so budget pressure lowers detail rather than deleting trees.
-        struct Visible : System.IComparable<Visible>
-        {
-            public Tree tree;
-            public float distance;
-            // Stable distance ties keep budget selection repeatable as dictionary iteration order changes.
-            public int CompareTo(Visible other)
-            {
-                int order = distance.CompareTo(other.distance);
-                if (order == 0) order = tree.position.x.CompareTo(other.tree.position.x);
-                return order != 0 ? order : tree.position.z.CompareTo(other.tree.position.z);
-            }
-        }
 
         public static int MeshTreesDrawn { get; private set; }
         public static int CardTreesDrawn { get; private set; }
         public static int TreesDrawn => MeshTreesDrawn + CardTreesDrawn;
         public static int HousesDrawn { get; private set; }
         public static int InstanceDrawCalls { get; private set; }
-        public static int FullTreesDrawn { get; private set; }
-        public static int ReducedTreesDrawn { get; private set; }
-        public static int TreeTrianglesDrawn { get; private set; }
-        public static int CachedTreeRecords { get; private set; }
-        public static Vector4 TierDistances { get; private set; } = new Vector4(45f, 125f, 350f, 700f);
-
-        // Explicit camera submission supports photo, scene and gameplay cameras without sharing their allowances.
-        void OnEnable() => RenderPipelineManager.beginCameraRendering += Render;
-
-        // Unsubscribe even when the persistent far terrain is temporarily disabled.
-        void OnDisable() => RenderPipelineManager.beginCameraRendering -= Render;
 
         // Release generated resources on sector/seed changes, not just their dictionary entries.
         public void Clear()
         {
             cells.Clear(); forest.Clear(); settlements.Clear(); landmarks.Clear();
-            readyByCamera.Clear();
             MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
-            FullTreesDrawn = ReducedTreesDrawn = TreeTrianglesDrawn = CachedTreeRecords = 0;
         }
 
         // Also release cloned instancing materials when the persistent terrain object is destroyed.
@@ -116,32 +82,28 @@ namespace DroneSandbox
         // Keep the ground lookup in one place for FarDetail's independent height-source change.
         // On the streamed detail tile's surface where one is (or will be), else the far terrain's ground. The tiered
         // trees stand on the ground itself (no canopy lift), so this is the bare-ground form of FarDetail's lookup.
-        internal static float GroundAt(Vector2 local) => InSector(local) || !FarTerrain.Active
-            ? Ground.HeightAt(new Vector3(local.x, 0f, local.y)) : FarDetail.ScatterHeight(local, false);
+        internal static float GroundAt(Vector2 local) => FarDetail.ScatterHeight(local, false);
 
         // 3D distance includes camera altitude, so the 2.5/9 km views submit no individual trees or houses.
-        void Render(ScriptableRenderContext context, Camera cam)
+        void LateUpdate()
         {
             MeshTreesDrawn = CardTreesDrawn = HousesDrawn = InstanceDrawCalls = 0;
-            FullTreesDrawn = ReducedTreesDrawn = TreeTrianglesDrawn = 0;
-            if (cam == null || (cam.cameraType != CameraType.Game && cam.cameraType != CameraType.SceneView)) return;
-            if (!FarTerrain.Active && !SectorForest.Ready) return;
+            var cam = Camera.main;
+            if (cam == null || !FarTerrain.Active) return;
             if (models == null) LoadModels();
-            if (builtSeed != WorldPlan.Seed || builtOrigin != FarTerrain.Origin || builtVersion != SectorForest.Version)
+            if (builtSeed != WorldPlan.Seed || builtOrigin != FarTerrain.Origin)
             {
-                Clear(); builtSeed = WorldPlan.Seed; builtOrigin = FarTerrain.Origin; builtVersion = SectorForest.Version;
-                forest.AdoptSector();
+                Clear(); builtSeed = WorldPlan.Seed; builtOrigin = FarTerrain.Origin;
             }
             GeometryUtility.CalculateFrustumPlanes(cam, planes);
             foreach (var model in models) if (model != null) model.instances.Clear();
             Vector3 position = cam.transform.position;
             Vector2 local = new Vector2(position.x, position.z), world = local + FarTerrain.Origin;
             float altitude = position.y - GroundAt(local);
-            if (altitude < TreeReach + 150f && generatedFrame != Time.frameCount)
+            if (altitude < TreeReach + 150f)
             {
-                generatedFrame = Time.frameCount;
                 int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize), built = 0;
-                int reach = Mathf.CeilToInt((TreeReach + 180f) / CellSize);
+                int reach = Mathf.CeilToInt(TreeReach / CellSize);
                 for (int ring = 0; ring <= reach && built < CellsPerFrame; ring++)
                     for (int dz = -ring; dz <= ring && built < CellsPerFrame; dz++)
                         for (int dx = -ring; dx <= ring && built < CellsPerFrame; dx++)
@@ -153,95 +115,34 @@ namespace DroneSandbox
                         }
             }
             stale.Clear();
-            visible.Clear();
             foreach (var pair in cells)
             {
                 var cell = pair.Value;
-                if (cell.bounds.SqrDistance(position) > 780f * 780f) { stale.Add(pair.Key); continue; }
-                bool inView = GeometryUtility.TestPlanesAABB(planes, cell.bounds);
-                if (!inView && cell.bounds.SqrDistance(position) > MeshReach * MeshReach) continue;
+                if (cell.bounds.SqrDistance(position) > 1100f * 1100f) { stale.Add(pair.Key); continue; }
+                if (!GeometryUtility.TestPlanesAABB(planes, cell.bounds)) continue;
                 foreach (var tree in cell.trees)
                 {
-                    float distance = Vector3.Distance(position, tree.position);
-                    if (distance <= TreeReach && (inView || distance <= MeshReach)) visible.Add(new Visible { tree = tree, distance = distance });
+                    float distance = Vector3.Distance(position, tree.position + Vector3.up * tree.stand.height * 0.7f);
+                    if (distance > TreeReach) continue;
+                    int tier = distance <= MeshReach ? 0 : 1;
+                    int kind = tier * 12 + tree.stand.species * 3 + tree.stand.shade;
+                    var model = models[kind];
+                    if (model == null) continue;
+                    model.instances.Add(tier == 0 ? tree.mesh : tree.card);
+                    if (tier == 0) MeshTreesDrawn++; else CardTreesDrawn++;
                 }
             }
             foreach (long key in stale) cells.Remove(key);
-            while (cells.Count > CellLimit)
-            {
-                long oldest = 0; float farthest = -1f;
-                foreach (var pair in cells)
-                {
-                    float distance = pair.Value.bounds.SqrDistance(position);
-                    if (distance > farthest) { farthest = distance; oldest = pair.Key; }
-                }
-                cells.Remove(oldest);
-            }
-            CachedTreeRecords = 0;
-            foreach (var cell in cells.Values) CachedTreeRecords += cell.trees.Length;
-            SelectTiers(ReadyReach(cam, world));
             forest.Update(cam, planes);
-            if (FarTerrain.Active) { landmarks.Update(cam, planes); settlements.Update(cam, planes, this); }
+            landmarks.Update(cam, planes);
+            settlements.Update(cam, planes, this);
             Draw(cam);
-        }
-
-        // Account for BOTH draws during each fade. Overflow moves the whole boundary inward, leaving canopy coverage.
-        void SelectTiers(float readyReach)
-        {
-            visible.Sort();
-            costs.Clear();
-            foreach (var v in visible)
-            {
-                int kind = v.tree.stand.species * 3 + v.tree.stand.shade;
-                costs.Add(new ForestBudget.Entry { distance = v.distance,
-                    fullTriangles = models[kind] != null ? models[kind].triangles : 0,
-                    reducedTriangles = models[12 + kind] != null ? models[12 + kind].triangles : 0,
-                    cardTriangles = models[24 + kind] != null ? models[24 + kind].triangles : 0 });
-            }
-            TierDistances = ForestBudget.Select(costs, readyReach);
-            float full = TierDistances.x, reduced = TierDistances.y, card = TierDistances.z;
-            foreach (var v in visible)
-            {
-                int kind = v.tree.stand.species * 3 + v.tree.stand.shade;
-                if (v.distance <= full) AddTree(kind, v.tree.mesh);
-                if (v.distance >= full - 10f && v.distance <= reduced) AddTree(12 + kind, v.tree.reduced);
-                if (v.distance >= reduced - 20f && v.distance <= card) AddTree(24 + kind, v.tree.card);
-            }
-            MeshTreesDrawn = FullTreesDrawn + ReducedTreesDrawn;
-        }
-
-        // Retain canopy until the entire tree bubble is ready; prefetch gives a 40 m/s flight several seconds' lead.
-        float ReadyReach(Camera camera, Vector2 world)
-        {
-            int ci = Mathf.FloorToInt(world.x / CellSize), cj = Mathf.FloorToInt(world.y / CellSize);
-            float reach = TreeReach;
-            for (int j = cj - 4; j <= cj + 4; j++)
-                for (int i = ci - 4; i <= ci + 4; i++)
-                {
-                    if (cells.ContainsKey(Key(i, j))) continue;
-                    float x = Mathf.Max(i * CellSize - world.x, Mathf.Max(0f, world.x - (i + 1) * CellSize));
-                    float z = Mathf.Max(j * CellSize - world.y, Mathf.Max(0f, world.y - (j + 1) * CellSize));
-                    reach = Mathf.Min(reach, Mathf.Sqrt(x * x + z * z));
-                }
-            readyByCamera.TryGetValue(camera, out float previous);
-            reach = Mathf.Min(reach, previous + Mathf.Min(Time.unscaledDeltaTime, 0.05f) * 120f);
-            readyByCamera[camera] = reach;
-            return reach;
-        }
-
-        // Counters describe submitted instances and triangles, including transition overlap and all submeshes.
-        void AddTree(int kind, Matrix4x4 matrix)
-        {
-            var model = models[kind];
-            if (model == null) return;
-            model.instances.Add(matrix); TreeTrianglesDrawn += model.triangles;
-            if (kind < 12) FullTreesDrawn++; else if (kind < 24) ReducedTreesDrawn++; else CardTreesDrawn++;
         }
 
         // Settlement blocks call this only when their corresponding combined roof group is hidden.
         internal void House(SettlementPattern.House house)
         {
-            var model = models[36 + house.kind];
+            var model = models[24 + house.kind];
             if (model == null) return;
             Vector2 p = house.world - FarTerrain.Origin;
             model.instances.Add(Matrix4x4.TRS(new Vector3(p.x, GroundAt(p) - 0.2f, p.y),
@@ -253,8 +154,6 @@ namespace DroneSandbox
         void Draw(Camera cam)
         {
             var bounds = new Bounds(cam.transform.position, Vector3.one * 3600f);
-            properties.SetVector("_ForestCamera", cam.transform.position);
-            properties.SetVector("_ForestDistances", TierDistances);
             foreach (var model in models)
             {
                 if (model == null || model.instances.Count == 0) continue;
@@ -268,7 +167,7 @@ namespace DroneSandbox
                             var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
                             if (material == null) continue;
                             var rp = new RenderParams(material) { camera = cam, worldBounds = bounds,
-                                matProps = properties, shadowCastingMode = model.tier < 2 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
+                                shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
                             Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, count);
                             InstanceDrawCalls++;
                         }
@@ -289,20 +188,20 @@ namespace DroneSandbox
             for (int j = cj * count; j < (cj + 1) * count; j++)
                 for (int i = ci * count; i < (ci + 1) * count; i++)
                 {
-                    if (!SectorForest.Tree(i, j, out Vector2 world, out ForestPattern.Stand stand)) continue;
+                    if (!ForestPattern.Tree(i, j, out Vector2 world, out ForestPattern.Stand stand)) continue;
                     Vector2 p = world - FarTerrain.Origin;
-                    if (InSector(p) && !SectorForest.Ready) continue;
-                    var at = new Vector3(p.x, GroundAt(p) - 0.15f, p.y);
+                    if (InSector(p)) continue;
+                    var at = new Vector3(p.x, GroundAt(p), p.y);
                     var tree = new Tree { position = at, stand = stand };
                     var rotation = Quaternion.Euler(0f, ForestPattern.Unit(i, j, 44) * 360f, 0f);
                     // Cache both roots once: flight changes the tier, not thousands of TRS matrices each frame.
-                    for (int tier = 0; tier < 3; tier++)
+                    for (int tier = 0; tier < 2; tier++)
                     {
                         var model = models[tier * 12 + stand.species * 3 + stand.shade];
                         if (model == null) continue;
                         float size = stand.height / model.height;
                         var matrix = Matrix4x4.TRS(at, rotation, new Vector3(size * stand.width, size, size * stand.width));
-                        if (tier == 0) tree.mesh = matrix; else if (tier == 1) tree.reduced = matrix; else tree.card = matrix;
+                        if (tier == 0) tree.mesh = matrix; else tree.card = matrix;
                     }
                     trees.Add(tree);
                     bounds.Encapsulate(at); bounds.Encapsulate(at + Vector3.up * 26f);
@@ -310,24 +209,23 @@ namespace DroneSandbox
             return new Cell { trees = trees.ToArray(), bounds = bounds };
         }
 
-        // Half-open ownership joins logical sector stems to the same world candidates without an empty border.
+        // The detailed sector continues to own its existing scenery, including a small overlap margin.
         internal static bool InSector(Vector2 local) =>
-            local.x >= -Ground.Size / 2f && local.x < Ground.Size / 2f && local.y >= -Ground.Size / 2f && local.y < Ground.Size / 2f;
+            Mathf.Abs(local.x) < Ground.Size / 2f + 10f && Mathf.Abs(local.y) < Ground.Size / 2f + 10f;
 
         // Keep the photo material path used by Art, with three reusable tint variants for each tree tier.
         void LoadModels()
         {
-            models = new Model[43];
-            for (int tier = 0; tier < 3; tier++)
+            models = new Model[31];
+            for (int tier = 0; tier < 2; tier++)
                 for (int species = 0; species < 4; species++)
                     for (int shade = 0; shade < 3; shade++)
-                        models[tier * 12 + species * 3 + shade] = LoadModel(tier == 1 ? Trees[species].Replace("Scenery_", "Forest_") + "_Reduced" : Trees[species],
-                            tier == 1 ? 0 : tier, ForestPattern.Tint(shade), tier);
-            for (int i = 0; i < Houses.Length; i++) models[36 + i] = LoadModel(Houses[i], 1, 1f, 3);
+                        models[tier * 12 + species * 3 + shade] = LoadModel(Trees[species], tier == 0 ? 1 : 2, ForestPattern.Tint(shade));
+            for (int i = 0; i < Houses.Length; i++) models[24 + i] = LoadModel(Houses[i], 1, 1f);
         }
 
         // Read every renderer of the selected LOD and use its transformed bounds to normalize tree height.
-        Model LoadModel(string name, int lod, float tint, int tier)
+        Model LoadModel(string name, int lod, float tint)
         {
             var prefab = Resources.Load<GameObject>("Models/" + name);
             if (prefab == null) return null;
@@ -341,7 +239,6 @@ namespace DroneSandbox
             if (renderers == null || renderers.Length == 0) renderers = prefab.GetComponentsInChildren<MeshRenderer>();
             var parts = new List<Part>();
             float bottom = float.MaxValue, top = float.MinValue;
-            int triangles = 0;
             foreach (var renderer in renderers)
             {
                 if (renderer == null) continue;
@@ -352,13 +249,8 @@ namespace DroneSandbox
                 for (int i = 0; i < materials.Length; i++)
                 {
                     if (materials[i] == null) continue;
-                    var photo = Resources.Load<Material>((tier < 3 ? "Materials/Forest/" : "Materials/PBR/") + materials[i].name);
+                    var photo = Resources.Load<Material>("Materials/PBR/" + materials[i].name);
                     var material = new Material(photo != null ? photo : materials[i]) { enableInstancing = true };
-                    if (tier < 3)
-                    {
-                        material.shader = Shader.Find("DroneSandbox/ForestLit");
-                        material.SetFloat("_ForestTier", tier); material.SetFloat("_ForestBuild", 1f);
-                    }
                     var colour = material.color; colour.r *= tint; colour.g *= tint; colour.b *= tint;
                     material.color = colour; materials[i] = material; ownedMaterials.Add(material);
                 }
@@ -370,9 +262,8 @@ namespace DroneSandbox
                     bottom = Mathf.Min(bottom, p.y); top = Mathf.Max(top, p.y);
                 }
                 parts.Add(new Part { mesh = filter.sharedMesh, materials = materials, local = local });
-                for (int sub = 0; sub < filter.sharedMesh.subMeshCount; sub++) triangles += (int)filter.sharedMesh.GetIndexCount(sub) / 3;
             }
-            return parts.Count == 0 ? null : new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom), triangles = triangles, tier = tier };
+            return parts.Count == 0 ? null : new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom) };
         }
     }
 }

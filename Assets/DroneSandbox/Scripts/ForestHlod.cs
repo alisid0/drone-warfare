@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 
 namespace DroneSandbox
 {
-    // Lit woodland masses in 2 km blocks. Sector patches sample at 16 m, margins at 8 m; distant LODs use 64/128 m.
+    // Opaque, lit woodland masses in 2 km blocks. Interiors sample at 32 m, margins at 8 m; distant LODs use 64/128 m.
     // Generation is sliced between small sampling batches on the main thread, so changing WorldPlan cannot race a worker.
     public sealed class ForestHlod
     {
@@ -26,7 +26,7 @@ namespace DroneSandbox
             public Color32[] pixels;
         }
 
-        // Shader fades keep surfaces immutable, so uploaded blocks need no retained CPU vertex copy.
+        // Cached resources own their CPU vertex copy only while a nearby camera can open a tree bubble.
         sealed class Block
         {
             public Data data;
@@ -34,16 +34,15 @@ namespace DroneSandbox
             public Material material;
             public Texture2D texture;
             public Bounds bounds;
+            public Vector3[] moved;
+            public Vector3 lastCamera = Vector3.one * 1e8f;
             public int lastSeen;
-            public int triangles;
-            public Block previous;
-            public float changedAt;
+            public bool hadBubble;
         }
 
         readonly Dictionary<int, Block> blocks = new Dictionary<int, Block>();
         readonly List<int> stale = new List<int>();
         readonly Stopwatch timer = new Stopwatch();
-        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
         IEnumerator builder;
         Data pending;
         int pendingKey, frame;
@@ -60,24 +59,9 @@ namespace DroneSandbox
             BlocksDrawn = TrianglesDrawn = CachedBlocks = 0;
         }
 
-        // Sector construction has already sampled these coarse blocks; uploading does not re-run the recipe.
-        public void AdoptSector()
-        {
-            var prepared = SectorForest.PreparedCanopy;
-            if (prepared == null) return;
-            foreach (var data in prepared)
-            {
-                int i = Mathf.RoundToInt((data.corner.x + WorldPlan.Half) / BlockSize);
-                int j = Mathf.RoundToInt((data.corner.y + WorldPlan.Half) / BlockSize);
-                blocks[j * BlockCount + i] = Upload(data);
-            }
-            prepared.Clear();
-        }
-
         // Each cached block owns exactly these three Unity resources.
         static void Discard(Block block)
         {
-            if (block.previous != null) Discard(block.previous);
             Art.Discard(block.mesh); Art.Discard(block.material); Art.Discard(block.texture);
         }
 
@@ -95,12 +79,6 @@ namespace DroneSandbox
         {
             BlocksDrawn = TrianglesDrawn = 0; frame++;
             if (!FarTerrain.ForestCanopyHlod) return;
-            if (!WorldPlan.Ready)
-            {
-                foreach (var block in blocks.Values)
-                    if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
-                return;
-            }
             Vector3 local = camera.transform.position;
             Vector3 world = local + new Vector3(FarTerrain.Origin.x, 0f, FarTerrain.Origin.y);
             int wantedKey = -1, wantedStep = 128;
@@ -120,7 +98,7 @@ namespace DroneSandbox
                     if (blocks.TryGetValue(key, out Block block))
                     {
                         block.lastSeen = frame;
-                        if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
+                        if (block.mesh != null && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
                         if (block.data.step == step) continue;
                         // First give every visible block a coarse shape before refining any of them.
                         if (block.bounds.SqrDistance(local) > 1400f * 1400f) distance += 2e9f;
@@ -142,14 +120,8 @@ namespace DroneSandbox
             while (builder != null && timer.Elapsed.TotalMilliseconds < BuildMilliseconds)
                 if (!builder.MoveNext())
                 {
-                    var next = Upload(pending);
-                    if (blocks.TryGetValue(pendingKey, out Block old))
-                    {
-                        if (old.previous != null) { Discard(old.previous); old.previous = null; }
-                        next.previous = old; next.changedAt = Time.unscaledTime;
-                        if (next.mesh == null) next.bounds = old.bounds;
-                    }
-                    blocks[pendingKey] = next;
+                    if (blocks.TryGetValue(pendingKey, out Block old)) Discard(old);
+                    blocks[pendingKey] = Upload(pending);
                     builder = null; pending = null;
                 }
             BuildMs = (float)timer.Elapsed.TotalMilliseconds;
@@ -164,55 +136,47 @@ namespace DroneSandbox
         Block Upload(Data data)
         {
             var block = new Block { data = data, lastSeen = frame };
-            if (data.triangles.Length == 0)
-            {
-                data.vertices = data.normals = null; data.uv = null;
-                data.ground = data.crown = null; data.triangles = null; data.pixels = null;
-                return block;
-            }
+            if (data.triangles.Length == 0) { data.pixels = null; return block; }
             var mesh = new Mesh { name = "Forest canopy " + data.step };
             mesh.indexFormat = data.vertices.Length > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
             mesh.vertices = data.vertices; mesh.normals = data.normals; mesh.uv = data.uv;
             mesh.triangles = data.triangles; mesh.RecalculateBounds();
-            mesh.UploadMeshData(true);
+            if (data.step == 16) mesh.MarkDynamic();
             var texture = new Texture2D(data.textureSize, data.textureSize, TextureFormat.RGBA32, true)
                 { name = "Forest crown field", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
             texture.SetPixels32(data.pixels); texture.Apply(true, true);
-            var source = Resources.Load<Material>("Materials/Forest/Canopy");
-            var material = source != null ? new Material(source) : Art.NewMaterial(Color.white);
-            material.shader = Shader.Find("DroneSandbox/ForestLit"); material.SetFloat("_ForestTier", 3f);
+            var material = Art.NewMaterial(Color.white);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
             block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
-            block.triangles = data.triangles.Length / 3;
-            data.vertices = data.normals = null; data.uv = null;
-            data.ground = data.crown = null; data.triangles = null;
             data.pixels = null;
             return block;
         }
 
-        // Fine canopy patches cover 350-700 m and continue into HLOD with identical geometry at that boundary.
-        // The shader opens the camera's tree bubble smoothly; no vertex uploads or 16 m stepping during flight.
+        // Sink the near canopy beneath trees over 560-700 m, including coarse blocks awaiting refinement.
         void Draw(Block block, Camera camera)
         {
-            float fade = block.previous != null ? Mathf.Clamp01((Time.unscaledTime - block.changedAt) / 0.75f) : 1f;
-            if (block.previous != null)
+            Vector3 position = camera.transform.position;
+            bool bubble = block.bounds.SqrDistance(position) < 900f * 900f;
+            if ((bubble || block.hadBubble) && (position - block.lastCamera).sqrMagnitude > 16f * 16f)
             {
-                if (fade >= 1f) { Discard(block.previous); block.previous = null; }
-                else if (block.previous.mesh != null) Submit(block.previous, camera, -Mathf.Max(0.00001f, fade));
+                var data = block.data;
+                if (block.moved == null) block.moved = new Vector3[data.vertices.Length];
+                for (int i = 0; i < data.vertices.Length; i++)
+                {
+                    Vector3 p = data.vertices[i];
+                    float distance = Vector3.Distance(position, p);
+                    float blend = Mathf.SmoothStep(0f, 1f, (distance - 560f) / 140f);
+                    p.y = data.ground[i] - 2f + (data.crown[i] + 1.7f) * blend;
+                    block.moved[i] = p;
+                }
+                block.mesh.vertices = block.moved;
+                block.lastCamera = position;
+                block.hadBubble = bubble;
             }
-            if (block.mesh != null) Submit(block, camera, fade);
-        }
-
-        // Refinement shares complementary coverage for three quarters of a second instead of replacing a silhouette.
-        void Submit(Block block, Camera camera, float fade)
-        {
-            properties.SetVector("_ForestCamera", camera.transform.position);
-            properties.SetVector("_ForestDistances", FarScatter.TierDistances);
-            properties.SetFloat("_ForestBuild", fade);
             var rp = new RenderParams(block.material) { camera = camera, worldBounds = block.bounds,
-                matProps = properties, shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
+                shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
             Graphics.RenderMesh(rp, block.mesh, 0, Matrix4x4.identity);
-            BlocksDrawn++; TrianglesDrawn += block.triangles;
+            BlocksDrawn++; TrianglesDrawn += block.data.triangles.Length / 3;
         }
 
         // Reuse world-aligned vertices; fine outline samples are shared even across differently refined cells.
@@ -234,8 +198,8 @@ namespace DroneSandbox
                 long key = ((long)x << 32) ^ (uint)z;
                 if (indices.TryGetValue(key, out int index)) return index;
                 Vector2 world = data.corner + new Vector2(x, z), p = world - FarTerrain.Origin;
-                var stand = SectorForest.At(world.x, world.y);
-                float height = Relief(stand, world.x, world.y);
+                var stand = ForestPattern.At(world.x, world.y);
+                float height = FarScatter.InSector(p) ? 0f : Relief(stand, world.x, world.y);
                 float floor = FarScatter.GroundAt(p);
                 index = vertices.Count; indices.Add(key, index);
                 vertices.Add(new Vector3(p.x, floor + height - 0.3f, p.y));
@@ -254,8 +218,8 @@ namespace DroneSandbox
             float Height(float x, float z)
             {
                 Vector2 local = new Vector2(x, z) - FarTerrain.Origin;
-                var stand = SectorForest.At(x, z);
-                return FarScatter.GroundAt(local) + Relief(stand, x, z);
+                var stand = ForestPattern.At(x, z);
+                return FarScatter.GroundAt(local) + (FarScatter.InSector(local) ? 0f : Relief(stand, x, z));
             }
 
             // Distant geometry averages whole stands; sampling individual glades would make distant dots again.
@@ -267,10 +231,10 @@ namespace DroneSandbox
                     for (int i = -1; i <= 1; i++)
                     {
                         float sx = x + i * data.step * 0.5f, sz = z + j * data.step * 0.5f;
-                        var sample = SectorForest.At(sx, sz);
+                        var sample = ForestPattern.At(sx, sz);
                         height += ForestPattern.Canopy(sample, sx, sz);
                     }
-                float edge = SectorForest.At(x, z).cover;
+                float edge = ForestPattern.Edge(x, z);
                 return height / 9f * edge - (1f - edge) * 1.7f;
             }
             // Entirely empty triangles stay absent; marginal vertices sink through the terrain at zero cover.
@@ -313,12 +277,11 @@ namespace DroneSandbox
                 for (int i = 0; i <= 2; i++)
                 {
                     float x = p.x + i * 16, z = p.y + j * 16;
-                    float edge = SectorForest.At(x, z).cover, glade = ForestPattern.Glade(x, z);
+                    float edge = ForestPattern.Edge(x, z), glade = ForestPattern.Glade(x, z);
                     lo = Mathf.Min(lo, edge); hi = Mathf.Max(hi, edge);
                     gladeLo = Mathf.Min(gladeLo, glade); gladeHi = Mathf.Max(gladeHi, glade);
                 }
             if (hi > 0.01f && lo < 0.98f && hi - lo > 0.12f) return 8;
-            if (hi > 0.01f && SectorForest.Contains(p - SectorForest.Origin)) return 16;
             return hi > 0.01f && gladeHi - gladeLo > 0.12f ? 16 : 32;
         }
 
@@ -393,9 +356,9 @@ namespace DroneSandbox
                         for (int s = 0; s < 4; s++)
                         {
                             float sx = wx + ((s & 1) - 0.5f) * data.step, sz = wz + ((s >> 1) - 0.5f) * data.step;
-                            var stand = SectorForest.At(sx, sz);
+                            var stand = ForestPattern.At(sx, sz);
                             stand.radius = 4.6f;
-                            Color sample = Color.Lerp(ForestPalette.Ground, ForestPalette.Linear(stand), stand.cover);
+                            Color sample = Color.Lerp(ForestPalette.Ground, ForestPalette.Linear(stand), ForestPattern.Edge(sx, sz));
                             c = Add(c, sample * 0.25f);
                         }
                         pixels[j * size + i] = c;
@@ -410,7 +373,7 @@ namespace DroneSandbox
                 for (int j = z0; j <= z1; j++)
                     for (int i = x0; i <= x1; i++)
                     {
-                        if (SectorForest.Tree(i, j, out Vector2 world, out var stand))
+                        if (ForestPattern.Tree(i, j, out Vector2 world, out var stand) && !FarScatter.InSector(world - FarTerrain.Origin))
                             Stamp(pixels, tops, size, pictureCorner, world, stand, i, j);
                         if ((i & 7) == 0) yield return null;
                     }
@@ -427,7 +390,7 @@ namespace DroneSandbox
                         Add(pixels[Mathf.Max(0, z - 1) * size + x], pixels[Mathf.Min(size - 1, z + 1) * size + x])) * 0.125f) * 0.9f;
                 }
                 float wx = pictureCorner.x + (x + 0.5f) * pixelSize, wz = pictureCorner.y + (z + 0.5f) * pixelSize;
-                float edge = SectorForest.At(wx, wz).cover;
+                float edge = ForestPattern.Edge(wx, wz);
                 if (edge < 0.95f) c = Color.Lerp(FarTerrain.CanopyGroundColour(wx, wz), c, Mathf.SmoothStep(0f, 1f, edge / 0.65f));
                 c.a = 1f; data.pixels[i] = c.gamma;
                 if ((i & 255) == 0) yield return null;
