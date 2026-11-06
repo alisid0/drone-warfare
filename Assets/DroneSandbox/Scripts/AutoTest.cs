@@ -745,6 +745,9 @@ namespace DroneSandbox
                           $"{Screen.width}x{Screen.height}, {SystemInfo.graphicsDeviceName}");
             log.WriteLine($"World forest over the flight: {ForestLine()}");
             log.WriteLine($"forest flight screen: effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, near coarse {ForestHlod.NearCoarseBlocks}, CPU mean {FarScatter.MeanMs:F3} ms, worst {FarScatter.WorstMs:F3} ms, samples {FarScatter.Samples}");
+            log.WriteLine($"forest flight budget: fast frames {FarScatter.FastFrames}, samples {FarScatter.Samples}, peak per-camera full/reduced/card {FarScatter.PeakFullTrees}/{FarScatter.PeakReducedTrees}/{FarScatter.PeakCards}, peak tree triangles {FarScatter.PeakTreeTriangles}; selection start/complete/cancel {FarScatter.SelectionStarts}/{FarScatter.SelectionCompletes}/{FarScatter.SelectionCancels}");
+            log.WriteLine($"forest flight phases: generation {FarScatter.GenerationMeanMs:F3}, selection {FarScatter.SelectionMeanMs:F3}, submission {FarScatter.SubmissionMeanMs:F3}, canopy {FarScatter.CanopyMeanMs:F3} ms mean/frame (all cameras)");
+            log.WriteLine($"forest flight canopy: build mean {ForestHlod.BuildMeanMs:F3} ms, worst {ForestHlod.BuildWorstMs:F3} ms, refinements {ForestHlod.RefinementsStarted}, cancelled {ForestHlod.CancelledBuilds}, deferred frames {ForestHlod.DeferredFrames}");
             if (FarScatter.Samples > 0 && FarScatter.MeanMs > 1f) errors++;
             if (!lowField || !lowForest || FarDetail.Live > FarDetail.MaxTiles || FarDetail.Committed == 0 ||
                 FarDetail.WorstCommitMs > 2.0 || meanCommit > 1.0 || p95 > 16.7f) errors++;
@@ -1278,6 +1281,7 @@ namespace DroneSandbox
                 log.WriteLine($"  {ForestLine()}");
                 log.WriteLine($"  forest screen: full/reduced/card {FarScatter.FullTreesDrawn}/{FarScatter.ReducedTreesDrawn}/{FarScatter.CardTreesDrawn}, effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, crown reach {FarScatter.CrownReach:F0} m, ready radius {FarScatter.ReadyRadius:F0} m; missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, near coarse {ForestHlod.NearCoarseBlocks}, build {ForestHlod.BuildMs:F3} ms");
                 log.WriteLine($"  forest materials: fallbacks {ForestMaterials.FallbackCount}, remapped variants {ForestMaterials.RemappedCount}; last fallback {ForestMaterials.LastFallback}");
+                log.WriteLine($"  forest motion: camera {FarScatter.CameraSpeed:F1} m/s, canopy slice {ForestHlod.SliceBudgetMs:F2} ms; recipe cells {SectorForest.LocalCells.Count}, logical stems {SectorForest.Stems.Count}, woods build {SectorForest.BuildMilliseconds:F1} ms");
                 photo.Exit();
                 // The mission's targets from the game camera.
                 DayNight.Instance.SetTime(game.Mission.startHour, 0f);
