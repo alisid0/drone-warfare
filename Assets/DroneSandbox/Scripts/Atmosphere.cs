@@ -45,7 +45,11 @@ namespace DroneSandbox
             volume.priority = 10f;
             volume.sharedProfile = profile;
             ConfigureScenery(volume.profile); // also update existing saved profiles, without changing the asset
+            Profile = volume.profile;
         }
+
+        // The game camera's live copy of the profile (the autotest switches effects in it to compare them).
+        public static VolumeProfile Profile { get; private set; }
 
         // Temporal anti-aliasing, and water, clouds, volumetric fog, reflections, ambient occlusion, contact shadows
         // and global illumination (only switched on by photo mode's volume) turned on for this camera whatever the
@@ -90,6 +94,7 @@ namespace DroneSandbox
                 Set(FrameSettingsField.SSAO, q >= 1);
                 Set(FrameSettingsField.Volumetrics, q >= 2);
                 Set(FrameSettingsField.VolumetricClouds, q >= 1);
+                Set(FrameSettingsField.SSGI, q >= 2);
                 data.allowDynamicResolution = Settings.Upscaling;
                 data.allowDeepLearningSuperSampling = true;
                 data.deepLearningSuperSamplingUseCustomQualitySettings = true;
@@ -97,6 +102,7 @@ namespace DroneSandbox
                     : q == 1 ? UnityEngine.NVIDIA.DLSSQuality.Balanced : UnityEngine.NVIDIA.DLSSQuality.MaximumPerformance);
             }
             QualitySettings.lodBias = q == 0 ? 0.65f : q == 1 ? 0.85f : 1f; // Art calibrates tree transitions at 45 degrees and bias 1
+            if (RenderSettings.sun != null) ApplySunQuality(RenderSettings.sun.GetComponent<HDAdditionalLightData>());
             if (Ground.Current != null) Ground.Current.detailObjectDensity = GrassDensity;
         }
 
@@ -117,6 +123,20 @@ namespace DroneSandbox
             sun.transform.rotation = Quaternion.Euler(36f, -35f, 0f);
             sun.shadows = LightShadows.Soft;
             RenderSettings.sun = sun;
+            ApplySunQuality(sun.GetComponent<HDAdditionalLightData>());
+        }
+
+        // The sun's shadow map: HDRP's default 512 texels a cascade left a tree's shadow a soft blob and a house's a
+        // smudge; 2048 at High draws trunks, eaves and vehicles crisply (1024 at Medium, 512 at Low). It also casts
+        // contact shadows (the profile's ContactShadows; drawn at High).
+        static void ApplySunQuality(HDAdditionalLightData light)
+        {
+            if (light == null) return;
+            int q = Settings.Quality;
+            light.SetShadowResolutionOverride(true);
+            light.SetShadowResolution(q == 2 ? 2048 : q == 1 ? 1024 : 512);
+            light.useContactShadow.useOverride = true;
+            light.useContactShadow.@override = true;
         }
 
         // Creates the shared editor/runtime environment settings, including the bounded scenery distances.
@@ -156,9 +176,31 @@ namespace DroneSandbox
             var indirect = Get<IndirectLightingController>(profile);
             indirect.indirectDiffuseLightingMultiplier.Override(2f);
             indirect.reflectionLightingMultiplier.Override(1.2f);
+            // Ambient occlusion out to 2.5 m, so from a drone's height the ground still darkens round a trunk, under
+            // a hedge and along a wall's foot (1.5 m showed only up close).
             var ao = Get<ScreenSpaceAmbientOcclusion>(profile);
-            ao.intensity.Override(0.8f);
-            ao.radius.Override(1.5f);
+            ao.intensity.Override(1f);
+            ao.radius.Override(2.5f);
+            // Contact shadows: the thin dark line where a wheel, a wall or a trunk meets the ground, finer than the
+            // sun's shadow map can draw. Traced on screen out to 200 m, for low cameras and photo mode (High only).
+            var contact = Get<ContactShadows>(profile);
+            contact.enable.Override(true);
+            contact.length.Override(0.35f);
+            contact.distanceScaleFactor.Override(0.6f);
+            contact.maxDistance.Override(200f);
+            contact.fadeDistance.Override(40f);
+            contact.opacity.Override(0.9f);
+            // Normal maps and ambient occlusion shadow themselves in sunlight: the leaves in the forest floor, the
+            // ridges of ploughed soil and the grain of rock stand up from the ground instead of lying painted on it.
+            Get<MicroShadowing>(profile).enable.Override(true);
+            // Sunlight bouncing off the ground into the shade: green light under trees beside a sunlit field, warm
+            // fill on a wall facing a bright yard. Traced on screen at half resolution and the low tier, and only at
+            // High graphics (ApplyQuality); photo mode adds its own at full quality.
+            var bounce = Get<GlobalIllumination>(profile);
+            bounce.enable.Override(true);
+            bounce.tracing.Override(RayCastingMode.RayMarching);
+            bounce.fullResolutionSS.Override(false);
+            bounce.quality.Override((int)ScalableSettingLevelParameter.Level.Low);
             // Reflections traced on screen for anything about as glossy as wet concrete and up, so the lake (glossy
             // out to the far shore, see Water) mirrors the trees and hills across it, not just the sky.
             var ssr = Get<ScreenSpaceReflection>(profile);

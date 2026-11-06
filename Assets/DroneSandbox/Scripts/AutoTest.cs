@@ -101,6 +101,7 @@ namespace DroneSandbox
             rts.LookAt(game.basePosition, 42f * Scale.Camera, 20f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02a_base");
+            yield return LightingCheck(game, rts);
 
             // Close-up of the enemy HQ, to check the vehicle models, terrain and sky.
             rts.LookAt(game.enemyHqPosition, 38f * Scale.Camera, 210f);
@@ -1991,6 +1992,46 @@ namespace DroneSandbox
 
         // Saves exactly the frame being shown now. (CaptureScreenshot writes a later frame, which came out showing
         // the next camera position.)
+        // The same two views (the grass by the base, the woods beside it) with each lighting effect switched off in
+        // turn, to see what each one adds or spoils: bounce light, contact shadows, micro-shadows, the wider ambient
+        // occlusion, and all of them with the old 512 shadow map ("before").
+        IEnumerator LightingCheck(SandboxGame game, RtsController rts)
+        {
+            var profile = Atmosphere.Profile;
+            if (profile == null) { log.WriteLine("Lighting check: no profile"); yield break; }
+            profile.TryGet(out UnityEngine.Rendering.HighDefinition.GlobalIllumination bounce);
+            profile.TryGet(out UnityEngine.Rendering.HighDefinition.ContactShadows contact);
+            profile.TryGet(out UnityEngine.Rendering.HighDefinition.MicroShadowing micro);
+            profile.TryGet(out UnityEngine.Rendering.HighDefinition.ScreenSpaceAmbientOcclusion ao);
+            var sun = RenderSettings.sun != null ? RenderSettings.sun.GetComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalLightData>() : null;
+            if (bounce == null || contact == null || micro == null || ao == null || sun == null) { log.WriteLine("Lighting check: missing effects"); yield break; }
+            float radius = ao.radius.value, intensity = ao.intensity.value;
+            void Set(bool gi, bool cs, bool ms, bool wideAo, bool sharp)
+            {
+                bounce.enable.value = gi; contact.enable.value = cs; micro.enable.value = ms;
+                ao.radius.value = wideAo ? radius : 1.5f; ao.intensity.value = wideAo ? intensity : 0.8f;
+                sun.SetShadowResolution(sharp ? 2048 : 512);
+            }
+            var variants = new (string name, bool gi, bool cs, bool ms, bool ao, bool sharp)[]
+            {
+                ("all", true, true, true, true, true), ("no_bounce", false, true, true, true, true), ("no_contact", true, false, true, true, true),
+                ("no_micro", true, true, false, true, true), ("narrow_ao", true, true, true, false, true), ("before", false, false, false, false, false),
+            };
+            var views = new (string name, float distance, float yaw)[] { ("grass", 18f * Scale.Lens, 30f), ("woods", 42f * Scale.Camera, 20f) };
+            foreach (var view in views)
+            {
+                rts.LookAt(game.basePosition, view.distance, view.yaw);
+                foreach (var v in variants)
+                {
+                    Set(v.gi, v.cs, v.ms, v.ao, v.sharp);
+                    yield return new WaitForSecondsRealtime(1.5f); // temporal AA and the bounce light settle
+                    yield return Shot($"90_light_{view.name}_{v.name}");
+                }
+            }
+            Set(true, true, true, true, true);
+            Atmosphere.ApplyQuality(Camera.main);
+        }
+
         IEnumerator Shot(string name)
         {
             yield return new WaitForEndOfFrame();
