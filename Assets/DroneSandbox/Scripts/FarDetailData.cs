@@ -94,6 +94,15 @@ namespace DroneSandbox
             return Mix(Mix(heights[k], heights[k + 1], gx - i), Mix(heights[k + count], heights[k + count + 1], gx - i), gz - j);
         }
 
+        // How low the ground lies in the lie of the land (0 on rises and slopes), in the units of the sector's own hollow
+        // depth (Ground.LowAt): valley floors and broad field bottoms, the only drainage lines the 32 m world heights hold.
+        // Their dips are gentle (tenths of a metre over 200 m), so they count several times a sector hollow's metres.
+        public float Low(float x, float z)
+        {
+            float around = (Height(x + 200f, z) + Height(x - 200f, z) + Height(x, z + 200f) + Height(x, z - 200f)) * .25f;
+            return Math.Max(0f, around - Height(x, z)) * 2.5f;
+        }
+
         // The same nearest cover sample as the macro picture, without any native engine calls.
         public Cover CoverAt(float x, float z)
         {
