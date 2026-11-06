@@ -26,12 +26,17 @@ namespace DroneSandbox
                 int nu = Mathf.CeilToInt((f.halfLength + f.clearance) * 2f / 24f), nv = Mathf.CeilToInt((f.halfWidth + f.clearance) * 2f / 24f);
                 for (int j = 0; j <= nv; j++) for (int i = 0; i <= nu; i++)
                 {
-                    Vector2 p = f.Area.Point(Mathf.Lerp(-f.halfLength - f.clearance, f.halfLength + f.clearance, i / (float)nu),
-                        Mathf.Lerp(-f.halfWidth - f.clearance, f.halfWidth + f.clearance, j / (float)nv));
+                    float u = Mathf.Lerp(-f.halfLength - f.clearance, f.halfLength + f.clearance, i / (float)nu);
+                    float v = Mathf.Lerp(-f.halfWidth - f.clearance, f.halfWidth + f.clearance, j / (float)nv);
+                    Vector2 p = f.Area.Point(u, v);
                     samples++;
                     if (WorldPlan.NearWater(p, 12f)) return "LANDMARK FAIL: wet footprint " + f.id;
                     Cover c = WorldPlan.CoverAt(p.x, p.y);
-                    if (c == Cover.Forest || c == Cover.Farmland || c == Cover.Town || c == Cover.Village) return "LANDMARK FAIL: occupied cover " + f.id;
+                    // Fields may run up to the compound's worn margin (StampFeature keeps them round it); inside the fence,
+                    // more than a cover cell in, and anywhere in the clearance for woods and settlements, the land is clear.
+                    float outside = Mathf.Max(Mathf.Abs(u) - f.halfLength, Mathf.Abs(v) - f.halfWidth);
+                    if (c == Cover.Forest || c == Cover.Town || c == Cover.Village || c == Cover.Farmland && outside < -2f * WorldPlan.HeightStep)
+                        return "LANDMARK FAIL: occupied cover " + f.id;
                     if (f.Area.Contains(p) && Mathf.Abs(WorldPlan.Height(p.x, p.y) - f.elevation) > 0.01f) return "LANDMARK FAIL: ungraded footprint " + f.id;
                     if (!WorldPlan.FeatureReserved(p, 0.1f)) return "LANDMARK FAIL: spatial index " + f.id;
                     if (ForestPattern.Edge(p.x, p.y) > 0f) return "LANDMARK FAIL: forest encroachment " + f.id;

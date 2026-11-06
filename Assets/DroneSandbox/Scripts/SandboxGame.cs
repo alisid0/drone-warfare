@@ -433,6 +433,22 @@ namespace DroneSandbox
             return true;
         }
 
+        // How fast the clock may run when asked for `wanted`: at 4x a Swift crosses a 512 m detail tile in about two
+        // seconds, so while the ground ahead of the followed drone isn't streamed yet (FarDetail.ReadyAhead, in real
+        // seconds) it runs at half speed, then 1x when the gap is under half a second, and catches up above three seconds
+        // (ChatGPT, critique 20). Only the pace changes; the simulation is the same.
+        public float AllowedSpeed(float wanted)
+        {
+            if (wanted <= 1f) return wanted;
+            float ready = FarDetail.ReadyAhead;
+            if (ready < 0.5f) streamingCap = 1f;
+            else if (ready < 1.5f) streamingCap = Mathf.Min(streamingCap, Mathf.Max(1f, wanted * 0.5f));
+            else if (ready > 3f) streamingCap = wanted;
+            return Mathf.Min(wanted, streamingCap);
+        }
+
+        float streamingCap = 4f;
+
         // Something the player has to see at normal speed: fast-forward drops back to 1x, saying why.
         public void SlowDown(string why)
         {
@@ -588,6 +604,12 @@ namespace DroneSandbox
             {
                 string threat = Threat();
                 if (threat != null) SlowDown(threat);
+            }
+            // Fast-forward holds back while the streamed ground ahead of the followed drone isn't ready yet.
+            if (GameSpeed > 1 && !Paused && !UiBlocking && !Loading && Time.timeScale > 0f)
+            {
+                float allowed = AllowedSpeed(GameSpeed);
+                if (!Mathf.Approximately(Time.timeScale, allowed)) Time.timeScale = allowed;
             }
             if (Mode == GameMode.Mission) Coach.Tick(this);
             if (Mode != GameMode.Mission || BriefingOpen || Result != MissionResult.None) return;
