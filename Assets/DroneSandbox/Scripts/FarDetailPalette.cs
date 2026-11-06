@@ -28,7 +28,22 @@ namespace DroneSandbox
         // The standard sRGB transfer, with no native engine calls on a tile worker.
         public static float Linear(float x) => x <= .04045f ? x / 12.92f : (float)Math.Pow((x + .055f) / 1.055f, 2.4);
 
-        // Quantize a linear channel once at the end of painting.
-        static byte Byte(float x) => (byte)Math.Max(0, Math.Min(255, (int)Math.Round(255f * (x <= .0031308f ? 12.92f * x : 1.055f * (float)Math.Pow(x, 1f / 2.4f) - .055f))));
+        static readonly byte[] encoding = Encoding();
+
+        // A 64 KiB immutable transfer table replaces fifty million Pow calls in a 4096-square world picture.
+        // Linear quantization changes at most one output byte, including the steep near-black transfer segment.
+        static byte Byte(float x) => encoding[(int)(Math.Max(0f, Math.Min(1f, x)) * 65535f + .5f)];
+
+        // Build once before any worker reads the table; tiles, regional pages and the world use identical rounding.
+        static byte[] Encoding()
+        {
+            var result = new byte[65536];
+            for (int i = 0; i < result.Length; i++)
+            {
+                float x = i / 65535f;
+                result[i] = (byte)Math.Max(0, Math.Min(255, (int)Math.Round(255f * (x <= .0031308f ? 12.92f * x : 1.055f * (float)Math.Pow(x, 1f / 2.4f) - .055f))));
+            }
+            return result;
+        }
     }
 }

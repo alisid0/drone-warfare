@@ -80,11 +80,14 @@ namespace DroneSandbox
             c = Blend(c, WaterColour, BandCoverage(-bank, riverWidth, pixel));
             Road(x, z, lanes, out float edge, out int kind, out float roadWidth);
             c = Blend(c, FarDetailPalette.Means[4], BandCoverage(2f - edge, roadWidth + 2f, pixel));
-            Vector3 road = kind == 0 ? FarDetailPalette.Decode(C(78, 78, 80)) : FarDetailPalette.Means[2];
+            Vector3 road = kind == 0 ? RoadColour : FarDetailPalette.Means[2];
             return Blend(c, road, BandCoverage(-edge, roadWidth, pixel));
         }
 
         static readonly Vector3 WaterColour = FarDetailPalette.Decode(new Color32(54, 82, 78, 255));
+        // Mono cannot hoist these three-channel Pow transfers out of sixteen million pixel queries.
+        static readonly Vector3 RoadColour = FarDetailPalette.Decode(C(78, 78, 80));
+        static readonly Vector3 HedgeColour = FarDetailPalette.Decode(C(46, 62, 36));
 
         // The ground of a wood seen from above, between and under its crowns: half the sector's litter, half shaded damp
         // grass (sRGB about 63, 73, 50, near ChatGPT's dense-canopy shadow). Plain litter showed brown halos round the
@@ -171,7 +174,7 @@ namespace DroneSandbox
             float projection = f.projection;
             float crop = Coverage(f.side, pixel * projection) * Coverage(f.end, pixel * projection);
             float side = BandCoverage(-f.side - 1.5f, 1.5f, pixel * projection);
-            Vector3 hedge = FarDetailPalette.Decode(C(46, 62, 36));
+            Vector3 hedge = HedgeColour;
             Vector3 margin = Blend(FarDetailPalette.Means[4], hedge, f.hedge ? side * .6f : 0f);
             return Blend(margin, c, crop);
         }
@@ -202,7 +205,7 @@ namespace DroneSandbox
             Vector3 c = Blend(grass, FarDetailPalette.Means[(hp & 1) == 0 ? 1 : 4], garden * .45f);
             c = Blend(c, FarDetailPalette.Means[2], yard * (town ? .8f : .5f));
             float hedge = Math.Max(BandCoverage(.7f - Math.Min(frontage, pitch - frontage), .7f, pixel), BandCoverage(.7f - Math.Abs(depth - back), .7f, pixel));
-            return Blend(c, FarDetailPalette.Decode(C(46, 62, 36)), hedge * occupied * .6f);
+            return Blend(c, HedgeColour, hedge * occupied * .6f);
         }
 
         // Exposed for the deterministic field/mask harness.
