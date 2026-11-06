@@ -19,11 +19,12 @@ namespace DroneSandbox
         struct Grove
         {
             public Vector2 center;
-            public float radius, stretch, angle;
+            public float radius, stretch, cosine, sine, reach;
         }
 
         static readonly List<Stem> stems = new List<Stem>();
-        static readonly List<Grove> groves = new List<Grove>();
+        const int GroveCell = 64;
+        static readonly Dictionary<long, List<Grove>> groveCells = new Dictionary<long, List<Grove>>();
         // Cached bounds let the renderer find small recipe groves without scanning empty world candidate cells.
         public sealed class LocalCell
         {
@@ -41,12 +42,16 @@ namespace DroneSandbox
         public static int Version { get; private set; }
         public static bool Ready { get; private set; }
         public static double BuildMilliseconds { get; private set; }
+        public static double StemsMilliseconds { get; private set; }
+        public static double IndicesMilliseconds { get; private set; }
+        public static double CanopyMilliseconds { get; private set; }
         public static List<ForestHlod.Data> PreparedCanopy { get; private set; }
 
         // Drop sector ownership before planting gardens, so stale logical trees cannot exclude the next sector.
         public static void Reset()
         {
-            Ready = false; indices = null; stems.Clear(); groves.Clear(); localCells.Clear(); PreparedCanopy = null; Version++;
+            Ready = false; indices = null; stems.Clear(); groveCells.Clear(); localCells.Clear(); PreparedCanopy = null; Version++;
+            BuildMilliseconds = StemsMilliseconds = IndicesMilliseconds = CanopyMilliseconds = 0;
         }
 
         // Populate every accepted stem, without a render budget or a GameObject; reuse the floor's existing input.
@@ -75,6 +80,7 @@ namespace DroneSandbox
                     candidates[row * columns + i - firstX] = new Stem { position = new Vector3(p.x, 0f, p.y), stand = stand, i = i, j = j };
                 }
             });
+            StemsMilliseconds = timer.Elapsed.TotalMilliseconds;
             // Stable row order makes thread scheduling irrelevant. The pattern already enforces mutual spacing.
             for (int k = 0; k < candidates.Length; k++)
             {
@@ -97,8 +103,10 @@ namespace DroneSandbox
             foreach (var stem in stems) Undergrowth.NoteTree(new Vector2(stem.position.x, stem.position.z));
             // Publish occupancy only after all indices and stems exist; renderers invalidate any pre-build cache.
             Ready = true; Version++;
+            IndicesMilliseconds = timer.Elapsed.TotalMilliseconds - StemsMilliseconds;
             PreparedCanopy = PrepareCanopy();
             BuildMilliseconds = timer.Elapsed.TotalMilliseconds;
+            CanopyMilliseconds = BuildMilliseconds - StemsMilliseconds - IndicesMilliseconds;
         }
 
         // Stand-scale relief is ready with the sector, so its first frame has the same age zones as its trees.
@@ -114,9 +122,18 @@ namespace DroneSandbox
                 // World stands start at 32 m; recipe groves still resolve at 4 m before their floor is painted.
                 var data = new ForestHlod.Data { corner = new Vector2(i * ForestHlod.BlockSize - WorldPlan.Half, j * ForestHlod.BlockSize - WorldPlan.Half),
                     step = 32, local = MapLayout.Plan.world == null };
-                var build = ForestHlod.Build(data, null); while (build.MoveNext()) { }
+                if (data.local) ForestHlod.SampleGround(data);
+                else { var build = ForestHlod.Build(data, null); while (build.MoveNext()) { } }
                 result.Add(data);
             }
+            if (MapLayout.Plan.world == null)
+                System.Threading.Tasks.Parallel.For(0, result.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 4 }, k =>
+                {
+                    // Terrain is already sampled; each worker owns its geometry, caches and colour array until joined.
+                    var data = result[k];
+                    var build = ForestHlod.Build(data, null); while (build.MoveNext()) { }
+                    data.sampledGround = null;
+                });
             return result;
         }
 
@@ -174,6 +191,23 @@ namespace DroneSandbox
             return top;
         }
 
+        // Skip only provably empty recipe quads; keep crop seams and special reserves on the exact sampling path.
+        public static bool MayHaveCanopy(Vector2 corner, float size)
+        {
+            var plan = MapLayout.Plan;
+            float half = Ground.Size * 0.5f;
+            if (!Ready || plan.world != null || (plan.kind == SectorKind.DeepForest && plan.reservedFeatures.Count > 0)
+                || corner.x < -half || corner.y < -half || corner.x + size >= half || corner.y + size >= half) return true;
+            int x0 = Mathf.FloorToInt(corner.x / GroveCell), x1 = Mathf.FloorToInt((corner.x + size) / GroveCell);
+            int z0 = Mathf.FloorToInt(corner.y / GroveCell), z1 = Mathf.FloorToInt((corner.y + size) / GroveCell);
+            for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++)
+                if (groveCells.TryGetValue(((long)x << 32) ^ (uint)z, out var nearby))
+                    foreach (var grove in nearby)
+                        if (corner.x <= grove.center.x + grove.reach && corner.x + size >= grove.center.x - grove.reach
+                            && corner.y <= grove.center.y + grove.reach && corner.y + size >= grove.center.y - grove.reach) return true;
+            return false;
+        }
+
         // HLOD uses the same glades, local reserves and species as its individual crowns.
         public static ForestPattern.Stand At(float x, float z)
         {
@@ -193,14 +227,16 @@ namespace DroneSandbox
             bool core = plan.kind == SectorKind.DeepForest && plan.reservedFeatures.Count > 0 && plan.reservedFeatures[0].Contains(p);
             float edge = 0f;
             if (plan.world != null) edge = ForestPattern.Edge(p.x + Origin.x, p.y + Origin.y);
-            else foreach (var grove in groves)
+            else if (groveCells.TryGetValue(((long)Mathf.FloorToInt(p.x / GroveCell) << 32) ^ (uint)Mathf.FloorToInt(p.y / GroveCell), out var nearby))
+            {
+                float ripple = (ForestPattern.Noise(p.x + Origin.x, p.y + Origin.y, 19f, 95) - 0.5f) * 14f;
+                foreach (var grove in nearby)
                 {
                     Vector2 d = p - grove.center;
-                    float ca = Mathf.Cos(grove.angle), sa = Mathf.Sin(grove.angle);
-                    float u = (d.x * ca + d.y * sa) / grove.stretch, v = (d.y * ca - d.x * sa) * grove.stretch;
-                    float ripple = (ForestPattern.Noise(p.x + Origin.x, p.y + Origin.y, 19f, 95) - 0.5f) * 14f;
+                    float u = (d.x * grove.cosine + d.y * grove.sine) / grove.stretch, v = (d.y * grove.cosine - d.x * grove.sine) * grove.stretch;
                     edge = Mathf.Max(edge, Mathf.SmoothStep(0f, 1f, (grove.radius + ripple - Mathf.Sqrt(u * u + v * v)) / 25f));
                 }
+            }
             if (core)
             {
                 var a = plan.reservedFeatures[0];
@@ -249,9 +285,23 @@ namespace DroneSandbox
                 if (isOuter ? outer >= outerWant : inner >= innerWant) continue;
                 if (!MapLayout.IsWild(p, 3f)) continue;
                 if (isOuter) outer++; else inner++;
-                groves.Add(new Grove { center = p,
-                    radius = Mathf.Min(Scale.D((isOuter ? 16f : 8f) + (float)rng.NextDouble() * (isOuter ? 14f : 9f)), Ground.Size * 0.075f),
-                    stretch = 1f + (float)rng.NextDouble() * 0.5f, angle = (float)rng.NextDouble() * Mathf.PI });
+                float radius = Mathf.Min(Scale.D((isOuter ? 16f : 8f) + (float)rng.NextDouble() * (isOuter ? 14f : 9f)), Ground.Size * 0.075f);
+                float stretch = 1f + (float)rng.NextDouble() * 0.5f, angle = (float)rng.NextDouble() * Mathf.PI;
+                IndexGrove(new Grove { center = p, radius = radius, stretch = stretch, cosine = Mathf.Cos(angle), sine = Mathf.Sin(angle),
+                    reach = (radius + 7f) * stretch + 6f });
+            }
+        }
+
+        // Cache immutable neighbours before workers start; include the 7 m ripple and the largest (<6 m) crown.
+        static void IndexGrove(Grove grove)
+        {
+            int x0 = Mathf.FloorToInt((grove.center.x - grove.reach) / GroveCell), x1 = Mathf.FloorToInt((grove.center.x + grove.reach) / GroveCell);
+            int z0 = Mathf.FloorToInt((grove.center.y - grove.reach) / GroveCell), z1 = Mathf.FloorToInt((grove.center.y + grove.reach) / GroveCell);
+            for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++)
+            {
+                long key = ((long)x << 32) ^ (uint)z;
+                if (!groveCells.TryGetValue(key, out var nearby)) groveCells.Add(key, nearby = new List<Grove>());
+                nearby.Add(grove);
             }
         }
     }
