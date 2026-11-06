@@ -429,7 +429,7 @@ namespace DroneSandbox
         void Abort()
         {
             if (incoming != null) pool.Push(incoming);
-            incoming = outgoing = null; ready = null; sampling = false; roughness = null; coverPositions = null; changed.Clear();
+            incoming = outgoing = null; ready = null; sampling = false; roughness = null; changed.Clear();
         }
 
         // Enable at most one coarser collider per frame and remove distant ones without recooking.
