@@ -94,7 +94,7 @@ namespace DroneSandbox
             {
                 garden.Coordinates(new Vector2(x, z), out float u, out float v);
                 int ground = garden.GroundMaterial(u, v);
-                layer = ground == 0 || ground == 3 ? 4 : 2; angle = 0f;
+                layer = ground == 0 || ground == 3 || ground == VillagePlot.Meadow ? 4 : 2; angle = 0f;
                 strength = ground == 2 ? (byte)50 : (byte)255;
             }
             if (bank < 4f) layer = 2;

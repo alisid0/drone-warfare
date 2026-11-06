@@ -37,8 +37,9 @@ namespace DroneSandbox
             return new[] { new Vector2(-h, 0), new Vector2(h, 0), new Vector2(hi, depth), new Vector2(lo, depth) };
         }
 
-        // Ground use codes shared by the painters and the sector: 0 lawn, 1 soil, 2 gravel, 3 rough, 4 oil stain, 5 mud.
-        public const int Lawn = 0, Soil = 1, Gravel = 2, Rough = 3, Stain = 4, Mud = 5;
+        // Ground use codes shared by the painters and the sector: 0 lawn, 1 soil, 2 gravel, 3 rough, 4 oil stain, 5 mud,
+        // 6 uncut hay meadow (paler than a grazed lawn).
+        public const int Lawn = 0, Soil = 1, Gravel = 2, Rough = 3, Stain = 4, Mud = 5, Meadow = 6;
 
         // Farms, sheds and about half the houses have a drive; town land uses and the village fringe have none of their own.
         public bool HasDrive => (landUse == 0 || landUse == 5) && (farm || shed || (identity & 1) == 0);
@@ -111,8 +112,9 @@ namespace DroneSandbox
             return (new Vector2(u, v) - a - d * t).sqrMagnitude < .2f;
         }
 
-        // Paddocks are grazed with tussocks and a trodden gateway; orchards keep rough grass under their rows; rough
-        // grass is an irregular patch that fades out before the plot's edge, so no rectangle shows.
+        // Paddocks are grazed short with tussocks, left for hay (paler, cut late) or rough grazing gone to thistle, each
+        // with a trodden gateway; orchards keep rough grass under their rows; vegetable plots are beds of bare soil between
+        // grass paths with a compost corner; rough grass is an irregular patch that fades out before the plot's edge.
         int FringeUse(float u, float v)
         {
             float h = frontage * .5f, x = u + (identity % 97) * 3.1f, z = v + (identity >> 8) % 89 * 2.7f;
@@ -121,7 +123,18 @@ namespace DroneSandbox
                 Vector2 gate = new Vector2(h - 4f, 0f);
                 if ((new Vector2(u, v) - gate).sqrMagnitude < 26f) return Noise(x * .6f, z * .6f) < .45f ? Mud : Soil;
                 if (h - Math.Abs(u) < 1.2f || depth - v < 1.2f) return Rough;
+                int kind = (identity >> 5) % 3;
+                if (kind == 1) return Noise(x / 7f, z / 7f) > .78f ? Rough : Meadow;
+                if (kind == 2) return Noise(x / 3.4f, z / 3.4f) * .6f + Noise(x / 9f, z / 9f) * .4f > .48f ? Rough : Lawn;
                 return Noise(x / 2.6f, z / 2.6f) > .7f ? Rough : Lawn;
+            }
+            if (landUse == 9)
+            {
+                if (h - Math.Abs(u) < 1.5f || v < 1.5f || depth - v < 1.5f) return Lawn;
+                if (u < -h + 4.5f && v > depth - 5f) return Mud; // the compost heap and the shed's trodden corner
+                if (Math.Abs(u - (identity % 5 - 2) * 1.5f) < .6f) return Soil; // the path down the middle
+                float bed = (v - 1.5f) % 2.6f;
+                return bed < 1.7f && Noise(x / 5f, z / 5f) > .22f ? Soil : Lawn;
             }
             if (landUse == 7) return (u + h - 4f) % 7f < 1.6f && u + h > 2.5f && v > 2f && v < depth - 2f ? Rough : Lawn;
             float edge = Math.Min(h - Math.Abs(u), Math.Min(v, depth - v));
@@ -201,7 +214,8 @@ namespace DroneSandbox
             for (int j = -1; j <= 1; j += 2) for (int i = -1; i <= 1; i += 2)
             {
                 int use = WorkAt(u + i * q, v + j * q);
-                sum += use == Soil ? soil : use == Gravel ? gravel : use == Rough ? rough : use == Stain ? stain : use == Mud ? mud : lawn ?? grass;
+                sum += use == Soil ? soil : use == Gravel ? gravel : use == Rough ? rough : use == Stain ? stain : use == Mud ? mud
+                    : use == Meadow ? ((lawn ?? grass) + rough) * .5f : lawn ?? grass;
             }
             Vector3 colour = sum * .25f;
             float door = landUse < 6 ? FarDetailData.BandCoverage(pathWidth * .5f - Math.Abs(u), pathWidth * .5f, pixel)
