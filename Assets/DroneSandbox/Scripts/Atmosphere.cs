@@ -293,6 +293,7 @@ namespace DroneSandbox
             Recon.WeatherFactor = weather == Weather.Fog ? 0.6f : weather == Weather.Rain ? 0.8f : weather == Weather.Overcast ? 0.95f : 1f;
             SunScale = weather == Weather.Overcast ? 0.35f : weather == Weather.Rain ? 0.2f : weather == Weather.Fog ? 0.45f : 1f;
             Rain(weather == Weather.Rain);
+            RoadSurface.SetRain(weather == Weather.Rain);
             if (weather == Weather.Clear) return;
             var p = weatherVolume.sharedProfile;
             p.TryGet(out VolumetricClouds clouds);

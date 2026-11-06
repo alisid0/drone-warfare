@@ -1,0 +1,10 @@
+Wrote Ground/Farmland/Atmosphere patch and temporary compile copies; originals unchanged.
+  Determining projects to restore...
+  Restored C:\Users\ali10\Documents\DroneWarfare-world\Temp\roads\build\api.csproj (in 145 ms).
+  api -> C:\Users\ali10\Documents\DroneWarfare-world\Temp\roads\build\bin\Release\netstandard2.1\api.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.78

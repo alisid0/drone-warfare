@@ -50,7 +50,7 @@ namespace DroneSandbox
             root.SetParent(parent, false);
             foreach (var plot in MapLayout.Fields) BuildField(plot, root, rng);
             int useRenderers = FieldMargins.Build(root);
-            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count - useRenderers);
+            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count - useRenderers - RoadSurface.Renderers);
             int rows = Mathf.Min(480, remaining / 8);
             remaining -= rows;
             // Pay for every boundary's inexpensive silhouette first; fences and mature trees share what remains.
@@ -69,7 +69,7 @@ namespace DroneSandbox
                 int allowance = perField;
                 if (plot.crop == Crop.MownHay) PlaceBales(plot, root, rng, ref allowance);
             }
-            PoplarRows(root, rng, ref rows);
+            Roadside.Build(root, ref rows); // same avenue allowance, shared FBX instances
         }
 
         // ---- Fields ----
@@ -288,6 +288,8 @@ namespace DroneSandbox
             Vector2 opening = edge.hasGate ? edge.gate : FieldAppearance.Gate(edge.a, edge.b);
             float gate = Vector2.Dot(opening-edge.a, edge.b-edge.a) / Mathf.Max(.01f, length*length);
             if (Mathf.Abs(t - gate) * length < 2f + extra) return true;
+            foreach (var entry in RoadSurface.Entrances)
+                if ((edge.Point(t) - entry.gate).sqrMagnitude < (2f + extra) * (2f + extra)) return true;
             Vector2 p = edge.Point(t);
             return MapLayout.TrackField.Distance(p.x, p.y) < 2.2f + extra;
         }

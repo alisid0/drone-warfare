@@ -8,7 +8,7 @@ namespace DroneSandbox
     // Projects the immutable village plots into the playable crop, and gives legacy Operations the same plot data.
     internal static class VillageLayout
     {
-        // Sector-only road wander must not move the shared old street through an already planned property.
+        // Shared roads keep their exact world centreline, including rural stretches and sector clipping seams.
         public static void HoldFrontages(List<List<Vector2>> lines)
         {
             var plan = MapLayout.Plan;
@@ -19,20 +19,14 @@ namespace DroneSandbox
                 int k = plan.roads.IndexOf(road.points);
                 if (k < 0 || k >= lines.Count) continue;
                 var source = road.points;
-                for (int i = 0; i < lines[k].Count; i++)
+                var fixedLine = new List<Vector2>();
+                for (int i = 1; i < source.Length; i++)
                 {
-                    Vector2 p = lines[k][i];
-                    if (!MapLayout.DetailPlan.villages.Near(p + plan.world.center, 45f)) continue;
-                    float best = float.MaxValue; Vector2 nearest = p;
-                    for (int j = 1; j < source.Length; j++)
-                    {
-                        Vector2 a = source[j - 1], d = source[j] - a;
-                        float t = Mathf.Clamp01(Vector2.Dot(p - a, d) / Math.Max(.01f, d.sqrMagnitude));
-                        Vector2 q = a + d * t; float distance = (q - p).sqrMagnitude;
-                        if (distance < best) { best = distance; nearest = q; }
-                    }
-                    lines[k][i] = nearest;
+                    int steps = Math.Max(1, Mathf.CeilToInt(Vector2.Distance(source[i - 1], source[i]) / 2f));
+                    for (int j = 0; j < steps; j++) fixedLine.Add(Vector2.Lerp(source[i - 1], source[i], j / (float)steps));
                 }
+                if (source.Length > 0) fixedLine.Add(source[source.Length - 1]);
+                lines[k] = fixedLine;
             }
         }
 
@@ -43,8 +37,8 @@ namespace DroneSandbox
             if (index < plan.roads.Count)
                 foreach (var road in plan.world.roads)
                     if (ReferenceEquals(plan.roads[index], road.points))
-                        return road.kind == RoadClass.Highway ? 3.5f : road.kind == RoadClass.Track ? 1.5f : 2f;
-            return index < plan.roads.Count ? 1.5f : 2f;
+                        return RoadAppearance.HalfWidth(road.kind);
+            return RoadAppearance.HalfWidth(RoadLayout.Kind(index));
         }
 
         // The old town recipe creates a second unconnected town on reserved farmland. Replace only that scenery;

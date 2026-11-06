@@ -1,0 +1,41 @@
+[
+  {
+    "scene": "Main",
+    "layoutMs": 2259.2925,
+    "groundMs": 145.5409,
+    "roadMs": 35.7417,
+    "renderers": 4,
+    "triangles": 8268,
+    "gates": 6,
+    "trees": 67,
+    "poles": 36,
+    "furnitureRenderers": 327,
+    "peakMiB": 251
+  },
+  {
+    "scene": "River",
+    "layoutMs": 1924.4678,
+    "groundMs": 101.341,
+    "roadMs": 27.0318,
+    "renderers": 6,
+    "triangles": 17444,
+    "gates": 9,
+    "trees": 75,
+    "poles": 0,
+    "furnitureRenderers": 252,
+    "peakMiB": 278
+  },
+  {
+    "scene": "Village",
+    "layoutMs": 1848.3578,
+    "groundMs": 98.0841,
+    "roadMs": 28.0373,
+    "renderers": 6,
+    "triangles": 9918,
+    "gates": 8,
+    "trees": 20,
+    "poles": 16,
+    "furnitureRenderers": 132,
+    "peakMiB": 263
+  }
+]

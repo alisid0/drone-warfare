@@ -148,6 +148,7 @@ namespace DroneSandbox
         public static PathField RiverField { get; private set; }
         public static PathField RoadField { get; private set; }
         static float[] roadWidths;
+        public static RoadNetwork Roads { get; private set; }
 
         // Widths follow the prepared road's segment indices, making highway grading and painting cheap.
         public static float RoadWidth(int segment) => roadWidths != null && segment >= 0 && segment < roadWidths.Length
@@ -244,6 +245,7 @@ namespace DroneSandbox
             TrackLines = PlanTracks();
             VillageAccess.Preserve(TrackLines, true);
             TrackField = new PathField(TrackLines, 6f, Ground.Size);
+            Roads = RoadLayout.Capture();
             Lap("road fields");
 
             PlanFields(new System.Random(p.fieldSeed));
