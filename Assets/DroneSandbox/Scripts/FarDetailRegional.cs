@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Random = System.Random;
 using Stage = DroneSandbox.FarDetailTiming.Stage;
 
 namespace DroneSandbox
@@ -14,6 +15,8 @@ namespace DroneSandbox
         public static long GpuBytes => (Slots + 1) * FarDetailRegionData.Bytes;
         public int Committed { get; private set; }
         public double LastWorkerMs { get; private set; }
+        // A finished page waits for a texture stage; FarDetail then gives this queue a frame of its own.
+        public bool Pending => !disposed && array != null && (ready != null || worker != null && worker.IsCompleted);
         readonly FarDetailData plan;
         readonly Vector4[] pages = new Vector4[Slots];
         readonly Texture2DArray array;
@@ -54,7 +57,8 @@ namespace DroneSandbox
             Art.Discard(array); Art.Discard(upload);
         }
 
-        // FarDetail owns the one frame timer: a regional upload never shares a frame with a tile/collider API stage.
+        // FarDetail owns the one frame timer: a regional upload never shares a frame with a tile/collider API stage, but
+        // an idle queue may start its next worker on any frame, since busy tile streaming rarely leaves one free.
         public void Tick(Vector2 eye, bool commit)
         {
             long stamp = FarDetailTiming.Begin(); operation = Stage.RegionPlan;
@@ -67,7 +71,7 @@ namespace DroneSandbox
         {
             if (disposed || array == null) return;
             Shader.SetGlobalFloat("_FarRegionTime", Time.unscaledTime);
-            if (!commit) return;
+            if (!commit) { if (ready == null && worker == null && Time.unscaledTime >= retryAfter) Next(eye); return; }
             if (worker != null && worker.IsCompleted)
             {
                 if (worker.IsFaulted) { Debug.LogException(worker.Exception); retryAfter = Time.unscaledTime + 2f; }
@@ -81,6 +85,12 @@ namespace DroneSandbox
                 Upload(); return;
             }
             if (worker != null || Time.unscaledTime < retryAfter) return;
+            Next(eye);
+        }
+
+        // Launch the nearest wanted page that is not yet current, if any.
+        void Next(Vector2 eye)
+        {
             int cx = (int)Math.Floor(eye.x / 2048f), cz = (int)Math.Floor(eye.y / 2048f);
             int bx = 0, bz = 0; float best = float.MaxValue;
             for (int z = cz - 4; z <= cz + 4; z++) for (int x = cx - 4; x <= cx + 4; x++)
