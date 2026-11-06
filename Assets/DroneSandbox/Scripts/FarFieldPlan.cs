@@ -73,12 +73,16 @@ namespace DroneSandbox
                     if (pu < p.u0 - 3f || pu > p.u1 + 3f) continue;
                     float t = (pu - p.u0) / (p.u1 - p.u0);
                     float lo = p.a0 + (p.b0 - p.a0) * t, hi = p.a1 + (p.b1 - p.a1) * t;
-                    float side = Math.Min((pv - lo) * p.lowerNormal, (hi - pv) * p.upperNormal), end = Math.Min(pu - p.u0, p.u1 - pu);
+                    float lower = (pv - lo) * p.lowerNormal, upper = (hi - pv) * p.upperNormal, near = pu - p.u0, far = p.u1 - pu;
+                    float side = Math.Min(lower, upper), end = Math.Min(near, far);
                     float score = Math.Min(side, end);
                     if (score < nearest) continue;
                     nearest = score;
+                    int sideUse = FieldAppearance.EdgeUse(p.edges, lower <= upper ? 0 : 2), endUse = FieldAppearance.EdgeUse(p.edges, far <= near ? 1 : 3);
                     best = new FarDetailData.FieldSample { worldX = x, worldZ = z, use = p.use, layer = 5 + (int)p.crop, angle = angle + (p.cross ? (float)Math.PI * .5f : 0f), projection = Math.Abs(along.x) + Math.Abs(along.y), width = hi - lo, length = p.u1 - p.u0,
-                        across = pv - lo, along = pu - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = p.hedge,
+                        across = pv - lo, along = pu - p.u0, side = side, end = end, districtEdge = score + 4f, hedge = sideUse == (int)FieldEdge.Hedge,
+                        hedgeEnd = endUse == (int)FieldEdge.Hedge, sideUse = sideUse, endUse = endUse,
+                        sideMargin = FieldAppearance.MarginFor(sideUse, x, z), endMargin = FieldAppearance.MarginFor(endUse, x, z),
                         gateDistance = score < 3f ? FieldAppearance.GateDistance(pu,pv,p.u0,p.u1,p.a0,p.a1,p.b0,p.b1) : float.MaxValue };
                     if (score >= 0f) return best;
                 }
@@ -92,7 +96,8 @@ namespace DroneSandbox
             public float u0, u1, a0, a1, b0, b1, lowerNormal, upperNormal;
             public Crop crop;
             public int use; // 0 crop, 1 meadow, 2 fallow, 3 orchard, 4 market garden
-            public bool valid, hedge, cross;
+            public bool valid, hedge, cross; // hedge: at least one edge is a woody boundary
+            public ushort edges; // FieldEdge per edge, four bits each: 0 lower side, 1 far end, 2 upper side, 3 near end
 
             // Translate the shared world geometry into the existing Farmland mesh input without re-planning it.
             public FieldPlot Plot(District district, Vector2 origin)
@@ -102,7 +107,7 @@ namespace DroneSandbox
                 float width = a1 - a0 + b1 - b0, length = u1 - u0;
                 return new FieldPlot { center = district.site - origin + along * ((u0 + u1) * .5f) + across * ((a0 + a1 + b0 + b1) * .25f),
                     along = along, halfLength = length * .5f, halfWidth = width * .25f,
-                    taper = (b1 - b0 - a1 + a0) / width, shear = (b0 + b1 - a0 - a1) / (2f * length), crop = crop };
+                    taper = (b1 - b0 - a1 + a0) / width, shear = (b0 + b1 - a0 - a1) / (2f * length), crop = crop, edges = edges };
             }
         }
 
@@ -172,7 +177,9 @@ namespace DroneSandbox
             d.width = FarDetailData.Mix(80f + regional * 105f, 34f + regional * 25f, small);
             bool estate = small < .22f && (hash & 15) < 3;
             if (estate) d.width = 260f + (hash >> 8 & 63);
-            d.hedgeDensity = .12f + .7f * Value(sx / 1800f - 81f, sz / 1800f + 9f);
+            // Woody boundaries are a minority of field edges (about 5% of farmland in Europe): 5-15% in most districts,
+            // more around villages and in small-strip country.
+            d.hedgeDensity = Math.Min(.45f, .05f + .10f * Value(sx / 1800f - 81f, sz / 1800f + 9f) + .18f * d.settlement + .10f * small);
             d.fallow = .1f + .1f * Value(sx / 1600f + 71f, sz / 1600f + 23f);
             // Use the control texture's exact angle grid so mesh rows and shader rows cannot drift in world metres.
             d.angle = (float)(Math.Round(Direction(d.site) / Math.PI * 65535) * Math.PI / 65535);
@@ -220,7 +227,8 @@ namespace DroneSandbox
                     if (p.use == 1) p.crop = Crop.MownHay;
                     if (p.use == 2) p.crop = Crop.Ploughed;
                     if (p.use == 3 || p.use == 4) p.crop = Crop.YoungCrop;
-                    p.hedge = p.use == 1 || p.use == 2 || (hs >> 16 & 1023) / 1024f < d.hedgeDensity;
+                    p.edges = Edges(d.hedgeDensity, h, p.use);
+                    p.hedge = HasHedge(p.edges);
                     var pieces = new List<Parcel>();
                     // Land cover clips the surface, not the ownership fabric. Cutting here AND in the sector
                     // discarded whole workable edge strips twice. Meadow is an enclosed hay/stubble parcel.
@@ -249,12 +257,40 @@ namespace DroneSandbox
                 var polygon=Clip(Clip(Clip(Clip(district,-1,0,-low),1,0,high),0,-1,-row*width-.65f),0,1,(row+1)*width-.65f);
                 var joined=BestFit(polygon);
                 if(ParcelArea(joined)<=ParcelArea(old)+1f)continue;
-                joined.crop=old.crop;joined.use=old.use;joined.hedge=old.hedge;
+                joined.crop=old.crop;joined.use=old.use;joined.hedge=old.hedge;joined.edges=old.edges;
                 int at=parcels.IndexOf(old);if(at<0)continue;parcels[at]=joined;
                 var replacement=new[]{joined};
                 for(int i=0;i<strip.parcels.Length;i++)if(ReferenceEquals(strip.parcels[i],shared))strip.parcels[i]=replacement;
                 strip.parcels[cell]=replacement;
             }
+        }
+
+        // Each edge is chosen on its own: a hedge at the district's woody share (pasture and orchards are enclosed more
+        // often), otherwise crop to the boundary, a grass strip, a wider uncultivated margin or a field track.
+        ushort Edges(float woody, int h, int use)
+        {
+            float enclosed = use == 1 ? 1.8f : use == 3 ? 1.5f : use == 2 ? 1.2f : 1f;
+            int edges = 0;
+            for (int e = 0; e < 4; e++)
+            {
+                int r = Hash(e + 11, h);
+                FieldEdge kind;
+                if ((r & 1023) / 1024f < woody * enclosed) kind = FieldEdge.Hedge;
+                else
+                {
+                    int k = (r >> 10) % 20;
+                    kind = k < 8 ? FieldEdge.Bare : k < 14 ? FieldEdge.Strip : k < 17 ? FieldEdge.Wide : FieldEdge.Track;
+                }
+                edges |= (int)kind << (e * 4);
+            }
+            return (ushort)edges;
+        }
+
+        // Any hedged edge makes a parcel enclosed for gates and legacy callers.
+        static bool HasHedge(ushort edges)
+        {
+            for (int e = 0; e < 4; e++) if (FieldAppearance.EdgeUse(edges, e) == (int)FieldEdge.Hedge) return true;
+            return false;
         }
 
         // Edge fields may turn a quarter turn to meet the farm boundary without sacrificing a broad wedge.

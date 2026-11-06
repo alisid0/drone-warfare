@@ -3,9 +3,37 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
+    // What runs along one field edge: a grass strip, a hedge, a field track, crop to the boundary or a wide uncultivated margin.
+    public enum FieldEdge : byte { Strip, Hedge, Track, Bare, Wide }
+
     // Shared metre-scale soil and growth signals leave the parcel graph untouched at every viewing distance.
     public static class FieldAppearance
     {
+        // One edge's use from a parcel's packed four-bit edge list (0 lower side, 1 far end, 2 upper side, 3 near end).
+        public static int EdgeUse(ushort edges, int edge) => (edges >> (edge * 4)) & 15;
+
+        // Uncultivated width inside an edge; the painter, the control map and the sector margin meshes all use it.
+        public static float MarginFor(int use, float x, float z)
+        {
+            if (use == (int)FieldEdge.Bare) return .35f;
+            if (use == (int)FieldEdge.Track) return 2.9f;
+            if (use == (int)FieldEdge.Wide) return 4f + 2f * Noise(x / 61f - 17f, z / 61f + 5f);
+            return Margin(x, z);
+        }
+
+        // Which edge of the uncut parent is nearest, using Edge's own distances: 0 lower side, 1 far end, 2 upper, 3 near end.
+        public static int NearestEdge(FieldPlot parent, Vector2 point)
+        {
+            Vector2 d = FieldPlot.Unwarp(point) - parent.center;
+            float u = Vector2.Dot(d, parent.along), v = Vector2.Dot(d, parent.Across) - parent.shear * u;
+            float slope = parent.halfWidth * parent.taper / parent.halfLength;
+            float left = (parent.HalfWidthAt(u) + v) / (float)Math.Sqrt(1f + (parent.shear - slope) * (parent.shear - slope));
+            float right = (parent.HalfWidthAt(u) - v) / (float)Math.Sqrt(1f + (parent.shear + slope) * (parent.shear + slope));
+            float end = parent.halfLength - Math.Abs(u);
+            if (end < left && end < right) return u > 0f ? 1 : 3;
+            return left <= right ? 0 : 2;
+        }
+
         // Gate positions use the original edge, so a clipped fragment cannot invent another tractor entrance.
         public static Vector2 Gate(Vector2 a, Vector2 b)
         {
@@ -42,13 +70,16 @@ namespace DroneSandbox
         public static float Margin(float x, float z) => 1f + 1.5f * Noise(x / 93f + 3f, z / 93f + 21f);
 
         // Linear crop means are shared with the distant painter, including grass margins and damp rough patches.
-        public static Vector3 Colour(int layer, float x, float z, float edge, float pixel)
+        public static Vector3 Colour(int layer, float x, float z, float edge, float pixel) => Colour(layer, x, z, edge, pixel, Margin(x, z));
+
+        // The same with the edge's own uncultivated width; zero when the caller has already subtracted it.
+        public static Vector3 Colour(int layer, float x, float z, float edge, float pixel, float margin)
         {
             Vector3 crop = FarDetailPalette.Means[layer] * (1f + .55f * (Growth(x, z, pixel) - .5f));
             float patch = Patch(x, z, pixel);
             Vector3 rough = FarDetailPalette.Means[4] * .8f + FarDetailPalette.Means[1] * .2f;
             crop += (rough - crop) * patch;
-            float inside = FarDetailData.Coverage(edge - Margin(x, z), pixel);
+            float inside = FarDetailData.Coverage(edge - margin, pixel);
             return rough + (crop - rough) * inside;
         }
 

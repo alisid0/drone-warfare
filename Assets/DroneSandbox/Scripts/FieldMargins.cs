@@ -17,6 +17,8 @@ namespace DroneSandbox
             made.Clear();
         }
 
+        static readonly float[] Ruts = { .55f, 2.3f };
+
         // Only original parcel edges grow a margin; clipped fragments keep continuous cultivation across their joins.
         public static int Build(Transform parent)
         {
@@ -38,9 +40,18 @@ namespace DroneSandbox
                         Vector2 x = Vector2.Lerp(a,b,i/(float)count), y = Vector2.Lerp(a,b,(i+1f)/count), mid = (x+y)*.5f;
                         float existing = FieldAppearance.Edge(whole,mid);
                         Vector2 world = mid + origin;
-                        float width = FieldAppearance.Margin(world.x,world.y) - Math.Max(0f,existing);
+                        int use = FieldAppearance.EdgeUse(whole.edges, FieldAppearance.NearestEdge(whole, mid));
+                        float width = FieldAppearance.MarginFor(use, world.x, world.y) - Math.Max(0f,existing);
                         if (width <= .1f || existing < -1f) continue;
-                        Get(blocks,mid).Quad(x,y,y+inward*width,x+inward*width,0);
+                        var batch = Get(blocks,mid);
+                        batch.Quad(x,y,y+inward*width,x+inward*width,0);
+                        // A field track's two wheel lines sit just above the margin, at the painter's distances from the edge.
+                        if (use == (int)FieldEdge.Track)
+                            foreach (float line in Ruts)
+                            {
+                                float a0 = Math.Max(0f, line - Math.Max(0f, existing)), a1 = line + .56f - Math.Max(0f, existing);
+                                if (a1 > a0 + .05f) batch.Quad(x+inward*a0,y+inward*a0,y+inward*a1,x+inward*a1,2,.435f);
+                            }
                     }
                 }
                 // Contour the continuous soil signal instead of placing disconnected discs on a regular grid.
@@ -56,7 +67,8 @@ namespace DroneSandbox
                     }
             }
             Vector3 grass = FarDetailPalette.Means[4]*.8f+FarDetailPalette.Means[1]*.2f;
-            var materials = new[] { Art.Shared((Color)FarDetailPalette.Encode(grass)), Art.Shared((Color)FarDetailPalette.Encode(grass*.9f)) };
+            var materials = new[] { Art.Shared((Color)FarDetailPalette.Encode(grass)), Art.Shared((Color)FarDetailPalette.Encode(grass*.9f)),
+                Art.Shared((Color)FarDetailPalette.Encode(FarDetailPalette.Means[2])) };
             foreach (var batch in blocks.Values) batch.Finish(parent,materials);
             return blocks.Count;
         }
@@ -89,21 +101,21 @@ namespace DroneSandbox
             return batch;
         }
 
-        // Two shared materials carry the margin and damp-ground colour without field-sized textures.
+        // Three shared materials carry the margin, damp ground and track ruts without field-sized textures.
         sealed class Batch
         {
             readonly List<Vector3> vertices = new List<Vector3>();
             readonly List<Vector3> normals = new List<Vector3>();
-            readonly List<int>[] triangles = { new List<int>(),new List<int>() };
+            readonly List<int>[] triangles = { new List<int>(),new List<int>(),new List<int>() };
 
             // Close terrain samples and a small lift cover the crop's 0.35 m surface without coplanar edges.
-            public void Quad(Vector2 a,Vector2 b,Vector2 c,Vector2 d,int material)
+            public void Quad(Vector2 a,Vector2 b,Vector2 c,Vector2 d,int material,float lift = .425f)
             {
                 int n = vertices.Count;
                 foreach (var p in new[] {a,b,c,d})
                 {
                     var q = new Vector3(p.x,0f,p.y);
-                    vertices.Add(new Vector3(p.x,Ground.HeightAt(q)+.425f,p.y)); normals.Add(Ground.NormalAt(q));
+                    vertices.Add(new Vector3(p.x,Ground.HeightAt(q)+lift,p.y)); normals.Add(Ground.NormalAt(q));
                 }
                 var list=triangles[material];
                 if (Vector3.Cross(vertices[n+1]-vertices[n],vertices[n+3]-vertices[n]).y > 0f)
@@ -111,16 +123,18 @@ namespace DroneSandbox
                 else list.AddRange(new[] {n,n+2,n+1,n,n+3,n+2});
             }
 
-            // Each block owns one renderer and its mesh is released with Farmland's generated resources.
+            // Each block owns one renderer and its mesh is released with Farmland's generated resources; empty slots are dropped.
             public void Finish(Transform parent,Material[] materials)
             {
                 var mesh = new Mesh {name="Field use 128 m block",indexFormat=IndexFormat.UInt32};
-                made.Add(mesh); mesh.SetVertices(vertices);mesh.SetNormals(normals);mesh.subMeshCount=2;
-                for(int i=0;i<2;i++)mesh.SetTriangles(triangles[i],i);
+                var used = new List<Material>();
+                for(int i=0;i<triangles.Length;i++)if(triangles[i].Count>0)used.Add(materials[i]);
+                made.Add(mesh); mesh.SetVertices(vertices);mesh.SetNormals(normals);mesh.subMeshCount=Math.Max(1,used.Count);
+                for(int i=0,sub=0;i<triangles.Length;i++)if(triangles[i].Count>0)mesh.SetTriangles(triangles[i],sub++);
                 mesh.RecalculateBounds();
                 var go=new GameObject(mesh.name);go.transform.SetParent(parent,false);
                 go.AddComponent<MeshFilter>().sharedMesh=mesh;
-                var renderer=go.AddComponent<MeshRenderer>();renderer.sharedMaterials=materials;
+                var renderer=go.AddComponent<MeshRenderer>();renderer.sharedMaterials=used.Count>0?used.ToArray():new[]{materials[0]};
                 renderer.shadowCastingMode=ShadowCastingMode.Off;
             }
         }

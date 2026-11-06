@@ -337,9 +337,10 @@ namespace DroneSandbox
                     }
                 }
             // Shuffle a balanced mix, so even a small marsh farm has ditches and the recipe cannot drift by chance.
+            // Woody boundaries stay a minority (about one edge in seven), as on real farmland; most edges are open.
             int n = MapLayout.Boundaries.Count;
             var kinds = new FieldBoundaryKind[n];
-            for (int i = 0; i < n; i++) kinds[i] = i < n * 0.48f ? FieldBoundaryKind.Hedge : i < n * 0.63f ? FieldBoundaryKind.Ditch : i < n * 0.75f ? FieldBoundaryKind.Fence : FieldBoundaryKind.Open;
+            for (int i = 0; i < n; i++) kinds[i] = i < n * 0.14f ? FieldBoundaryKind.Hedge : i < n * 0.30f ? FieldBoundaryKind.Ditch : i < n * 0.42f ? FieldBoundaryKind.Fence : FieldBoundaryKind.Open;
             for (int i = n - 1; i > 0; i--) { int j = random.Next(i + 1); var k = kinds[i]; kinds[i] = kinds[j]; kinds[j] = k; }
             for (int i = 0; i < n; i++) { var b = MapLayout.Boundaries[i]; b.kind = kinds[i]; MapLayout.Boundaries[i] = b; }
         }

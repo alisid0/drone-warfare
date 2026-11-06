@@ -16,6 +16,7 @@ namespace DroneSandbox
         public float taper;                 // the +along end is (1 + taper) times as wide as the middle, the other end (1 - taper)
         public float shear;                 // how far across the middle line drifts per metre along
         public Crop crop;
+        public ushort edges;                // world parcels: FieldEdge of each edge (FieldAppearance.EdgeUse); zero is a grass strip
 
         public Vector2 Across => new Vector2(-along.y, along.x);
 
