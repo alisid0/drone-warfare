@@ -1,0 +1,90 @@
+{
+  "spots": [
+    {
+      "name": "wheat",
+      "center": {
+        "x": -9000,
+        "z": -12000
+      },
+      "tileX": -18,
+      "tileZ": -24,
+      "medianMs": 125.0129,
+      "worstMs": 125.0222,
+      "clipping": {
+        "milliseconds": 15.0409,
+        "vertices": 4869,
+        "triangles": 8608,
+        "boundaryErrorMetres": 0,
+        "areaError": 9.059906005859375E-06
+      },
+      "gpuBytes": 1653696
+    },
+    {
+      "name": "ploughed",
+      "center": {
+        "x": -5928,
+        "z": -12000
+      },
+      "tileX": -12,
+      "tileZ": -24,
+      "medianMs": 125.5496,
+      "worstMs": 126.2229,
+      "clipping": {
+        "milliseconds": 0.4117,
+        "vertices": 4875,
+        "triangles": 8603,
+        "boundaryErrorMetres": 0,
+        "areaError": 9.059906005859375E-06
+      },
+      "gpuBytes": 1653696
+    },
+    {
+      "name": "village",
+      "center": {
+        "x": -11057.904,
+        "z": 4400.2354
+      },
+      "tileX": -22,
+      "tileZ": 8,
+      "medianMs": 136.2483,
+      "worstMs": 136.3252,
+      "clipping": {
+        "milliseconds": 0.5118,
+        "vertices": 5469,
+        "triangles": 9000,
+        "boundaryErrorMetres": 0,
+        "areaError": 0.00018739700317382812
+      },
+      "gpuBytes": 1653696
+    },
+    {
+      "name": "river-crossing",
+      "center": {
+        "x": -12063.079,
+        "z": 16067.159
+      },
+      "tileX": -24,
+      "tileZ": 31,
+      "medianMs": 193.0515,
+      "worstMs": 195.2619,
+      "clipping": {
+        "milliseconds": 0.1992,
+        "vertices": 4399,
+        "triangles": 8319,
+        "boundaryErrorMetres": 0,
+        "areaError": 7.62939453125E-05
+      },
+      "gpuBytes": 1653696
+    }
+  ],
+  "stream": {
+    "frames": 12351,
+    "maximumLive": 25,
+    "maximumClippedChunkPayloadBytes": 3588108,
+    "committed": 274,
+    "startCommitted": 25,
+    "cameraTileMisses": 0,
+    "note": "State-machine simulation. Worker completion is synchronized between frames; virtual 60 Hz and managed uploads do not measure runtime throughput."
+  },
+  "note": "Offline CPU material/coverage harness. Native Perlin is substituted. No Unity frame time, GPU, lighting or upload measurement."
+}

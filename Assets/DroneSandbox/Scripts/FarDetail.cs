@@ -30,7 +30,7 @@ namespace DroneSandbox
             public GameObject go;
             public Mesh mesh, collision;
             public MeshCollider collider;
-            public Texture2D texture;
+            public Texture2D texture, control;
             public Material material;
             public FarDetailData.Tile data;
             public int x, z;
@@ -113,15 +113,17 @@ namespace DroneSandbox
                 go = new GameObject("Detail tile " + number),
                 mesh = new Mesh(),
                 collision = new Mesh(),
-                texture = new Texture2D(256, 256, TextureFormat.RGBA32, true),
-                material = Art.NewMaterial(Color.white)
+                texture = new Texture2D(FarDetailData.TextureSize, FarDetailData.TextureSize, TextureFormat.RGBA32, true),
+                control = FarDetailMaterial.ControlMap(),
+                material = FarDetailMaterial.Create()
             };
             s.go.transform.SetParent(parent, false);
             s.go.AddComponent<MeshFilter>().sharedMesh = s.mesh;
             var renderer = s.go.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = s.material; renderer.shadowCastingMode = ShadowCastingMode.Off;
-            s.material.mainTexture = s.texture; s.material.SetFloat("_Smoothness", 0.05f);
+            s.material.mainTexture = s.texture; s.material.SetFloat("_Smoothness", 0f);
             s.texture.wrapMode = TextureWrapMode.Clamp; s.texture.anisoLevel = 8;
+            s.texture.filterMode = FilterMode.Trilinear;
             s.collider = s.go.AddComponent<MeshCollider>(); s.collider.enabled = false;
             s.go.SetActive(false);
             return s;
@@ -129,7 +131,7 @@ namespace DroneSandbox
 
         // Sector transitions release resources explicitly, including pooled objects that were never made live.
         static void Release(Slot s)
-        { Art.Discard(s.mesh); Art.Discard(s.collision); Art.Discard(s.texture); Art.Discard(s.material); Art.Discard(s.go); }
+        { Art.Discard(s.mesh); Art.Discard(s.collision); Art.Discard(s.texture); Art.Discard(s.control); Art.Discard(s.material); Art.Discard(s.go); }
 
         // Streaming continues while paused, using real camera velocity and real seconds for cache retention.
         void LateUpdate()
@@ -299,7 +301,7 @@ namespace DroneSandbox
             {
                 pending = next.Value; incoming = pool.Pop(); incoming.x = pending.x; incoming.z = pending.z;
                 roughness = new float[FarDetailData.Samples * FarDetailData.Samples]; sampleRow = 0; sampling = true;
-                coverPositions = new Vector2[FarDetailData.Pixels * FarDetailData.Pixels];
+                coverPositions = new Vector2[FarDetailData.TextureSize * FarDetailData.TextureSize];
             }
             else Launch();
         }
@@ -315,17 +317,17 @@ namespace DroneSandbox
                 else
                 {
                     int row = sampleRow - n;
-                    for (int i = 0; i < 256; i++)
+                    for (int i = 0; i < FarDetailData.TextureSize; i++)
                     {
-                        float x = pending.x * 512f + (i + 0.5f) * 2f, z = pending.z * 512f + (row + 0.5f) * 2f;
+                        float x = pending.x * 512f + (i - 0.5f) * 2f, z = pending.z * 512f + (row - 0.5f) * 2f;
                         // These are FarTerrain.PaintWorld's exact cover drifts, sampled on the main thread.
-                        coverPositions[row * 256 + i] = new Vector2(x + 44f * (Mathf.PerlinNoise(x / 70f, z / 70f + 31f) - 0.5f),
+                        coverPositions[row * FarDetailData.TextureSize + i] = new Vector2(x + 44f * (Mathf.PerlinNoise(x / 70f, z / 70f + 31f) - 0.5f),
                             z + 44f * (Mathf.PerlinNoise(x / 70f + 57f, z / 70f) - 0.5f));
                     }
                 }
                 sampleRow++;
-            } while (sampleRow < FarDetailData.Samples + 256 && timer.Elapsed.TotalMilliseconds < BudgetMs);
-            if (sampleRow == FarDetailData.Samples + 256) { sampling = false; Launch(); }
+            } while (sampleRow < FarDetailData.Samples + FarDetailData.TextureSize && timer.Elapsed.TotalMilliseconds < BudgetMs);
+            if (sampleRow == FarDetailData.Samples + FarDetailData.TextureSize) { sampling = false; Launch(); }
         }
 
         // Freeze all transaction inputs before dispatch; the worker captures no live collections or engine objects.
@@ -354,7 +356,7 @@ namespace DroneSandbox
         // One bounded API stage per frame: no recalculation, no full-resolution collider cooking, no upload burst.
         void Upload()
         {
-            if (incoming != null && stage < 9)
+            if (incoming != null && stage < 12)
             {
                 var d = ready.tile; var s = incoming;
                 switch (stage++)
@@ -367,7 +369,12 @@ namespace DroneSandbox
                     case 5: s.texture.Apply(true, false); break;
                     case 6: s.collider.sharedMesh = null; s.collision.Clear(); s.collision.SetVertices(d.collision); break;
                     case 7: s.collision.SetIndices(d.collisionTriangles, MeshTopology.Triangles, 0); break;
-                    case 8: s.go.transform.position = new Vector3(s.x * 512f - origin.x, 0f, s.z * 512f - origin.y); break;
+                    case 8: s.mesh.SetTangents(d.tangents); break;
+                    case 9: s.control.SetPixelData(d.controls, 0); break;
+                    case 10: s.control.Apply(false, false); break;
+                    case 11:
+                        s.go.transform.position = new Vector3(s.x * 512f - origin.x, 0f, s.z * 512f - origin.y);
+                        FarDetailMaterial.Bind(s.material, s.texture, s.control, s.x, s.z); break;
                 }
                 return;
             }
