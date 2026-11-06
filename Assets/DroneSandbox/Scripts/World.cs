@@ -275,6 +275,15 @@ namespace DroneSandbox
                 }
                 budgets[root] = budget;
             }
+            // Each vegetable plot's tool shed stands by its compost corner, from what the gardens leave of the allowance.
+            foreach (var p in occupiedPlots)
+            {
+                if (p.landUse != 9) continue;
+                var root = roots[p.owner]; int budget = budgets[root];
+                VillageProp("Scenery_Hut", p.Point(-p.frontage * .5f + 2.6f, p.depth - 2.6f), Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg,
+                    .55f, 2f, root, ref budget, false);
+                budgets[root] = budget;
+            }
             Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
         }
 
@@ -297,16 +306,12 @@ namespace DroneSandbox
             budgets[root] = budget;
         }
 
-        // Small fringe orchards: up to six fruit trees on their painted 7 m rows, from the garden tree allowance; each
-        // vegetable plot has its tool shed by the compost corner.
+        // Small fringe orchards: up to six fruit trees on their painted 7 m rows, from the garden tree allowance.
         static void Orchards(Transform root, int village, List<VillagePlot> plots, Dictionary<Transform, int> budgets)
         {
             if (!budgets.TryGetValue(root, out int budget)) return;
             foreach (var p in plots)
             {
-                if (p.owner == village && p.landUse == 9)
-                    VillageProp("Scenery_Hut", p.Point(-p.frontage * .5f + 2.6f, p.depth - 2.6f), Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg,
-                        .55f, 2f, root, ref budget, false);
                 if (p.owner != village || p.landUse != 7) continue;
                 int planted = 0;
                 for (float u = -p.frontage * .5f + 4.8f; u < p.frontage * .5f - 2f && planted < 6; u += 7f)
