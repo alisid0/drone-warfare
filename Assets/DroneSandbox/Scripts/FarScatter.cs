@@ -606,9 +606,7 @@ namespace DroneSandbox
         Tree MakeTree(int i, int j, Vector3 at, ForestPattern.Stand stand)
         {
             var tree = new Tree { position = at, stand = stand };
-            float lean = (1f - stand.cover) * 14f;
-            var rotation = Quaternion.Euler((ForestPattern.Unit(i, j, 51) - 0.5f) * lean,
-                ForestPattern.Unit(i, j, 44) * 360f, (ForestPattern.Unit(i, j, 52) - 0.5f) * lean);
+            var rotation = ForestPattern.Rotation(i, j, stand);
             // Cache roots once: flight changes the tier, not thousands of TRS matrices each frame.
             for (int tier = 0; tier < 3; tier++)
             {

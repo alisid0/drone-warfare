@@ -12,6 +12,7 @@ namespace DroneSandbox
         {
             public int species, shade, neighbour;
             public float height, width, radius, cover, blend, age, wood;
+            public Vector2 lean;
         }
 
         // Stable integer noise avoids changing the forest when another cell is generated first.
@@ -38,14 +39,14 @@ namespace DroneSandbox
                 Mathf.Lerp(Unit(i, j + 1, salt), Unit(i + 1, j + 1, salt), u), v);
         }
 
-        // Irregular glades occupy about eight percent of an unbounded forest, with soft young margins.
+        // Warped ellipses retain elongated openings; distance is in metres so every rim has a physical width.
         public static float Glade(float x, float z)
         {
             const float step = 192f;
             int i = Mathf.FloorToInt(x / step), j = Mathf.FloorToInt(z / step);
-            float distance = float.MaxValue;
-            float warpX = (Noise(x, z, 29f, 67) - 0.5f) * 24f;
-            float warpZ = (Noise(x, z, 31f, 68) - 0.5f) * 24f;
+            float margin = 1f;
+            float warpX = (Noise(x, z, 43f, 67) - 0.5f) * 10f;
+            float warpZ = (Noise(x, z, 47f, 68) - 0.5f) * 10f;
             for (int dz = -1; dz <= 1; dz++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
@@ -53,16 +54,29 @@ namespace DroneSandbox
                     if (Unit(a, b, 60) > 0.9f) continue;
                     float cx = (a + Unit(a, b, 61)) * step;
                     float cz = (b + Unit(a, b, 62)) * step;
-                    float rx = 18f + 32f * Unit(a, b, 63), rz = 14f + 38f * Unit(a, b, 64);
+                    float radius = 24f + 18f * Unit(a, b, 63);
+                    float stretch = Mathf.Sqrt(1.7f + Unit(a, b, 64));
+                    float rx = radius * stretch, rz = radius / stretch;
                     float angle = Unit(a, b, 66) * Mathf.PI, ca = Mathf.Cos(angle), sa = Mathf.Sin(angle);
                     float wx = x - cx + warpX;
                     float wz = z - cz + warpZ;
-                    float u = (wx * ca - wz * sa) / rx, v = (wx * sa + wz * ca) / rz;
-                    distance = Mathf.Min(distance, (Mathf.Sqrt(u * u + v * v) - 1f) * 30f);
+                    float u = wx * ca - wz * sa, v = wx * sa + wz * ca;
+                    float distance = EllipseDistance(u, v, rx, rz);
+                    margin = Mathf.Min(margin, Mathf.Clamp01(distance / (10f + 15f * Unit(a, b, 69))));
                 }
-            distance += (Noise(x, z, 18f, 65) - 0.5f) * 13f;
-            return Mathf.SmoothStep(0f, 1f, distance / 30f);
+            return margin;
         }
+
+        // First-order ellipse distance is exact at the rim and along either axis, unlike a fixed radial multiplier.
+        public static float EllipseDistance(float x, float z, float rx, float rz)
+        {
+            float u = x / rx, v = z / rz, length = Mathf.Sqrt(u * u + v * v);
+            float gradient = Mathf.Sqrt(u * u / (rx * rx) + v * v / (rz * rz));
+            return gradient > 0.0001f ? length * (length - 1f) / gradient : -Mathf.Min(rx, rz);
+        }
+
+        // A convex descent reaches ground tangentially instead of retaining an upright five-metre canopy lip.
+        public static float Rim(float margin) => Mathf.Clamp01(margin) * Mathf.Clamp01(margin);
 
         // Interpolate cover before adding metre-scale shoreline noise; keep scrub out of water and built land.
         public static float Edge(float x, float z)
@@ -78,7 +92,7 @@ namespace DroneSandbox
             float a = Wood(cx, cz), b = Wood(cx + step, cz), c = Wood(cx, cz + step), d = Wood(cx + step, cz + step);
             float mask = Mathf.Lerp(Mathf.Lerp(a, b, gx - i), Mathf.Lerp(c, d, gx - i), gz - j);
             float ripple = (Noise(x, z, 7f, 71) - 0.5f) * 0.18f + (Noise(x, z, 21f, 72) - 0.5f) * 0.16f;
-            return Mathf.SmoothStep(0f, 1f, (mask + ripple - 0.28f) / 0.66f);
+            return Mathf.Clamp01((mask + ripple - 0.28f) / 0.66f);
         }
 
         // Cover is categorical in WorldPlan; interpolation belongs only to this visual forest mask.
@@ -90,7 +104,7 @@ namespace DroneSandbox
         // Sector reserves supply their own boundary, but share species, ages and glades with the world.
         public static Stand At(float x, float z, float edge)
         {
-            if (edge <= 0f) return new Stand { height = 5f, radius = 2f, width = 1f };
+            if (edge <= 0f) return new Stand { radius = 2f, width = 1f };
             float sx = x + (Noise(x, z, 190f, 16) - 0.5f) * 130f;
             float sz = z + (Noise(x, z, 170f, 17) - 0.5f) * 130f;
             int i = Mathf.FloorToInt(sx / 240f), j = Mathf.FloorToInt(sz / 240f), patch = 0, nextPatch = 0;
@@ -116,16 +130,16 @@ namespace DroneSandbox
             float az = z + (Noise(x, z, 71f, 20) - 0.5f) * 26f;
             float age = Mathf.Clamp01((Noise(ax, az, 64f, 14) - 0.22f) / 0.56f);
             float glade = Glade(x, z), margin = Mathf.Min(edge, glade);
-            float height = Mathf.Lerp(5f, 12f + 12f * age, margin);
+            float height = (12f + 12f * age) * Rim(margin);
             float tint = Noise(x, z, 80f, 83) * 0.7f + Noise(x, z, 12f, 84) * 0.3f;
             return new Stand { species = species, neighbour = neighbour, blend = blend,
                 shade = Mathf.Clamp(Mathf.FloorToInt(tint * 3f), 0, 2), height = height, age = age, wood = edge,
                 width = 1f, radius = Mathf.Lerp(2f, 2.8f + 1.8f * age, margin), cover = edge * glade };
         }
 
-        // Age raises whole stands, while smaller crown domes sit below card caps; glades retain shaded understorey.
-        public static float Canopy(Stand stand, float x, float z) => stand.wood * Mathf.Lerp(2.5f,
-            Mathf.Max(2f, stand.height * 0.70f + (Noise(x, z, 11f, 33) - 0.5f) * 4f), stand.cover);
+        // Empty glades have no canopy slab; relief and crown noise both meet the real floor at the rim.
+        public static float Canopy(Stand stand, float x, float z) => Mathf.Max(0f,
+            stand.height * 0.70f + (Noise(x, z, 11f, 33) - 0.5f) * 4f * Rim(stand.cover));
 
         // The same species districts drive a soft canopy mixture and individual trees along the ecotone.
         static int Species(int patch, float conifer)
@@ -158,18 +172,27 @@ namespace DroneSandbox
                 }
             stand = At(world.x, world.y, edge < 0f ? Edge(world.x, world.y) : edge);
             float cluster = Noise(world.x, world.y, 24f, 48);
-            if (Unit(i, j, 43) >= stand.cover * Mathf.Lerp(0.88f, 1f, cluster)) return false;
+            // A few young trees survive in natural openings; protected roads, fields and reserves still have edge zero.
+            float density = Mathf.Max(stand.cover, stand.wood * 0.025f);
+            if (Unit(i, j, 43) >= density * Mathf.Lerp(0.88f, 1f, cluster)) return false;
             float individual = Unit(i, j, 49);
             if (Unit(i, j, 47) < stand.blend) stand.species = stand.neighbour;
             stand.neighbour = stand.species; stand.blend = 0f;
-            stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 5f, 5f, 26f);
+            stand.height = Mathf.Clamp(stand.height + (individual - 0.5f) * 5f * stand.cover, 2f + individual * 2f, 26f);
             // The canopy fade uses a conservative two-metre crown, including the youngest edge trees.
             stand.radius = Mathf.Max(2f, stand.radius * (0.78f + individual * 0.44f));
             // Isolated old trees and groups of saplings interrupt the stand's average silhouette.
             if (Unit(i, j, 50) > 0.97f && stand.cover > 0.95f) { stand.radius = 4.6f; stand.height = 23f; }
             stand.width = stand.radius / (stand.height * ForestPalette.RadiusPerHeight[stand.species]);
+            stand.lean = SectorForest.EdgeLean(world, stand.cover, edge >= 0f);
             return true;
         }
+
+        // Tilt in world space before applying yaw, so all render tiers lean toward the same opening.
+        public static Quaternion Rotation(int i, int j, Stand stand) =>
+            Quaternion.Euler(stand.lean.y * Mathf.Rad2Deg, 0f, -stand.lean.x * Mathf.Rad2Deg)
+                * Quaternion.Euler(0f, Unit(i, j, 44) * 360f, 0f);
+
         // A subtle stand-wide tint is shared by photo materials and the derived canopy palette.
         public static float Tint(int shade) => 0.90f + shade * 0.09f;
     }
