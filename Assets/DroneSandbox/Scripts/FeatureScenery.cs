@@ -41,9 +41,10 @@ namespace DroneSandbox
                 var source = LandmarkMesh.Build(f, data.center, true);
                 if (source.vertices.Count == 0) continue;
                 var mesh = new Mesh { name = "World landmark surfaces", indexFormat = IndexFormat.UInt32 };
-                mesh.SetVertices(source.vertices); mesh.SetNormals(source.normals);
+                mesh.SetVertices(source.vertices); mesh.SetNormals(source.normals); mesh.SetUVs(0, source.uvs);
                 var materials = new List<Material>();
-                for (int i = 0; i < source.triangles.Length; i++) if (source.triangles[i].Count > 0) materials.Add(Art.Shared(LandmarkMesh.Color(i)));
+                for (int i = 0; i < source.triangles.Length; i++)
+                    if (source.triangles[i].Count > 0) materials.Add(i == LandmarkMesh.SurfaceSlot ? LandmarkSurfaceMaterial() : Art.Shared(LandmarkMesh.Color(i)));
                 mesh.subMeshCount = materials.Count;
                 int sub = 0;
                 for (int i = 0; i < source.triangles.Length; i++) if (source.triangles[i].Count > 0) mesh.SetTriangles(source.triangles[i], sub++);
@@ -52,6 +53,21 @@ namespace DroneSandbox
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 go.AddComponent<MeshRenderer>().sharedMaterials = materials.ToArray();
             }
+        }
+
+        static Material surfaceMaterial;
+
+        // One palette material for every landmark's flat surfaces, near and distant: tones and their soft edges are texture
+        // coordinates (LandmarkMesh.PaletteUv), so a whole yard is a single draw. Kept for the session, like Art.Shared.
+        public static Material LandmarkSurfaceMaterial()
+        {
+            if (surfaceMaterial != null) return surfaceMaterial;
+            var palette = new Texture2D(LandmarkMesh.PaletteWidth, LandmarkMesh.PaletteHeight, TextureFormat.RGBA32, false)
+                { name = "Landmark surface palette", filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            palette.SetPixels32(LandmarkMesh.PalettePixels());
+            palette.Apply(false, true);
+            surfaceMaterial = Art.NewMaterial(Color.white); surfaceMaterial.mainTexture = palette; surfaceMaterial.SetFloat("_Smoothness", 0.12f);
+            return surfaceMaterial;
         }
 
         // Samples finished terrain so dressings neither float on hills nor cut through flattened building sites.

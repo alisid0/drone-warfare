@@ -20,6 +20,9 @@ namespace DroneSandbox
         readonly Material[] materials = new Material[LandmarkMesh.MaterialCount];
         readonly LandmarkInstances instances = new LandmarkInstances();
         readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
+        // The compound being meshed, about a millisecond per frame, and its id; null when none is in progress.
+        LandmarkMesh.Builder building;
+        int buildingId;
         public static int DrawCalls { get; private set; }
         public static int TrianglesDrawn { get; private set; }
 
@@ -28,8 +31,9 @@ namespace DroneSandbox
         {
             foreach (var batch in batches.Values) Art.Discard(batch.mesh);
             batches.Clear();
+            building = null;
             instances.Clear();
-            for (int i = 0; i < materials.Length; i++) { Art.Discard(materials[i]); materials[i] = null; }
+            for (int i = 0; i < materials.Length; i++) { if (i != LandmarkMesh.SurfaceSlot) Art.Discard(materials[i]); materials[i] = null; }
             DrawCalls = TrianglesDrawn = 0;
         }
 
@@ -37,7 +41,10 @@ namespace DroneSandbox
         public void Update(Camera camera, Plane[] planes)
         {
             DrawCalls = TrianglesDrawn = 0;
-            bool meshed = false; // one new compound per frame keeps a sector change from meshing every yard in one stage
+            // One compound is meshed at a time, a slice per frame, so neither a sector change nor a large soft-edged yard
+            // turns into one long stage.
+            bool meshed = building != null;
+            if (meshed && building.Step(1.0)) { batches[buildingId] = Upload(building.mesh); building = null; }
             foreach (var f in WorldPlan.Features)
             {
                 Vector2 p = f.center - FarTerrain.Origin;
@@ -48,7 +55,9 @@ namespace DroneSandbox
                 {
                     if (meshed) continue;
                     meshed = true;
-                    batch = Upload(LandmarkMesh.Build(f, FarTerrain.Origin, false)); batches.Add(f.id, batch);
+                    building = new LandmarkMesh.Builder(f, FarTerrain.Origin, false); buildingId = f.id;
+                    if (!building.Step(1.0)) continue;
+                    batch = Upload(building.mesh); batches.Add(f.id, batch); building = null;
                 }
                 if (batch.mesh == null) continue;
                 Vector2 projection = LandmarkLod.Projection(camera);
@@ -62,7 +71,8 @@ namespace DroneSandbox
                 for (int sub = 0; sub < batch.materials.Count; sub++)
                 {
                     int index = batch.materials[sub];
-                    if (materials[index] == null)
+                    if (index == LandmarkMesh.SurfaceSlot) materials[index] = Features.LandmarkSurfaceMaterial(); // shared, never discarded here
+                    else if (materials[index] == null)
                     {
                         materials[index] = Art.NewMaterial(LandmarkMesh.Color(index));
                         materials[index].SetFloat("_Smoothness", 0.12f);
@@ -87,7 +97,7 @@ namespace DroneSandbox
             var batch = new Batch();
             if (data.vertices.Count == 0) return batch;
             var mesh = new Mesh { name = "World landmark", indexFormat = IndexFormat.UInt32 };
-            mesh.SetVertices(data.vertices); mesh.SetNormals(data.normals);
+            mesh.SetVertices(data.vertices); mesh.SetNormals(data.normals); mesh.SetUVs(0, data.uvs);
             for (int i = 0; i < data.triangles.Length; i++) if (data.triangles[i].Count > 0) batch.materials.Add(i);
             mesh.subMeshCount = batch.materials.Count;
             for (int sub = 0; sub < batch.materials.Count; sub++)

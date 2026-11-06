@@ -15,6 +15,9 @@ namespace DroneSandbox
             var obstacles = new List<VillagePlot>();
             foreach (var source in MapLayout.DetailPlan.villages.plots)
             {
+                // Paddocks, vegetable plots, orchards and rough grass are spare land: access may cross them, and the sector
+                // then leaves that plot out (World.VillagePlotClear), rather than every track bending round the fringe.
+                if (source.landUse >= 6) continue;
                 var p = source; p.front -= plan.world.center;
                 if (Math.Abs(p.front.x) < 1100f && Math.Abs(p.front.y) < 1100f) obstacles.Add(p);
             }

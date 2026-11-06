@@ -705,13 +705,21 @@ namespace DroneSandbox
             canopy = new float[canopyRes * canopyRes];
             stems = new float[canopyRes * canopyRes];
             Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
-            foreach (var p in woodland) { Spread(canopy, p, 1f); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p); }
+            var stand = new Stand(woodland);
+            foreach (var p in woodland)
+            {
+                float weight = stand.Weight(p);
+                if (weight <= 0f) continue;
+                Spread(canopy, p, weight); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p);
+            }
             for (int t = 0; t < trees.Count; t++)
             {
                 // Varrow's decorative bank/garden trees cull independently; only logical woods keep a distant floor.
                 if (MapLayout.Plan.kind == SectorKind.VarrowValley && !SectorForest.HasFloorCoverage(trees[t])) continue;
-                Spread(canopy, trees[t], 0.5f);
-                Spread(stems, trees[t], 1f);
+                float weight = stand.Weight(trees[t]);
+                if (weight <= 0f) continue;
+                Spread(canopy, trees[t], 0.5f * weight);
+                Spread(stems, trees[t], weight);
                 lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]);
             }
             if (lo.x > hi.x) return;
@@ -734,6 +742,8 @@ namespace DroneSandbox
                         float x = -Size / 2f + (x0 + i + 0.5f) * cell, z = -Size / 2f + (band + j + 0.5f) * cell;
                         float ragged = (Mathf.PerlinNoise(x * 0.11f + 41f, z * 0.11f + 7f) - 0.5f) * 1.4f;
                         float floor = Mathf.SmoothStep(0f, 1f, (CanopyAt(x, z) + ragged - 1.2f) / 1.8f);
+                        // Not past the trees' own reach: a copse's floor stopped as a dark halo well outside its crowns.
+                        floor *= Mathf.SmoothStep(0f, 1f, (Grid(stems, x, z) - 0.25f) / 0.5f);
                         float shore = maps.GetLength(2) > 7 ? maps[j, i, 6] + maps[j, i, 7] : 0f;
                         floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3] + shore) * 1.5f); // preserve exposed banks too
                         if (floor <= 0.001f) continue;
@@ -747,6 +757,52 @@ namespace DroneSandbox
                     }
                 });
                 data.SetAlphamaps(x0, band, maps);
+            }
+        }
+
+        // How much of a wood a point stands in, from the woodland stems within 25 m: a lone tree, a pair or three (a
+        // field or garden tree, an orchard, a wood's stray outlier) lay a floor with no tree over it, or a dark disc wider
+        // than the crowns, which read as isolated shadow blobs from the air (hd162 02d_village). They now add nothing,
+        // a copse adds a little, and from about ten stems, any wood's edge or corner included, the floor is as before.
+        sealed class Stand
+        {
+            const float Reach = 25f;
+            readonly int columns;
+            readonly int[] first, order;
+            readonly List<Vector2> points;
+
+            // Counting-sorts the stems into 25 m cells over the sector.
+            public Stand(List<Vector2> woodland)
+            {
+                points = woodland;
+                columns = Mathf.CeilToInt(Size / Reach) + 1;
+                first = new int[columns * columns + 1];
+                order = new int[woodland.Count];
+                foreach (var p in woodland) first[Cell(p) + 1]++;
+                for (int i = 1; i < first.Length; i++) first[i] += first[i - 1];
+                var next = (int[])first.Clone();
+                for (int i = 0; i < woodland.Count; i++) order[next[Cell(woodland[i])]++] = i;
+            }
+
+            int Cell(Vector2 p)
+            {
+                int i = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / Reach), 0, columns - 1), j = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / Reach), 0, columns - 1);
+                return j * columns + i;
+            }
+
+            // 0 with two or fewer other stems within reach (a group of three at most), 1 with ten; counting stops at ten.
+            public float Weight(Vector2 p)
+            {
+                int ci = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / Reach), 0, columns - 1), cj = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / Reach), 0, columns - 1);
+                int count = 0;
+                for (int j = Mathf.Max(0, cj - 1); j <= Mathf.Min(columns - 1, cj + 1) && count < 10; j++)
+                    for (int i = Mathf.Max(0, ci - 1); i <= Mathf.Min(columns - 1, ci + 1) && count < 10; i++)
+                        for (int k = first[j * columns + i], end = first[j * columns + i + 1]; k < end && count < 10; k++)
+                        {
+                            float d = (points[order[k]] - p).sqrMagnitude;
+                            if (d > 0.01f && d < Reach * Reach) count++;
+                        }
+                return Mathf.Clamp01((count - 2) / 8f);
             }
         }
 

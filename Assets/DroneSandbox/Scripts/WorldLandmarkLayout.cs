@@ -1,11 +1,13 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Random = System.Random;
 
 namespace DroneSandbox
 {
-    // Surface slots preserve the original HLOD building material indices (5-8); roof tints follow the surfaces (17-19).
-    public enum LandmarkSurfaceKind : byte { Gravel, Concrete, Asphalt, Paint, Rail, Soil = 9, Wear, Overgrown, Patch, Stain, TrackBed, Aggregate, Rut }
+    // Kinds 5-8 stay unused, as the HLOD building materials once shared these numbers; every surface now draws through
+    // one palette material (LandmarkMesh.SurfaceSlot), so a new kind costs a palette row, not a draw call.
+    public enum LandmarkSurfaceKind : byte { Gravel, Concrete, Asphalt, Paint, Rail, Soil = 9, Wear, Overgrown, Patch, Stain, TrackBed, Aggregate, Rut, Traffic, Scrub }
 
     // A real model's root and approximate outer volume, in world metres with its original yaw and scale.
     public struct LandmarkBuilding
@@ -37,6 +39,11 @@ namespace DroneSandbox
         public float lift;
         public Vector2[] outline;
         public Vector2 fall;
+        // Soft edge width in metres per outline edge (the rectangle's four sides when there is no outline); null is hard.
+        public float[] soft;
+        // 0 the kind's own tone, 1 lighter, 2 darker; bays > 0 instead picks a tone per pour of that length along the area.
+        public byte shade;
+        public float bays;
 
         // The polygon is convex and counterclockwise; the bounding rectangle rejects most painter queries.
         public bool Contains(Vector2 p)
@@ -49,6 +56,47 @@ namespace DroneSandbox
                 if (d.x * q.y - d.y * q.x < -.004f * d.magnitude) return false;
             }
             return true;
+        }
+
+        // How far inside its soft edge p lies: 0 on the outline, 1 once past every edge's width. The nearest edge in
+        // width units wins, so the weight is piecewise linear and LandmarkMesh reproduces it exactly with vertices.
+        public float Weight(Vector2 p)
+        {
+            if (soft == null) return 1f;
+            float t = 1f;
+            if (outline == null)
+            {
+                Vector2 d = p - area.center;
+                float u = Vector2.Dot(d, area.along), v = Vector2.Dot(d, area.Across);
+                if (soft[0] > 0f) t = Math.Min(t, (v + area.halfWidth) / soft[0]);
+                if (soft[1] > 0f) t = Math.Min(t, (area.halfLength - u) / soft[1]);
+                if (soft[2] > 0f) t = Math.Min(t, (area.halfWidth - v) / soft[2]);
+                if (soft[3] > 0f) t = Math.Min(t, (u + area.halfLength) / soft[3]);
+            }
+            else for (int i = 0; i < outline.Length; i++)
+            {
+                if (soft[i] <= 0f) continue;
+                Vector2 a = outline[i], d = outline[(i + 1) % outline.Length] - a;
+                float length = d.magnitude;
+                if (length < .001f) continue;
+                t = Math.Min(t, (d.x * (p.y - a.y) - d.y * (p.x - a.x)) / (length * soft[i]));
+            }
+            return t < 0f ? 0f : t;
+        }
+
+        // The palette tone at p: a pour's own shade along a bay-laid slab, otherwise the surface's fixed shade.
+        public int Tone(Vector2 p)
+        {
+            int variant = shade;
+            if (bays > 0f)
+            {
+                int bay = (int)Math.Floor((Vector2.Dot(p - area.center, area.along) + area.halfLength) / bays);
+                uint h = unchecked((uint)bay * 2654435761u ^ (uint)Mathf.RoundToInt(area.center.x) * 73856093u ^ (uint)Mathf.RoundToInt(area.center.y) * 19349663u);
+                h = unchecked((h ^ (h >> 15)) * 2246822519u); h ^= h >> 13;
+                int roll = (int)(h % 10u);
+                variant = roll < 5 ? 0 : roll < 8 ? 1 : 2;
+            }
+            return (int)kind * 3 + variant;
         }
     }
 
@@ -117,6 +165,9 @@ namespace DroneSandbox
             Region(f, rng, 115f, 80f, 138f, 99f, LandmarkSurfaceKind.Concrete);
             Region(f, rng, -167f, 5f, 64f, 65f, LandmarkSurfaceKind.Soil);
             Region(f, rng, 28f, 120f, 56f, 51f, LandmarkSurfaceKind.Asphalt);
+            // Darker compacted and paler loose patches on the gravel yards, laid before the lanes so the lanes stay clean.
+            Mottle(f, rng, 114f, -83f, 120f, 110f, 5);
+            Mottle(f, rng, -80f, 96f, 230f, 66f, 6);
             Building(f, "Scenery_FactoryHall", -141f, -64f, false, new Vector3(60.35f, 11.573f, 33.335f), 48f, 0, 1.45f);
             Building(f, "Scenery_FactoryHall", -33f, -68f, false, new Vector3(60.35f, 11.573f, 33.335f), 43f, 0, 1.25f);
             Building(f, "Scenery_FactoryHall", 97f, -89f, false, new Vector3(60.35f, 11.573f, 33.335f), 38f);
@@ -158,6 +209,7 @@ namespace DroneSandbox
             Region(f, rng, -124f, 32f, 286f, 54f, LandmarkSurfaceKind.Concrete);
             Region(f, rng, 175f, 28f, 263f, 58f, LandmarkSurfaceKind.Gravel);
             Region(f, rng, 301f, 60f, 130f, 53f, LandmarkSurfaceKind.Soil);
+            Mottle(f, rng, 175f, 28f, 240f, 40f, 5);
             var a = f.Area;
             Vector2 throat = WorldPlan.FeatureRailPoint(a.Point(-390f, -62f), out _);
             // A rust-brown formation and lighter shoulders go down first; the dark ballast strips are laid over them.
@@ -168,7 +220,7 @@ namespace DroneSandbox
                 lines[track] = new[] { throat, a.Point(-350f + track * 12f, -62f), a.Point(begin, v), a.Point(300f, v) };
                 for (int i = 1; i < lines[track].Length; i++) Formation(f, lines[track][i - 1], lines[track][i]);
             }
-            foreach (float v in new[] { -34.6f, -8.9f }) Strip(f, -235f, v, 302f, v, 2.4f, LandmarkSurfaceKind.Aggregate, DecalLift);
+            foreach (float v in new[] { -34.6f, -8.9f }) { Strip(f, -235f, v, 302f, v, 2.4f, LandmarkSurfaceKind.Aggregate, DecalLift); Soften(f, .5f); }
             // One siding stands idle and one holds a short rake, so the yard is never a full diagram of wagons.
             int idle = (f.variantSeed >> 4) & 3, shortRake = (idle + 1 + ((f.variantSeed >> 7) & 1)) & 3;
             var rakeEnd = new float[4];
@@ -177,11 +229,12 @@ namespace DroneSandbox
                 float v = -30f + track * 5.5f;
                 var line = lines[track];
                 f.rails.Add(DenseRail(line));
-                for (int i = 1; i < line.Length; i++) RailSurface(f, line[i - 1], line[i]);
                 int count = 5 + inventory.Next(5);
                 if (track == idle) count = 0;
                 else if (track == shortRake) count = Math.Max(2, count / 2);
                 float start = -125f + track * 43f;
+                for (int i = 1; i < line.Length - 1; i++) RailSurface(f, line[i - 1], line[i]);
+                Ballast(f, rng, -290f + track * 20f, 300f, v, start, start + count * 16.6f, track % 2 == 1);
                 for (int i = 0; i < count; i++) Building(f, track % 2 == 0 ? "Scenery_RailContainerWagon" : "Scenery_RailHopper",
                     start + i * 16.6f, v, true, new Vector3(3.14f, track % 2 == 0 ? 4.45f : 5.535f, 15f), 0f, 3, 1f, true);
                 rakeEnd[track] = count > 0 ? start + count * 16.6f : -290f + track * 20f;
@@ -190,15 +243,15 @@ namespace DroneSandbox
             for (float u = -280f + idle * 20f + Range(rng, 0f, 15f); u < 290f;)
             {
                 float run = Math.Min(296f - u, Range(rng, 18f, 55f));
-                Blob(f, rng, u + run * .5f, -30f + idle * 5.5f, 1f, 0f, run, Range(rng, 4.6f, 6.2f), LandmarkSurfaceKind.Overgrown, .162f);
+                Blob(f, rng, u + run * .5f, -30f + idle * 5.5f, 1f, 0f, run, Range(rng, 4.6f, 6.2f), LandmarkSurfaceKind.Overgrown, MarkLift, 1.5f);
                 u += run + Range(rng, 3f, 14f);
             }
             for (int gap = 0; gap < 3; gap++)
             {
                 float from = Math.Max(rakeEnd[gap], rakeEnd[gap + 1]) + Range(rng, 8f, 20f);
-                if (from < 290f) Strip(f, from, -27.25f + gap * 5.5f, 297f, -27.25f + gap * 5.5f, 1.2f, LandmarkSurfaceKind.Overgrown, .162f);
+                if (from < 290f) { Strip(f, from, -27.25f + gap * 5.5f, 297f, -27.25f + gap * 5.5f, 1.2f, LandmarkSurfaceKind.Overgrown, MarkLift); Soften(f, 2f); }
             }
-            Blob(f, rng, 312f, -21.75f, 1f, 0f, 30f, 26f, LandmarkSurfaceKind.Overgrown, .162f);
+            Blob(f, rng, 312f, -21.75f, 1f, 0f, 30f, 26f, LandmarkSurfaceKind.Overgrown, MarkLift, 2f);
             for (int i = 0; i < 3; i++) Building(f, "Scenery_FreightShed", -179f + i * 151f, 23f + (i % 2) * 8f, false, new Vector3(40.8f, 9.787f, 21.839f), 26f);
             Building(f, "Scenery_SignalBox", -270f, 28f, true, new Vector3(10.6f, 8.15f, 11.135f), 10f, 3);
             Building(f, "Scenery_Warehouse", 232f, 21f, true, new Vector3(18f, 9f, 30f), 22f);
@@ -267,24 +320,61 @@ namespace DroneSandbox
         }
 
         // Keep colours centralized for terrain hooks, local surfaces, HLOD geometry and the offline renderer.
-        public static Color SurfaceColor(LandmarkSurfaceKind kind)
+        public static Color SurfaceColor(LandmarkSurfaceKind kind) => ToneColor((int)kind * 3);
+
+        // Three tones per kind (its own, lighter, darker) and one verge tone for soft edges that run out onto grass.
+        public const int KindCount = 19, ToneCount = KindCount * 3 + 1, VergeTone = ToneCount - 1;
+        static readonly Color[] tones =
         {
-            switch (kind)
-            {
-                case LandmarkSurfaceKind.Concrete: return new Color(0.55f, 0.55f, 0.51f);
-                case LandmarkSurfaceKind.Asphalt: return new Color(0.15f, 0.15f, 0.15f);
-                case LandmarkSurfaceKind.Paint: return new Color(0.85f, 0.85f, 0.82f);
-                case LandmarkSurfaceKind.Rail: return new Color(0.21f, 0.20f, 0.19f);
-                case LandmarkSurfaceKind.Soil: return new Color(0.32f, 0.29f, 0.23f);
-                case LandmarkSurfaceKind.Wear: return new Color(0.24f, 0.25f, 0.23f);
-                case LandmarkSurfaceKind.Overgrown: return new Color(0.32f, 0.37f, 0.25f);
-                case LandmarkSurfaceKind.Patch: return new Color(0.46f, 0.46f, 0.42f);
-                case LandmarkSurfaceKind.Stain: return new Color(0.22f, 0.21f, 0.19f);
-                case LandmarkSurfaceKind.TrackBed: return new Color(0.36f, 0.26f, 0.19f);
-                case LandmarkSurfaceKind.Aggregate: return new Color(0.60f, 0.57f, 0.50f);
-                case LandmarkSurfaceKind.Rut: return new Color(0.33f, 0.30f, 0.25f);
-                default: return new Color(0.42f, 0.40f, 0.36f);
-            }
+            new Color(.42f, .40f, .36f), new Color(.47f, .45f, .40f), new Color(.36f, .345f, .31f),    // gravel
+            new Color(.55f, .55f, .51f), new Color(.565f, .56f, .52f), new Color(.525f, .52f, .48f),   // concrete
+            new Color(.15f, .15f, .15f), new Color(.19f, .19f, .18f), new Color(.12f, .12f, .12f),     // asphalt
+            new Color(.85f, .85f, .82f), new Color(.85f, .85f, .82f), new Color(.70f, .70f, .66f),     // paint
+            new Color(.21f, .20f, .19f), new Color(.28f, .26f, .23f), new Color(.16f, .15f, .14f),     // rail ballast: dusty, oily
+            new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f),     // 5-8 unused
+            new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f),
+            new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f),
+            new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f), new Color(.42f, .40f, .36f),
+            new Color(.32f, .29f, .23f), new Color(.38f, .34f, .27f), new Color(.27f, .24f, .19f),     // soil
+            new Color(.24f, .25f, .23f), new Color(.30f, .30f, .28f), new Color(.20f, .20f, .19f),     // wear
+            new Color(.32f, .37f, .25f), new Color(.38f, .40f, .27f), new Color(.27f, .33f, .21f),     // overgrown: dry, lush
+            new Color(.46f, .46f, .42f), new Color(.575f, .575f, .535f), new Color(.41f, .41f, .38f),   // repair: newer, older
+            new Color(.22f, .21f, .19f), new Color(.30f, .28f, .25f), new Color(.17f, .16f, .15f),     // stain: faded, fresh
+            new Color(.36f, .26f, .19f), new Color(.40f, .31f, .23f), new Color(.31f, .22f, .16f),     // track bed
+            new Color(.60f, .57f, .50f), new Color(.64f, .61f, .54f), new Color(.52f, .49f, .43f),     // aggregate
+            new Color(.33f, .30f, .25f), new Color(.38f, .35f, .30f), new Color(.28f, .25f, .21f),     // rut
+            new Color(.40f, .39f, .35f), new Color(.45f, .44f, .40f), new Color(.34f, .33f, .29f),     // traffic-worn slab
+            new Color(.27f, .32f, .19f), new Color(.31f, .35f, .21f), new Color(.23f, .28f, .17f),     // scrub
+            new Color(.40f, .44f, .29f),                                                               // verge grass
+        };
+
+        // sRGB colour of one palette tone.
+        public static Color ToneColor(int tone) => tones[tone];
+
+        // Soft edges ease in and out: smoothstep sampled at eight points and joined linearly, exactly what the GPU's
+        // bilinear filter makes of the palette's eight texels per tone pair.
+        public static float Profile(float t)
+        {
+            float x = Math.Max(0f, Math.Min(1f, t)) * 7f;
+            int k = Math.Min(6, (int)x);
+            float a = k / 7f, b = (k + 1) / 7f;
+            float sa = a * a * (3f - 2f * a), sb = b * b * (3f - 2f * b);
+            return sa + (sb - sa) * (x - k);
+        }
+
+        // What a viewer sees at p when surface top is the highest there: its tone, fading through its soft edge into the
+        // flat tone of the next surface down (or verge grass). Painters, queries and the slab mesh all use this rule.
+        public static Color Shade(IList<LandmarkSurface> surfaces, int top, Vector2 p)
+        {
+            var s = surfaces[top];
+            Color colour = tones[s.Tone(p)];
+            if (s.soft == null) return colour;
+            float w = s.Weight(p);
+            if (w >= 1f) return colour;
+            Color under = tones[VergeTone];
+            for (int i = top - 1; i >= 0; i--)
+                if (surfaces[i].Contains(p)) { under = tones[surfaces[i].Tone(p)]; break; }
+            return Color.Lerp(under, colour, Profile(w));
         }
     }
 }

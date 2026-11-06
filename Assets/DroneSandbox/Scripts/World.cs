@@ -275,6 +275,15 @@ namespace DroneSandbox
                 }
                 budgets[root] = budget;
             }
+            // Each vegetable plot's tool shed stands by its compost corner, from what the gardens leave of the allowance.
+            foreach (var p in occupiedPlots)
+            {
+                if (p.landUse != 9) continue;
+                var root = roots[p.owner]; int budget = budgets[root];
+                VillageProp("Scenery_Hut", p.Point(-p.frontage * .5f + 2.6f, p.depth - 2.6f), Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg,
+                    .55f, 2f, root, ref budget, false);
+                budgets[root] = budget;
+            }
             Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
         }
 

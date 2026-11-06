@@ -11,7 +11,7 @@ namespace DroneSandbox
         public Vector2 front, along, outward;
         public float frontage, depth, setback;
         public int owner, style;
-        public int landUse; // 1 allotments, 2 playing field, 3 cemetery, 4 depot, 5 edge farm, 6 paddock, 7 orchard, 8 rough grass
+        public int landUse; // 1 allotments, 2 playing field, 3 cemetery, 4 depot, 5 edge farm, 6 paddock, 7 orchard, 8 rough grass, 9 vegetable plot
         public bool town, farm, church, square;
         public string model;
         public bool old, core, cultivated, shed, logs, untended, roofChanged;

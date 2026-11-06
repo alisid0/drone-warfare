@@ -71,7 +71,7 @@ namespace DroneSandbox
                 var f = nearby[index];
                 if (!f.Area.Contains(p, f.clearance)) continue;
                 for (int i = f.surfaces.Count - 1; i >= 0; i--)
-                    if (f.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(f.surfaces[i].kind); return true; }
+                    if (f.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.Shade(f.surfaces, i, p); return true; }
             }
             color = default; return false;
         }

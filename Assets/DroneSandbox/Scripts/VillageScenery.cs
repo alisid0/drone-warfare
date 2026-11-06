@@ -113,6 +113,7 @@ namespace DroneSandbox
                     float finish = Math.Min(end, u - step * .5f);
                     if (last == VillagePlot.Soil || last == VillagePlot.Gravel) Ground.Wear(p.Point(start, v), p.Point(finish, v), step, .85f);
                     if (last == VillagePlot.Rough) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .55f, 4);
+                    if (last == VillagePlot.Meadow) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .3f, 4);
                     if (last == VillagePlot.Stain || last == VillagePlot.Mud) Ground.Paint(p.Point(start, v), p.Point(finish, v), step, .8f, 6); // wet mud layer
                     start = Math.Max(lo + .6f, u - step * .5f); last = use;
                 }
