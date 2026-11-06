@@ -25,7 +25,10 @@ namespace DroneSandbox
             {
                 var surfaces = f.surfaces.ToArray();
                 for (int i = 0; i < surfaces.Length; i++)
+                {
                     if (surfaces[i].outline != null) surfaces[i].outline = (Vector2[])surfaces[i].outline.Clone();
+                    if (surfaces[i].soft != null) surfaces[i].soft = (float[])surfaces[i].soft.Clone();
+                }
                 var entry = new Entry { area = f.Area, clearance = f.clearance, surfaces = surfaces };
                 float reach = f.halfLength + f.halfWidth + f.clearance + 64f;
                 int first = Index(f.center.x - reach, f.center.y - reach), last = Index(f.center.x + reach, f.center.y + reach);
@@ -40,7 +43,7 @@ namespace DroneSandbox
             for (int i = 0; i < bins.Length; i++) if (lists[i] != null) bins[i] = lists[i].ToArray();
         }
 
-        // Surface colour uses unwarped world metres and sRGB, matching WorldPlan.FeatureSurfaceAt.
+        // Surface colour uses unwarped world metres and sRGB, matching WorldPlan.FeatureSurfaceAt, soft edges included.
         public bool SurfaceAt(float x, float z, out Color color)
         {
             var entries = bins[Index(x, z)]; var p = new Vector2(x, z);
@@ -48,7 +51,7 @@ namespace DroneSandbox
             {
                 if (!entry.area.Contains(p, entry.clearance)) continue;
                 for (int i = entry.surfaces.Length - 1; i >= 0; i--)
-                    if (entry.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(entry.surfaces[i].kind); return true; }
+                    if (entry.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.Shade(entry.surfaces, i, p); return true; }
             }
             color = default; return false;
         }
