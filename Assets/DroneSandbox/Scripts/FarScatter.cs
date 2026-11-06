@@ -65,6 +65,7 @@ namespace DroneSandbox
         readonly SettlementHlod settlements = new SettlementHlod();
         readonly LandmarkHlod landmarks = new LandmarkHlod();
         readonly Stopwatch workTimer = new Stopwatch(), renderTimer = new Stopwatch();
+        readonly List<Tree> cellTrees = new List<Tree>(); // the one cell builder's working list
         Vector2 builtOrigin;
         int builtSeed = -1, builtVersion = -1, generatedFrame = -1, cellVersion;
         bool sectorOnly, fallbackMode;
@@ -77,16 +78,18 @@ namespace DroneSandbox
         static int timingFrame = -1;
         int nextCameraSlot;
 
-        // Completed matrix batches are immutable and can be submitted again without walking tree records.
+        // Completed matrix batches are immutable and can be submitted again without walking tree records. Arrays hold a
+        // full batch and are recycled per camera, so a selection allocates nothing once warm.
         sealed class DrawBatch
         {
             public Part part;
-            public Matrix4x4[] matrices;
+            public readonly Matrix4x4[] matrices = new Matrix4x4[Batch];
             public Bounds bounds;
-            public int tier;
+            public int tier, count;
         }
 
-        // Each camera keeps its own completed selection while a replacement is assembled in small slices.
+        // Each camera keeps its own completed selection while a replacement is assembled in small slices. Only that
+        // camera's one selection uses its scratch lists; an abandoned selection never resumes.
         sealed class View
         {
             public readonly List<DrawBatch> draws = new List<DrawBatch>();
@@ -98,6 +101,26 @@ namespace DroneSandbox
             public Vector4 distances;
             public float refreshed;
             public int version = -1, full, reduced, cards, triangles, slot, lastFrame;
+            public readonly List<Cell> snapshot = new List<Cell>();
+            public readonly List<Visible> visible = new List<Visible>();
+            public readonly ForestBudget.Bucket[] bins = new ForestBudget.Bucket[400];
+            public readonly List<Matrix4x4>[] instances = new List<Matrix4x4>[36];
+            public readonly Plane[] planes = new Plane[6];
+            public readonly List<DrawBatch> building = new List<DrawBatch>(), spare = new List<DrawBatch>();
+
+            // Published batches return to the spare list when replaced; the next selection starts frames later.
+            public void Retire()
+            {
+                spare.AddRange(draws); draws.Clear();
+            }
+
+            // A recycled batch, or a new one while the camera's pool is still warming.
+            public DrawBatch Take()
+            {
+                if (spare.Count == 0) return new DrawBatch();
+                var batch = spare[spare.Count - 1]; spare.RemoveAt(spare.Count - 1);
+                return batch;
+            }
         }
 
         // A selection copies only a cell reference and index, never three matrices into a sortable record.
@@ -136,6 +159,9 @@ namespace DroneSandbox
         public static int SelectionStarts { get; private set; }
         public static int SelectionCancels { get; private set; }
         public static int SelectionCompletes { get; private set; }
+        // This frame's landmark and settlement passes over every camera, outside MainThreadMs, for the spike log.
+        public static float PlacesMs { get; private set; }
+        static int placesFrame = -1;
         static double generationMs, selectionMs, submissionMs, canopyMs;
         public static float GenerationMeanMs => (float)(generationMs / Mathf.Max(1, Samples + 1));
         public static float SelectionMeanMs => (float)(selectionMs / Mathf.Max(1, Samples + 1));
@@ -246,7 +272,7 @@ namespace DroneSandbox
             view.lastFrame = Time.frameCount;
             // Never reuse a distant camera's tree hole or pending selection after a teleport.
             if ((position - view.position).sqrMagnitude > 96f * 96f
-                || Vector3.Dot(view.forward, cam.transform.forward) < 0.98f) view.draws.Clear();
+                || Vector3.Dot(view.forward, cam.transform.forward) < 0.98f) view.Retire();
             if (view.builder != null && ((position - view.buildingFrom).sqrMagnitude > 96f * 96f || fast != view.fast))
                 { view.builder = null; SelectionCancels++; }
             if (fast != view.fast) { view.fast = fast; view.version = -1; }
@@ -299,8 +325,17 @@ namespace DroneSandbox
             MainThreadMs = (float)frameMs + Canopy.QueryMs; WorstMs = Mathf.Max(WorstMs, MainThreadMs);
             // Settlement accounting remains outside the forest timer and retains its existing model submission path.
             for (int i = 36; i < models.Length; i++) if (models[i] != null) models[i].instances.Clear();
-            if (FarTerrain.Active) { landmarks.Update(cam, planes); settlements.Update(cam, planes, this); }
+            if (FarTerrain.Active) TimePlaces(cam);
             Draw(cam);
+        }
+
+        // The landmark and settlement passes, timed per frame; first sight of a compound or village lands here.
+        void TimePlaces(Camera cam)
+        {
+            if (placesFrame != Time.frameCount) { placesFrame = Time.frameCount; PlacesMs = 0f; }
+            long started = Stopwatch.GetTimestamp();
+            landmarks.Update(cam, planes); settlements.Update(cam, planes, this);
+            PlacesMs += (float)((Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency);
         }
 
         // Claude can reset measured CPU samples immediately before the low-flight interval, after initial asset loading.
@@ -399,10 +434,12 @@ namespace DroneSandbox
             float focal = FocalPixels(camera) * (orthographic ? -1f : 1f);
             float ready = ReadyReach(new Vector2(position.x, position.z) + FarTerrain.Origin);
             int guard = Mathf.Min(64, Mathf.CeilToInt(1000f * MovementGuard / (4f * Mathf.Max(1f, Mathf.Abs(focal)))));
-            var selectionPlanes = new Plane[6]; GeometryUtility.CalculateFrustumPlanes(camera, selectionPlanes);
-            var snapshot = new List<Cell>(cells.Values);
-            var visible = new List<Visible>();
-            var bins = new ForestBudget.Bucket[400];
+            // This camera's reused scratch (hd167 allocated about 0.5 MB per selection, 50 selections a second).
+            var selectionPlanes = target.planes; GeometryUtility.CalculateFrustumPlanes(camera, selectionPlanes);
+            var snapshot = target.snapshot; snapshot.Clear(); snapshot.AddRange(cells.Values);
+            var visible = target.visible; visible.Clear();
+            var bins = target.bins; System.Array.Clear(bins, 0, bins.Length);
+            target.spare.AddRange(target.building); target.building.Clear();
             int visited = 0;
             foreach (var cell in snapshot)
             {
@@ -441,8 +478,9 @@ namespace DroneSandbox
                 small ? 900 : target.fast ? 1800 : CardLimit, small ? 16 : target.fast ? (close ? 64 : 32) : FullLimit,
                 small ? 60 : target.fast ? (close ? 192 : 160) : ReducedLimit);
             yield return null;
-            var instances = new List<Matrix4x4>[36];
-            var next = new View { position = position, distances = distances, version = version };
+            var instances = target.instances;
+            foreach (var list in instances) list?.Clear();
+            int fullCount = 0, reducedCount = 0, cardCount = 0, triangleCount = 0; float reach = 0f;
             foreach (var v in visible)
             {
                 var tree = v.cell.trees[v.index]; int kind = tree.stand.species * 3 + tree.stand.shade;
@@ -456,19 +494,21 @@ namespace DroneSandbox
                     if (upper <= 0f || v.distance > upper + pad || tier > 0 && v.distance < lower - overlap - pad) continue;
                     if (instances[k] == null) instances[k] = new List<Matrix4x4>();
                     instances[k].Add(tier == 0 ? tree.mesh : tier == 1 ? tree.reduced : tree.card);
-                    next.triangles += model.triangles; next.reach = Mathf.Max(next.reach, Vector3.Distance(position, tree.position));
-                    if (tier == 0) next.full++; else if (tier == 1) next.reduced++; else next.cards++;
+                    triangleCount += model.triangles; reach = Mathf.Max(reach, Vector3.Distance(position, tree.position));
+                    if (tier == 0) fullCount++; else if (tier == 1) reducedCount++; else cardCount++;
                 }
                 if ((++visited & 31) == 0) yield return null;
             }
+            var building = target.building;
             for (int k = 0; k < instances.Length; k++)
             {
-                var list = instances[k]; if (list == null) continue;
+                var list = instances[k]; if (list == null || list.Count == 0) continue;
                 foreach (var part in models[k].parts)
                     for (int start = 0; start < list.Count; start += Batch)
                     {
                         int count = Mathf.Min(Batch, list.Count - start);
-                        var matrices = new Matrix4x4[count];
+                        var draw = target.Take(); building.Add(draw);
+                        var matrices = draw.matrices;
                         var bounds = new Bounds((list[start] * part.local).MultiplyPoint3x4(part.center), Vector3.zero);
                         for (int i = 0; i < count; i++)
                         {
@@ -477,15 +517,15 @@ namespace DroneSandbox
                             if ((i & 31) == 31) yield return null;
                         }
                         bounds.Expand(60f);
-                        next.draws.Add(new DrawBatch { part = part, matrices = matrices, bounds = bounds, tier = k / 12 });
+                        draw.part = part; draw.bounds = bounds; draw.tier = k / 12; draw.count = count;
                     }
             }
             // Selection can finish while the camera moves; publish only while its conservative guard remains valid.
-            target.draws.Clear(); target.draws.AddRange(next.draws); target.position = position;
+            target.Retire(); target.draws.AddRange(building); building.Clear(); target.position = position;
             target.viewport = viewport;
-            target.forward = forward; target.focal = focal; target.ready = ready; target.reach = next.reach;
+            target.forward = forward; target.focal = focal; target.ready = ready; target.reach = reach;
             target.distances = distances; target.version = version; target.refreshed = Time.unscaledTime;
-            target.full = next.full; target.reduced = next.reduced; target.cards = next.cards; target.triangles = next.triangles;
+            target.full = fullCount; target.reduced = reducedCount; target.cards = cardCount; target.triangles = triangleCount;
             SelectionCompletes++;
         }
 
@@ -502,7 +542,7 @@ namespace DroneSandbox
                     if (material == null) continue;
                     var rp = new RenderParams(material) { camera = camera, worldBounds = draw.bounds, matProps = properties,
                         shadowCastingMode = draw.tier == 0 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
-                    Graphics.RenderMeshInstanced(rp, draw.part.mesh, sub, draw.matrices, draw.matrices.Length);
+                    Graphics.RenderMeshInstanced(rp, draw.part.mesh, sub, draw.matrices, draw.count);
                     InstanceDrawCalls++;
                 }
             }
@@ -568,7 +608,7 @@ namespace DroneSandbox
         // The globally aligned candidate cells fit exactly in a 120 m cell, preventing duplicate boundary trees.
         IEnumerator Build(int ci, int cj)
         {
-            var trees = new List<Tree>();
+            var trees = cellTrees; trees.Clear(); // only the current cell builder runs; an abandoned one never resumes
             var center = new Vector2((ci + 0.5f) * CellSize, (cj + 0.5f) * CellSize) - FarTerrain.Origin;
             var bounds = new Bounds(new Vector3(center.x, GroundAt(center), center.y), new Vector3(CellSize + 40f, 240f, CellSize + 40f));
             int count = Mathf.RoundToInt(CellSize / ForestPattern.TreeStep);
