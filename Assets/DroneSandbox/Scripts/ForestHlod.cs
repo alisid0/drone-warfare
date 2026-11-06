@@ -8,6 +8,7 @@ namespace DroneSandbox
 {
     // Recipe woods retain a 4 m surface; world tiles use 16/32 m interiors and 8 m rims in 2 km draw blocks.
     // Flight generation stays in timed main-thread slices; sector loading joins its workers before play can resume.
+    // Coarse blocks are also built ahead round the followed drone and along its route (FarDetail.Route).
     public sealed class ForestHlod
     {
         public const int BlockSize = 2048, TileSize = 256;
@@ -88,9 +89,17 @@ namespace DroneSandbox
         public static int DeferredFrames { get; private set; }
         public static float BuildMeanMs { get; private set; }
         public static float BuildWorstMs { get; private set; }
+        // This frame's canopy main-thread time over every camera, bytes handed to Mesh/Texture2D, prefetch zone blocks
+        // still missing, and coarse blocks started for the prefetch zone since ResetTimings.
+        public static float LastFrameMs { get; private set; }
+        public static long UploadBytes { get; private set; }
+        public static int PrefetchMissing { get; private set; }
+        public static int PrefetchBuilds { get; private set; }
         static double buildTotal;
-        static int buildSamples;
+        static int buildSamples, countedFrame = -1;
+        static long frameBytes;
         float cruiseUntil;
+        Scratch scratch;
 
         // Destroy all native allocations as well as a partially built block when the terrain origin changes.
         public void Clear()
@@ -105,13 +114,14 @@ namespace DroneSandbox
         // Keep interval counters separate from the last camera, which may render after a flight has stopped.
         public static void ResetTimings()
         {
-            RefinementsStarted = CancelledBuilds = DeferredFrames = buildSamples = 0;
+            RefinementsStarted = CancelledBuilds = DeferredFrames = buildSamples = PrefetchBuilds = 0;
             buildTotal = 0; BuildMeanMs = BuildWorstMs = 0f;
         }
 
         // Sector construction has already sampled these coarse blocks; uploading does not re-run the recipe.
         public void AdoptSector()
         {
+            scratch ??= new Scratch(); // the flight builder's reusable arrays, allocated while the sector loads
             var prepared = SectorForest.PreparedCanopy;
             if (prepared == null) return;
             foreach (var data in prepared)
@@ -139,8 +149,19 @@ namespace DroneSandbox
             return d < 1800f ? 16 : d < 4000f ? 32 : d < 9000f ? 64 : 128;
         }
 
-        // Fill missing coverage first; fast flight defers fine work and caps coarse work at 0.20 ms per frame.
+        // Time every camera's pass, so a spike log can tell canopy work from the rest of the frame.
         public void Update(Camera camera, Plane[] planes, bool cruising = false)
+        {
+            if (countedFrame != Time.frameCount) { countedFrame = Time.frameCount; LastFrameMs = 0f; frameBytes = 0; }
+            long started = Stopwatch.GetTimestamp();
+            Refresh(camera, planes, cruising);
+            LastFrameMs += (float)((Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency);
+            UploadBytes = frameBytes;
+        }
+
+        // Fill missing coverage first, then the prefetch zone; fast flight defers fine work and caps coarse work at
+        // 0.20 ms per frame.
+        void Refresh(Camera camera, Plane[] planes, bool cruising)
         {
             BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = NearCoarseBlocks = 0; frame++;
             if (!FarTerrain.ForestCanopyHlod) return;
@@ -205,6 +226,9 @@ namespace DroneSandbox
                 builder = null; pending = null;
                 CancelledBuilds++;
             }
+            // With every visible block covered, coarse coverage ahead comes before refinement, never cancelling one.
+            int ahead = Prefetch(builder != null ? pendingKey : -1);
+            if (builder == null && ahead >= 0 && (wantedKey < 0 || wantedStep < 256)) { wantedKey = ahead; wantedStep = 256; PrefetchBuilds++; }
             if (builder == null && wantedKey >= 0)
             {
                 pendingKey = wantedKey; buildingFrom = world; buildingCamera = camera;
@@ -249,6 +273,51 @@ namespace DroneSandbox
             CachedBlocks = blocks.Count;
         }
 
+        // Blocks within 4 km of the followed eye, and within 2 km of its route out to the prefetch lead plus a block, stay
+        // cached while there; returns the missing one nearest along the route (round the eye first), or -1.
+        int Prefetch(int building)
+        {
+            PrefetchMissing = 0;
+            var route = FarDetail.Route;
+            if (route == null) return -1;
+            int chosen = -1; float best = float.MaxValue;
+            Consider(route.Eye, 4096f, 0f, building, ref chosen, ref best);
+            float walked = 0f, limit = route.Lead + BlockSize;
+            for (int i = 0; i + 1 < route.PathCount && walked < limit; i++)
+            {
+                Vector2 a = route.PathPoint(i), b = route.PathPoint(i + 1);
+                float length = Vector2.Distance(a, b);
+                for (float t = 512f; t < length + 512f; t += 512f)
+                {
+                    float along = Mathf.Min(t, length);
+                    if (walked + along > limit) break;
+                    Consider(Vector2.Lerp(a, b, along / Mathf.Max(length, 1f)), 2048f, walked + along, building, ref chosen, ref best);
+                }
+                walked += length;
+            }
+            return chosen;
+        }
+
+        // Each block whose footprint lies within radius of a route point: keep it if built, else rank it by route metres.
+        void Consider(Vector2 at, float radius, float metres, int building, ref int chosen, ref float best)
+        {
+            int i0 = Mathf.Max(0, Mathf.FloorToInt((at.x - radius + WorldPlan.Half) / BlockSize)), i1 = Mathf.Min(BlockCount - 1, Mathf.FloorToInt((at.x + radius + WorldPlan.Half) / BlockSize));
+            int j0 = Mathf.Max(0, Mathf.FloorToInt((at.y - radius + WorldPlan.Half) / BlockSize)), j1 = Mathf.Min(BlockCount - 1, Mathf.FloorToInt((at.y + radius + WorldPlan.Half) / BlockSize));
+            for (int j = j0; j <= j1; j++)
+                for (int i = i0; i <= i1; i++)
+                {
+                    float x0 = -WorldPlan.Half + i * BlockSize, z0 = -WorldPlan.Half + j * BlockSize;
+                    float dx = Mathf.Max(x0 - at.x, Mathf.Max(0f, at.x - x0 - BlockSize)), dz = Mathf.Max(z0 - at.y, Mathf.Max(0f, at.y - z0 - BlockSize));
+                    if (dx * dx + dz * dz > radius * radius) continue;
+                    int key = j * BlockCount + i;
+                    if (blocks.TryGetValue(key, out Block block)) { block.lastSeen = frame; continue; }
+                    if (key == building) continue;
+                    PrefetchMissing++;
+                    float score = metres + Mathf.Sqrt(dx * dx + dz * dz) * 0.001f;
+                    if (score < best) { best = score; chosen = key; }
+                }
+        }
+
         // Sector loading can finish synchronously before play; flight uses the same upload in small slices.
         Block Upload(Data data)
         {
@@ -264,12 +333,15 @@ namespace DroneSandbox
         // Finish coarse sampling before native allocation, then keep every upload operation in the timed slice.
         IEnumerator Prepare(Data data)
         {
-            var build = Build(data, null); while (build.MoveNext()) yield return null;
+            scratch ??= new Scratch();
+            var build = BuildWith(data, scratch); while (build.MoveNext()) yield return null;
             pendingBlock = new Block { data = data, lastSeen = frame };
             var upload = UploadSteps(pendingBlock); while (upload.MoveNext()) yield return null;
         }
 
-        // Separate channel copies and mip generation so refinement does not commit all resources in one frame.
+        // Separate channel copies and mip generation so refinement does not commit all resources in one frame. The mesh
+        // fills through FarChunkUpload's 1024-vertex slices with bounds taken from the data, never a whole-array set
+        // followed by RecalculateBounds (hd167's worst canopy slice was 3.3 ms).
         IEnumerator UploadSteps(Block block)
         {
             var data = block.data;
@@ -281,21 +353,29 @@ namespace DroneSandbox
             }
             var mesh = new Mesh { name = "Forest canopy " + data.step };
             block.mesh = mesh;
-            mesh.indexFormat = data.vertices.Length > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
-            mesh.vertices = data.vertices; yield return null;
-            mesh.normals = data.normals; yield return null;
-            mesh.uv = data.uv; yield return null;
-            mesh.triangles = data.triangles; yield return null;
-            mesh.RecalculateBounds(); mesh.UploadMeshData(true); yield return null;
+            Vector3 low = data.vertices[0], high = low;
+            for (int i = 0; i < data.vertices.Length; i++)
+            {
+                low = Vector3.Min(low, data.vertices[i]); high = Vector3.Max(high, data.vertices[i]);
+                if ((i & 8191) == 8191) yield return null;
+            }
+            var bounds = new Bounds((low + high) * 0.5f, high - low);
+            for (int stage = 1; ; )
+            {
+                frameBytes += FarChunkUpload.Bytes(stage, data.vertices.Length, data.triangles.Length);
+                if (FarChunkUpload.Step(mesh, data.vertices, data.normals, data.uv, data.triangles, bounds, true, ref stage)) break;
+                yield return null;
+            }
+            yield return null;
             var texture = new Texture2D(data.textureSize, data.textureSize, TextureFormat.RGBA32, true)
                 { name = "Forest crown field", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
             block.texture = texture;
-            texture.SetPixels32(data.pixels); yield return null;
-            texture.Apply(true, true); yield return null;
+            texture.SetPixels32(data.pixels); frameBytes += data.pixels.Length * 4L; yield return null;
+            texture.Apply(true, true); frameBytes += data.pixels.Length * 16L / 3; yield return null;
             var material = ForestMaterials.Create("Canopy", null, 3);
             material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
             if (ForestMaterials.Fades(material)) material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
-            block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = mesh.bounds;
+            block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = bounds;
             block.triangles = data.triangles.Length / 3;
             data.vertices = data.normals = null; data.uv = null;
             data.ground = data.crown = null; data.triangles = null;
@@ -325,38 +405,71 @@ namespace DroneSandbox
             BlocksDrawn++; TrianglesDrawn += block.triangles;
         }
 
-        // World-coordinate sampling and shared perimeter nodes join every refinement level without skirts.
-        sealed class Surface
+        // The flight builder's sampling arrays, lists and maps, kept between blocks: only one flight build runs at a
+        // time, and a generation stamp marks valid entries instead of reallocating 4 MB per refinement.
+        sealed class Scratch
         {
-            readonly Data data;
-            readonly int[] indices;
-            readonly Vector2[] heights;
-            readonly bool[] sampled;
-            readonly bool[] samples;
-            readonly float[] covers;
-            readonly Dictionary<int, Vector2> coarseHeights;
-            readonly Dictionary<int, int> coarseIndices;
-            readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>(Coordinates);
-            readonly Dictionary<long, int> edgeSteps = new Dictionary<long, int>(Coordinates);
+            public readonly int[] indices = new int[SampleCount], vertexStamps = new int[SampleCount], heightStamps = new int[SampleCount];
+            public readonly Vector2[] heights = new Vector2[SampleCount];
+            public readonly float[] covers = new float[SampleCount];
+            public readonly Dictionary<int, Vector2> coarseHeights = new Dictionary<int, Vector2>(4096);
+            public readonly Dictionary<int, int> coarseIndices = new Dictionary<int, int>(2048);
+            public readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>(Coordinates), edgeSteps = new Dictionary<long, int>(Coordinates);
             public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
             public readonly List<Vector2> uv = new List<Vector2>();
             public readonly List<float> ground = new List<float>(), crown = new List<float>();
             public readonly List<int> triangles = new List<int>();
+            public int stamp;
+        }
 
-            // Temporary sampling caches belong to one block and disappear after its immutable arrays are uploaded.
-            public Surface(Data target, bool[] groundSamples = null)
+        // World-coordinate sampling and shared perimeter nodes join every refinement level without skirts.
+        sealed class Surface
+        {
+            readonly Data data;
+            readonly int[] indices, vertexStamps, heightStamps;
+            readonly Vector2[] heights;
+            readonly bool[] samples;
+            readonly float[] covers;
+            readonly int stamp;
+            readonly Dictionary<int, Vector2> coarseHeights;
+            readonly Dictionary<int, int> coarseIndices;
+            readonly Dictionary<long, int> rimSteps, edgeSteps;
+            public readonly List<Vector3> vertices, normals;
+            public readonly List<Vector2> uv;
+            public readonly List<float> ground, crown;
+            public readonly List<int> triangles;
+
+            // Sector workers own fresh caches; the flight builder passes its scratch, whose old entries the new stamp hides.
+            public Surface(Data target, bool[] groundSamples = null, Scratch scratch = null)
             {
                 data = target; samples = groundSamples;
+                if (scratch != null)
+                {
+                    stamp = ++scratch.stamp;
+                    vertices = scratch.vertices; normals = scratch.normals; uv = scratch.uv;
+                    ground = scratch.ground; crown = scratch.crown; triangles = scratch.triangles;
+                    rimSteps = scratch.rimSteps; edgeSteps = scratch.edgeSteps;
+                    vertices.Clear(); normals.Clear(); uv.Clear(); ground.Clear(); crown.Clear(); triangles.Clear();
+                    rimSteps.Clear(); edgeSteps.Clear();
+                }
+                else
+                {
+                    stamp = 1;
+                    vertices = new List<Vector3>(); normals = new List<Vector3>(); uv = new List<Vector2>();
+                    ground = new List<float>(); crown = new List<float>(); triangles = new List<int>();
+                    rimSteps = new Dictionary<long, int>(Coordinates); edgeSteps = new Dictionary<long, int>(Coordinates);
+                }
                 if (samples != null) return;
                 // Bootstrap and distant blocks touch few nodes; avoid clearing a full four-metre cache during flight.
                 if (data.step == 256 || !data.local && data.step >= 64)
                 {
-                    coarseHeights = new Dictionary<int, Vector2>(4096);
-                    coarseIndices = new Dictionary<int, int>(2048);
+                    if (scratch != null) { coarseHeights = scratch.coarseHeights; coarseIndices = scratch.coarseIndices; coarseHeights.Clear(); coarseIndices.Clear(); }
+                    else { coarseHeights = new Dictionary<int, Vector2>(4096); coarseIndices = new Dictionary<int, int>(2048); }
                     return;
                 }
-                indices = new int[SampleCount]; heights = new Vector2[SampleCount]; sampled = new bool[SampleCount];
-                if (!data.local && data.step <= 32) covers = new float[SampleCount];
+                if (scratch != null) { indices = scratch.indices; heights = scratch.heights; vertexStamps = scratch.vertexStamps; heightStamps = scratch.heightStamps; }
+                else { indices = new int[SampleCount]; heights = new Vector2[SampleCount]; vertexStamps = new int[SampleCount]; heightStamps = new int[SampleCount]; }
+                if (!data.local && data.step <= 32) covers = scratch != null ? scratch.covers : new float[SampleCount];
             }
 
             // Use one height function for all tiers; averaging coarse vertices used to split shared block edges.
@@ -368,14 +481,14 @@ namespace DroneSandbox
                 {
                     if (coarseHeights.TryGetValue(key, out var found)) return found.y;
                 }
-                else if (sampled[key]) return heights[key].y;
+                else if (heightStamps[key] == stamp) return heights[key].y;
                 Vector2 world = data.corner + new Vector2(x, z);
                 var stand = SectorForest.At(world.x, world.y);
                 float relief = ForestPattern.Canopy(stand, world.x, world.y, data.local);
                 float floor = data.sampledGround != null ? data.sampledGround[key] : FarScatter.GroundAt(world - FarTerrain.Origin);
                 float height = floor + relief - 0.3f;
                 if (coarseHeights != null) coarseHeights.Add(key, new Vector2(floor, height));
-                else { heights[key] = new Vector2(floor, height); sampled[key] = true; }
+                else { heights[key] = new Vector2(floor, height); heightStamps[key] = stamp; }
                 if (covers != null) covers[key] = stand.cover;
                 return height;
             }
@@ -436,12 +549,12 @@ namespace DroneSandbox
                     samples[SampleIndex(x, z + d)] = samples[SampleIndex(x, z - d)] = true;
                     return 0;
                 }
-                int index = coarseIndices != null ? (coarseIndices.TryGetValue(key, out int found) ? found : -1) : indices[key] - 1;
+                int index = coarseIndices != null ? (coarseIndices.TryGetValue(key, out int found) ? found : -1) : vertexStamps[key] == stamp ? indices[key] : -1;
                 if (index >= 0) return index;
                 Vector2 p = data.corner + new Vector2(x, z) - FarTerrain.Origin;
                 float top = Height(x, z), floor = coarseHeights != null ? coarseHeights[key].x : heights[key].x;
                 index = vertices.Count;
-                if (coarseIndices != null) coarseIndices.Add(key, index); else indices[key] = index + 1;
+                if (coarseIndices != null) coarseIndices.Add(key, index); else { indices[key] = index; vertexStamps[key] = stamp; }
                 vertices.Add(new Vector3(p.x, top, p.y)); ground.Add(floor); crown.Add(top - floor);
                 float pixel = TexelSize(data), padding = pixel * 2f;
                 uv.Add(new Vector2((x + padding) / (BlockSize + padding * 2f), (z + padding) / (BlockSize + padding * 2f)));
@@ -497,15 +610,18 @@ namespace DroneSandbox
             }
         }
         // Construct in 256 m tiles, retaining one batched draw per 2 km district rather than a draw per tile.
-        public static IEnumerator Build(Data data, byte[] unused)
+        public static IEnumerator Build(Data data, byte[] unused) => BuildWith(data, null);
+
+        // The same construction, optionally on the flight builder's reusable scratch.
+        static IEnumerator BuildWith(Data data, Scratch scratch)
         {
             // Bootstrap uses the same surface and stitched perimeter; no vertical skirts around open ground.
             if (data.step == 256)
             {
-                var coverage = Coverage(data); while (coverage.MoveNext()) yield return null;
+                var coverage = Coverage(data, scratch); while (coverage.MoveNext()) yield return null;
                 yield break;
             }
-            var surface = new Surface(data);
+            var surface = new Surface(data, null, scratch);
             var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
             var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
             if (data.triangles.Length == 0) yield break;
@@ -606,9 +722,9 @@ namespace DroneSandbox
         static float TexelSize(Data data) => data.step == 256 ? 64f : data.local || data.step <= 32 ? 16f : 32f;
 
         // Coarse interiors share exact perimeter heights with refined blocks, removing the old 32 m vertical skirts.
-        static IEnumerator Coverage(Data data)
+        static IEnumerator Coverage(Data data, Scratch scratch)
         {
-            var surface = new Surface(data);
+            var surface = new Surface(data, null, scratch);
             var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
             var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
             if (data.triangles.Length == 0) yield break;
