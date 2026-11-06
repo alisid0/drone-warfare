@@ -180,7 +180,7 @@ namespace DroneSandbox
             { Lane(f, u, 62f, u, 9f, 6f); Region(f, rng, u, 10f, 24f, 23f, LandmarkSurfaceKind.Gravel, false); }
             Track(f, -340f, 76f, 358f, 76f);
             for (int i = 0; i < 12; i++) Prop(f, "Scenery_FreightGroup", -208f + (i % 6) * 85f, 43f + (i / 6) * 10f, i % 6, rng);
-            Vehicles(f, rng, -65f, 53f, 6); Vehicles(f, rng, 88f, 55f, 7);
+            Vehicles(f, rng, -65f, 53f, 6); Vehicles(f, rng, 88f, 53f, 7);
             Prop(f, "Scenery_AggregatePile", 311f, 42f, 5, rng, new Vector3(1.1f, 1f, .8f));
             Weather(f, rng, 10f, 6f, 480f, 8f, 22);
             Corners(f, rng); Perimeter(f, 377f, -87f, 87f, true);

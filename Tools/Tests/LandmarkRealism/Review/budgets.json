@@ -1,0 +1,293 @@
+{
+  "IndustrialZone": {
+    "before": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 86,
+          "triangles": 59774,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 7,
+            "Scenery_Warehouse": 8,
+            "Scenery_OfficeBlock": 7,
+            "Scenery_StorageTank": 4,
+            "Scenery_Chimney": 5
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 74,
+          "triangles": 16342,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 6,
+            "Scenery_Warehouse": 8,
+            "Scenery_OfficeBlock": 5,
+            "Scenery_StorageTank": 3,
+            "Scenery_Chimney": 5
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 63,
+          "triangles": 5538,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 5,
+            "Scenery_Warehouse": 8,
+            "Scenery_OfficeBlock": 4,
+            "Scenery_StorageTank": 2,
+            "Scenery_Chimney": 5
+          }
+        }
+      ],
+      "hlodDraws": 7,
+      "hlodTriangles": 330,
+      "managedBuildMs": 1027.9254,
+      "surfaceAndHlodMeshMs": 2.1491
+    },
+    "after": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 128,
+          "triangles": 103561,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 7,
+            "Scenery_Warehouse": 8,
+            "Scenery_FreightShed": 9,
+            "Scenery_OfficeBlock": 7,
+            "Scenery_CoolingTower": 4,
+            "Scenery_StorageTank": 4,
+            "Scenery_Chimney": 5,
+            "Scenery_PipeRack": 4,
+            "Scenery_RailWagon": 5
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 117,
+          "triangles": 69005,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 6,
+            "Scenery_Warehouse": 8,
+            "Scenery_FreightShed": 7,
+            "Scenery_OfficeBlock": 5,
+            "Scenery_CoolingTower": 4,
+            "Scenery_StorageTank": 3,
+            "Scenery_Chimney": 5,
+            "Scenery_PipeRack": 4,
+            "Scenery_RailWagon": 5
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 101,
+          "triangles": 57625,
+          "perAssetDraws": {
+            "Scenery_FactoryHall": 5,
+            "Scenery_Warehouse": 8,
+            "Scenery_FreightShed": 5,
+            "Scenery_OfficeBlock": 4,
+            "Scenery_CoolingTower": 3,
+            "Scenery_StorageTank": 2,
+            "Scenery_Chimney": 5,
+            "Scenery_PipeRack": 3,
+            "Scenery_RailWagon": 5
+          }
+        }
+      ],
+      "hlodDraws": 11,
+      "hlodTriangles": 8987,
+      "managedBuildMs": 929.9268,
+      "surfaceAndHlodMeshMs": 39.0318
+    },
+    "delta": [
+      42,
+      43,
+      38
+    ]
+  },
+  "Airfield": {
+    "before": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 26,
+          "triangles": 12502,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 5,
+            "Scenery_ControlTower": 7,
+            "Scenery_FuelFarm": 6
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 24,
+          "triangles": 3818,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 5,
+            "Scenery_ControlTower": 6,
+            "Scenery_FuelFarm": 5
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 19,
+          "triangles": 494,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 4,
+            "Scenery_ControlTower": 5,
+            "Scenery_FuelFarm": 3
+          }
+        }
+      ],
+      "hlodDraws": 6,
+      "hlodTriangles": 196,
+      "managedBuildMs": 961.1792,
+      "surfaceAndHlodMeshMs": 0.0376
+    },
+    "after": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 69,
+          "triangles": 101881,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 5,
+            "Scenery_AircraftShelter": 6,
+            "Scenery_ControlTower": 7,
+            "Scenery_FuelFarm": 6,
+            "Scenery_OfficeBlock": 7
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 62,
+          "triangles": 75805,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 5,
+            "Scenery_AircraftShelter": 5,
+            "Scenery_ControlTower": 6,
+            "Scenery_FuelFarm": 5,
+            "Scenery_OfficeBlock": 5
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 51,
+          "triangles": 68401,
+          "perAssetDraws": {
+            "Scenery_HangarLarge": 4,
+            "Scenery_AircraftShelter": 4,
+            "Scenery_ControlTower": 5,
+            "Scenery_FuelFarm": 3,
+            "Scenery_OfficeBlock": 4
+          }
+        }
+      ],
+      "hlodDraws": 10,
+      "hlodTriangles": 8963,
+      "managedBuildMs": 960.2649,
+      "surfaceAndHlodMeshMs": 60.1694
+    },
+    "delta": [
+      43,
+      38,
+      32
+    ]
+  },
+  "RailJunction": {
+    "before": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 171,
+          "triangles": 81540,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 6,
+            "Scenery_RailHopper": 4,
+            "Scenery_FreightShed": 9,
+            "Scenery_SignalBox": 8
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 124,
+          "triangles": 27344,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 4,
+            "Scenery_RailHopper": 3,
+            "Scenery_FreightShed": 7,
+            "Scenery_SignalBox": 7
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 102,
+          "triangles": 2952,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 3,
+            "Scenery_RailHopper": 3,
+            "Scenery_FreightShed": 5,
+            "Scenery_SignalBox": 5
+          }
+        }
+      ],
+      "hlodDraws": 6,
+      "hlodTriangles": 344,
+      "managedBuildMs": 1056.5546,
+      "surfaceAndHlodMeshMs": 0.0342
+    },
+    "after": {
+      "levels": [
+        {
+          "lod": 0,
+          "materialSubmissions": 213,
+          "triangles": 128218,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 6,
+            "Scenery_RailHopper": 4,
+            "Scenery_FreightShed": 9,
+            "Scenery_SignalBox": 8,
+            "Scenery_Warehouse": 8,
+            "Scenery_GantryCrane": 6
+          }
+        },
+        {
+          "lod": 1,
+          "materialSubmissions": 166,
+          "triangles": 73246,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 4,
+            "Scenery_RailHopper": 3,
+            "Scenery_FreightShed": 7,
+            "Scenery_SignalBox": 7,
+            "Scenery_Warehouse": 8,
+            "Scenery_GantryCrane": 6
+          }
+        },
+        {
+          "lod": 2,
+          "materialSubmissions": 137,
+          "triangles": 46934,
+          "perAssetDraws": {
+            "Scenery_RailContainerWagon": 3,
+            "Scenery_RailHopper": 3,
+            "Scenery_FreightShed": 5,
+            "Scenery_SignalBox": 5,
+            "Scenery_Warehouse": 8,
+            "Scenery_GantryCrane": 5
+          }
+        }
+      ],
+      "hlodDraws": 9,
+      "hlodTriangles": 3788,
+      "managedBuildMs": 852.7641,
+      "surfaceAndHlodMeshMs": 29.871
+    },
+    "delta": [
+      42,
+      42,
+      35
+    ]
+  }
+}
