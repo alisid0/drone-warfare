@@ -25,12 +25,16 @@ namespace DroneSandbox
         static Texture2D gravel;
         static Material fieldTemplate;
         static readonly List<Object> made = new List<Object>(); // each field's mesh, material and detail map, to free
+        // One detail map per world parcel: a parcel cut into pieces by roads or the sector edge shares its parent's
+        // map, which each piece used to paint again in full (fields 13.4 s in hd143's river valley).
+        static readonly Dictionary<FieldPlot, Texture2D> details = new Dictionary<FieldPlot, Texture2D>();
 
         // Frees the per-field meshes, materials and detail maps when a new sector replaces them.
         public static void Release()
         {
             foreach (var o in made) Art.Discard(o);
             made.Clear();
+            details.Clear();
         }
 
         // Builds every field surface, then shares the prop allowance between fields so a large farm count
@@ -128,7 +132,8 @@ namespace DroneSandbox
             if (fieldTemplate != null)
             {
                 // The detail map spans the field once: the UVs run in Tile-sized steps out from the middle.
-                material.SetTexture("_DetailMap", FieldDetail(surface));
+                if (!details.TryGetValue(surface, out var detail)) details[surface] = detail = FieldDetail(surface);
+                material.SetTexture("_DetailMap", detail);
                 material.SetTextureScale("_DetailMap", new Vector2(Tile / (2f * surface.halfWidth), Tile / (2f * surface.halfLength)));
                 Vector2 offset = new Vector2(0.5f, 0.5f);
                 if (worldParcel)
@@ -157,7 +162,9 @@ namespace DroneSandbox
             float tramOffset = Mathf.Repeat(plot.center.x * 3.7f + plot.center.y * 1.3f, TramSpacing);
             int nw = Mathf.CeilToInt(width / 2f) + 1, nh = Mathf.CeilToInt(length / 2f) + 1;
             var growth = new Vector2[nw * nh];
-            for (int y = 0; y < nh; y++)
+            // Rows on all cores: a world parcel's map can be a quarter of a million texels, and a sector has hundreds.
+            System.Threading.Tasks.Parallel.For(0, nh, y =>
+            {
                 for (int x = 0; x < nw; x++)
                 {
                     float across = x * 2f, along = y * 2f;
@@ -166,8 +173,9 @@ namespace DroneSandbox
                             + Mathf.PerlinNoise(across * 0.11f + seed * 2f, along * 0.11f + 7f) * 0.35f,
                         plot.crop == Crop.Wheat ? Mathf.PerlinNoise(across * 0.09f + seed * 3f, along * 0.09f + 40f) : 0f);
                 }
+            });
             var bytes = new byte[w * h];
-            for (int y = 0; y < h; y++)
+            System.Threading.Tasks.Parallel.For(0, h, y =>
             {
                 float along = (y + 0.5f) / h * length;
                 int gy = Mathf.Min((int)(along / 2f), nh - 2);
@@ -182,7 +190,7 @@ namespace DroneSandbox
                     float f = Brightness(plot.crop, across, along, width, length, seed, tramOffset, noise);
                     bytes[y * w + x] = (byte)Mathf.Clamp(Mathf.RoundToInt(DetailValue(f) * 255f), 0, 255);
                 }
-            }
+            });
             var tex = new Texture2D(w, h, TextureFormat.R8, true, true)
             {
                 name = plot.crop + " field detail", wrapMode = TextureWrapMode.Clamp, anisoLevel = 4, filterMode = FilterMode.Trilinear,

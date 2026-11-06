@@ -82,7 +82,7 @@ namespace DroneSandbox
                 }
             IndexSites();
             ClearWorn();
-            canopy = null; // the last sector's woods
+            canopy = stems = null; // the last sector's woods
 
             FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
@@ -648,32 +648,43 @@ namespace DroneSandbox
         // still has its floor) plus, at half weight, every tree actually planted.
         const float CanopyCell = 2f;
         static float[] canopy;
+        static float[] stems; // the trees actually planted alone, at full weight: where the litter lies
         static int canopyRes;
 
         // How wooded the ground at (x, z) is (see canopy); 0 before the woods are planted. Safe from worker threads.
-        public static float CanopyAt(float x, float z)
+        public static float CanopyAt(float x, float z) => canopy == null ? 0f : Grid(canopy, x, z);
+
+        // Bilinear sample of one of the 2 m wood grids.
+        static float Grid(float[] grid, float x, float z)
         {
-            if (canopy == null) return 0f;
             float gx = (x + Size / 2f) / CanopyCell - 0.5f, gz = (z + Size / 2f) / CanopyCell - 0.5f;
             int i = Mathf.Clamp(Mathf.FloorToInt(gx), 0, canopyRes - 2), j = Mathf.Clamp(Mathf.FloorToInt(gz), 0, canopyRes - 2);
             float u = Mathf.Clamp01(gx - i), v = Mathf.Clamp01(gz - j);
-            float a = canopy[j * canopyRes + i], b = canopy[j * canopyRes + i + 1];
-            float c = canopy[(j + 1) * canopyRes + i], d = canopy[(j + 1) * canopyRes + i + 1];
+            float a = grid[j * canopyRes + i], b = grid[j * canopyRes + i + 1];
+            float c = grid[(j + 1) * canopyRes + i], d = grid[(j + 1) * canopyRes + i + 1];
             return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
         }
 
         // The woods stood on the meadow layer and looked like trees in a park. Under them now: fallen leaves and
-        // needles (the litter layer), dark mossy patches (the damp grass) and a ragged edge where the wood gives way to
-        // open ground. Paths, yards and rock keep their own layers. Written in bands of 512 rows over the woods'
-        // bounds, so neither the copy of the splat nor the uploads grow with the whole map (hd127).
+        // needles (the litter layer) where trees actually stand, shaded damp grass and moss (layer 1) in a wood's
+        // thinner parts, and a ragged edge where the wood gives way to open ground; litter wherever the wood could
+        // grow lay as brown blotches between a thinned wood's trees (hd142's Deep Forest). Paths, yards and rock keep
+        // their own layers. Written in bands of 512 rows over the woods' bounds, so neither the copy of the splat nor
+        // the uploads grow with the whole map (hd127).
         public static void PaintForestFloor(List<Vector2> woodland, IReadOnlyList<Vector2> trees)
         {
             if (terrain == null) return;
             canopyRes = Mathf.CeilToInt(Size / CanopyCell);
             canopy = new float[canopyRes * canopyRes];
+            stems = new float[canopyRes * canopyRes];
             Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
-            foreach (var p in woodland) { Spread(p, 1f); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p); }
-            for (int t = 0; t < trees.Count; t++) { Spread(trees[t], 0.5f); lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]); }
+            foreach (var p in woodland) { Spread(canopy, p, 1f); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p); }
+            for (int t = 0; t < trees.Count; t++)
+            {
+                Spread(canopy, trees[t], 0.5f);
+                Spread(stems, trees[t], 1f);
+                lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]);
+            }
             if (lo.x > hi.x) return;
 
             var data = terrain.terrainData;
@@ -696,19 +707,21 @@ namespace DroneSandbox
                         float floor = Mathf.SmoothStep(0f, 1f, (CanopyAt(x, z) + ragged - 1.2f) / 1.8f);
                         floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3]) * 1.5f); // tracks, yards, rock
                         if (floor <= 0.001f) continue;
-                        // Moss and damp grass where the canopy opens a little, in patches 10-25 m across.
-                        float moss = 0.55f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.045f + 3f, z * 0.045f + 19f) - 0.5f) / 0.2f);
+                        // Litter under the trees that stand (about 1.5 at 10 m spacing, 0.4 at the 17 m of a thinned wood),
+                        // with moss and damp grass in patches 10-25 m across; shaded grass in the rest.
+                        float litter = Mathf.SmoothStep(0f, 1f, (Grid(stems, x, z) + ragged * 0.4f - 0.5f) / 1.5f);
+                        litter *= 1f - 0.55f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.045f + 3f, z * 0.045f + 19f) - 0.5f) / 0.2f);
                         for (int k = 0; k < maps.GetLength(2); k++) maps[j, i, k] *= 1f - floor;
-                        maps[j, i, LitterLayer] += floor * (1f - moss);
-                        maps[j, i, 1] += floor * moss;
+                        maps[j, i, LitterLayer] += floor * litter;
+                        maps[j, i, 1] += floor * (1f - litter);
                     }
                 });
                 data.SetAlphamaps(x0, band, maps);
             }
         }
 
-        // Adds one wood point's share to the canopy grid: a 4.5 m Gaussian, cut off at 9 m.
-        static void Spread(Vector2 p, float weight)
+        // Adds one wood point's share to a wood grid: a 4.5 m Gaussian, cut off at 9 m.
+        static void Spread(float[] grid, Vector2 p, float weight)
         {
             const float reach = 9f, spread = 2f * 4.5f * 4.5f;
             int r = Mathf.CeilToInt(reach / CanopyCell);
@@ -718,7 +731,7 @@ namespace DroneSandbox
                 {
                     float dx = -Size / 2f + (i + 0.5f) * CanopyCell - p.x, dz = -Size / 2f + (j + 0.5f) * CanopyCell - p.y;
                     float d2 = dx * dx + dz * dz;
-                    if (d2 < reach * reach) canopy[j * canopyRes + i] += weight * Mathf.Exp(-d2 / spread);
+                    if (d2 < reach * reach) grid[j * canopyRes + i] += weight * Mathf.Exp(-d2 / spread);
                 }
         }
 
