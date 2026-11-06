@@ -1,5 +1,5 @@
 // Complementary world-stable coverage intervals fade meshes, cards and canopy in every HDRP raster pass.
-void ForestFade(float3 positionRWS, float2 canopyUV)
+void ForestFade(float3 positionRWS, float2 canopyUV, uint2 positionSS)
 {
     // Invalid/unbound draw parameters fail open. Material properties live in UnityPerMaterial in every pass.
     if (_ForestEnabled < 0.5 || _ForestCamera.w < 0.5 || _ForestDistances.w < 1.0 || _ForestDistances.z < _ForestDistances.y
@@ -37,8 +37,20 @@ void ForestFade(float3 positionRWS, float2 canopyUV)
     uint hash = cell.x * 73856093u ^ cell.y * 19349663u ^ cell.z * 83492791u;
     hash ^= hash >> 16; hash *= 0x7feb352du; hash ^= hash >> 15;
     float noise = ((hash & 65535u) + 0.5) / 65536.0;
-    if (_ForestBuild >= 0.0) clip(_ForestBuild - noise);
-    else clip(noise + _ForestBuild);
+    // A refining canopy block and its predecessor lie at different heights, so world cells cannot interleave them
+    // and a quarter of the pixels mid-fade would show neither. Both share one per-pixel pattern instead; the canopy
+    // casts no shadow, so no shadow pass has to reproduce it.
+    float build = noise;
+#if !defined(SHADER_STAGE_RAY_TRACING)
+    if (_ForestTier >= 3.0)
+    {
+        uint screen = positionSS.x * 73856093u ^ positionSS.y * 19349663u;
+        screen ^= screen >> 16; screen *= 0x7feb352du; screen ^= screen >> 15;
+        build = ((screen & 65535u) + 0.5) / 65536.0;
+    }
+#endif
+    if (_ForestBuild >= 0.0) clip(_ForestBuild - build);
+    else clip(build + _ForestBuild);
     clip(noise - low);
     clip(high - noise);
 }
