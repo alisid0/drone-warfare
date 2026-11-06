@@ -574,8 +574,10 @@ namespace DroneSandbox
             for (int i = 0; i < game.Feed.Count; i++)
             {
                 var (text, until) = game.Feed[i];
-                float alpha = Mathf.Clamp01((until - now) / 0.6f) * (i == 0 ? 1f : 0.8f);
                 string lower = text.ToLowerInvariant();
+                // Photo mode shows only its own news: a battle's "pinned down" banner turned up across a dam picture.
+                if (PhotoMode.Active && !lower.Contains("photo")) continue;
+                float alpha = Mathf.Clamp01((until - now) / 0.6f) * (i == 0 ? 1f : 0.8f);
                 Color colour = lower.Contains("lost") || lower.Contains("down") || lower.Contains("left behind") ? Hostile
                     : lower.Contains("alerted") || lower.Contains("spotted") || lower.Contains("identified") || lower.Contains("jammed") ? DravinOrange
                     : lower.StartsWith("recon") || lower.StartsWith("strike") || lower.StartsWith("extract") || lower.StartsWith("returning") || lower.StartsWith("following") ? Teal
