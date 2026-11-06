@@ -170,7 +170,9 @@ namespace DroneSandbox
             exposure.mode.Override(ExposureMode.AutomaticHistogram);
             exposure.limitMin.Override(-1f);
             exposure.limitMax.Override(16f);
-            exposure.compensation.Override(0.3f); // keeps the shaded valley readable at sunrise and sunset
+            // Keeps the shaded valley readable at sunrise and sunset; with 0.3 the grey card sat near sRGB 95, short of
+            // the 110-118 a correctly exposed 18% grey shows (hd161).
+            exposure.compensation.Override(0.5f);
             exposure.adaptationSpeedDarkToLight.Override(3f);
             exposure.adaptationSpeedLightToDark.Override(2f);
 
@@ -237,7 +239,10 @@ namespace DroneSandbox
             vignette.intensity.Override(0.12f);
             vignette.smoothness.Override(0.45f);
             var whiteBalance = Get<WhiteBalance>(profile);
-            whiteBalance.temperature.Override(0f); // the sky already warms low sun; more turned dawn brown
+            // A camera's daylight white balance: the physical sun reaches the ground yellowed by the air, so with none an
+            // 18% grey card in the strategy view read (107, 94, 77) and every meadow olive (hd161). At -20 it reads
+            // (99, 95, 92); low sun is still far warmer than this, so dawn and dusk keep their colour.
+            whiteBalance.temperature.Override(-20f);
             var split = Get<SplitToning>(profile);
             split.shadows.Override(new Color(0.47f, 0.53f, 0.57f));
             split.highlights.Override(new Color(0.75f, 0.62f, 0.48f));

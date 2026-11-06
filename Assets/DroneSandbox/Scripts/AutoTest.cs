@@ -116,7 +116,7 @@ namespace DroneSandbox
             rts.LookAt(new Vector3(bridge.x, 0f, bridge.y), 40f * Scale.Camera, 135f);
             yield return new WaitForSeconds(0.5f);
             yield return Shot("02c_bridge");
-            rts.LookAt(Old(-100f, 0f), 26f * Scale.Lens, 150f);
+            rts.LookAt(OpenRiverNear(Old(-100f, 0f)), 26f * Scale.Lens, 150f);
             yield return new WaitForSeconds(2f); // the camera settled, for the pair below
             yield return Shot("02f_river");
             // The same view a second later, to check that the water flows down the river (compare the two).
@@ -501,6 +501,20 @@ namespace DroneSandbox
                     var p = new Vector2(from.x, from.z) + new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
                     bool dry = MapLayout.LakeDistance(p.x, p.y) > 10f && MapLayout.RiverField.Distance(p.x, p.y) > MapLayout.RiverHalfWidth + 8f;
                     if (dry && !Undergrowth.UnderTrees(p, clearance)) return new Vector3(p.x, 0f, p.y);
+                }
+            return from;
+        }
+
+        // The nearest spot in the river (going out in rings) with no tree within clearance metres: hd160's river shot
+        // looked straight into a bankside crown.
+        static Vector3 OpenRiverNear(Vector3 from, float clearance = 18f)
+        {
+            for (float reach = 0f; reach < 400f; reach += 10f)
+                for (float angle = 0f; angle < 360f; angle += reach > 0f ? 15f : 360f)
+                {
+                    var p = new Vector2(from.x, from.z) + new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
+                    if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth * 0.5f && !Undergrowth.UnderTrees(p, clearance))
+                        return new Vector3(p.x, 0f, p.y);
                 }
             return from;
         }
@@ -2073,6 +2087,38 @@ namespace DroneSandbox
             log.WriteLine(cost.ToString());
             Set(bounceOn, true, microOn, true, 2048);
             Atmosphere.ApplyQuality(Camera.main);
+            yield return GreyCard(game, rts);
+        }
+
+        // A flat 18%-grey matte card in the open by the base, from 60 m and the strategy camera's 300 m: its colour on
+        // screen is the cast the sun, sky, fog and grade put on everything (hd159's concrete came out tan and every
+        // meadow short of blue). A neutral picture keeps its R, G and B within a few levels of each other; hd161's A/B of
+        // white balances and highlight tones chose -20 (Atmosphere.ConfigureProfile).
+        IEnumerator GreyCard(SandboxGame game, RtsController rts)
+        {
+            Vector3 spot = OpenGroundNear(game.basePosition, 30f);
+            var card = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Destroy(card.GetComponent<Collider>());
+            card.transform.SetPositionAndRotation(Ground.OnGround(spot) + Vector3.up * 0.3f, Quaternion.Euler(90f, 0f, 0f)); // facing up
+            card.transform.localScale = Vector3.one * 40f;
+            var material = Art.NewMaterial(new Color(0.46f, 0.46f, 0.46f)); // sRGB 0.46 is 18% reflectance
+            material.SetFloat("_Smoothness", 0f);
+            card.GetComponent<MeshRenderer>().sharedMaterial = material;
+            foreach (var (name, distance) in new[] { ("60m", 60f), ("300m", 300f) })
+            {
+                rts.LookAt(spot, distance, 30f);
+                yield return new WaitForSecondsRealtime(1.5f); // exposure and temporal AA settle
+                yield return new WaitForEndOfFrame();
+                var screen = ScreenCapture.CaptureScreenshotAsTexture();
+                Color sum = Color.black;
+                for (int y = -4; y <= 4; y++)
+                    for (int x = -4; x <= 4; x++) sum += screen.GetPixel(screen.width / 2 + x, screen.height / 2 + y);
+                Destroy(screen);
+                log.WriteLine($"Grey card {name}: sRGB {sum.r / 81f * 255f:F0} {sum.g / 81f * 255f:F0} {sum.b / 81f * 255f:F0}");
+                yield return Shot($"90_greycard_{name}");
+            }
+            Destroy(card);
+            Destroy(material);
         }
 
         // One permanent landmark of each kind as the world draws it outside a sector (streamed ground, far masses), from
