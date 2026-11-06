@@ -107,6 +107,7 @@ namespace DroneSandbox
             plan = sector;
             prepared = false;
             VillageField = null; // the last sector's streets
+            DetailPlan = null;
         }
 
         public static float RiverHalfWidth => Plan.riverHalfWidth;
@@ -165,6 +166,7 @@ namespace DroneSandbox
         public static readonly List<Ground.FlatSite> FlatSites = new List<Ground.FlatSite>();
         public static readonly List<FieldPlot> Fields = new List<FieldPlot>();
         public static readonly List<FieldBoundary> Boundaries = new List<FieldBoundary>();
+        internal static FarDetailData DetailPlan { get; private set; }
         // Where roads meet or cross, which wheels have worn into a wider patch of bare ground.
         public static readonly List<Vector2> Junctions = new List<Vector2>();
         public static string Timings { get; private set; } = ""; // how long the last Prepare's steps took
@@ -178,6 +180,8 @@ namespace DroneSandbox
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var times = new System.Text.StringBuilder();
             void Lap(string what) { times.Append($"{what} {clock.ElapsedMilliseconds} ms, "); clock.Restart(); }
+            DetailPlan = p.world == null ? null : WorldPlan.CaptureDetail(null);
+            Lap("shared plan");
 
             FlatSites.Clear();
             FlatSites.Add(new Ground.FlatSite(p.basePosition, BaseRadius, true));
@@ -241,6 +245,7 @@ namespace DroneSandbox
 
             PlanFields(new System.Random(p.fieldSeed));
             IndexFields();
+            if (p.world != null) FieldTimings += $", farmland coverage {FarmlandCoverage():P1}";
             Lap("fields");
             Timings = times.ToString();
         }
@@ -495,6 +500,24 @@ namespace DroneSandbox
             return false;
         }
 
+        // Survey all eligible farmland, including land where parcel fitting failed; exclusions never shrink to
+        // the accepted crops. The eight metre grid uses the field index already needed by scenery placement.
+        public static float FarmlandCoverage()
+        {
+            if (Plan.world == null) return FieldCoverage();
+            int land = 0, filled = 0;
+            for (float z = -Ground.Size * .5f + 3f; z < Ground.Size * .5f; z += 8f)
+                for (float x = -Ground.Size * .5f + 3f; x < Ground.Size * .5f; x += 8f)
+                {
+                    var p = new Vector2(x, z);
+                    if (Plan.world.CoverAt(x, z) != Cover.Farmland || Blocked(p)) continue;
+                    land++;
+                    if (InField(p, 0f)) filled++;
+                }
+            return land > 0 ? filled / (float)land : 0f;
+        }
+
+
         // Within margin of a village's houses and gardens: the strip either side of its streets once they're planned
         // (fields, woods and scrub keep out of it), the old circle round its centre before.
         public static bool NearVillage(Vector2 p, float margin)
@@ -748,7 +771,8 @@ namespace DroneSandbox
                         || RoadField.Distance(p.x, p.y) < RoadWidthAt(p.x, p.y) + 2f + slack || TrackField.Distance(p.x, p.y) < 2.5f + slack
                         || (HasRiver && RiverField.Distance(p.x, p.y) < RiverHalfWidth + 6f + slack)
                         || LakeDistance(p.x, p.y) < 16f + slack || NearDam(p, 15f + slack) || OnWorks(p, 4f + slack)
-                        || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p);
+                        || NearFlatSite(p, 4f + slack) || NearVillage(p, slack) || FieldParcels.Steep(p)
+                        || (Plan.world != null && Plan.world.CoverAt(p.x, p.y) != Cover.Farmland);
                     if (!blocked[j * blockCount + i])
                         foreach (var orchard in Plan.orchards)
                             if (orchard.Contains(p, 3f)) { blocked[j * blockCount + i] = true; break; }
