@@ -1239,6 +1239,10 @@ namespace DroneSandbox
                               $"convoy route {(game.Mission.convoyRoute != null ? game.Mission.convoyRoute.Count : 0)} points, " +
                               $"{game.Mission.units.FindAll(u => Undergrowth.UnderTrees(new Vector2(u.position.x, u.position.z), 4f)).Count} under trees, " +
                               $"{Stacked(game.Mission.units)} stacked");
+                // The permanent landmarks (WorldPlan.Features) and this sector's copy of any it holds.
+                string landmarks = LandmarkCheck.Run(plan);
+                log.WriteLine($"  {landmarks}");
+                if (landmarks.StartsWith("LANDMARK FAIL")) errors++;
                 game.CloseBriefing();
                 yield return null;
                 var stack = UnityEngine.Rendering.VolumeManager.instance.stack;
@@ -1992,9 +1996,10 @@ namespace DroneSandbox
 
         // Saves exactly the frame being shown now. (CaptureScreenshot writes a later frame, which came out showing
         // the next camera position.)
-        // The same two views (the grass by the base, the woods beside it) with each lighting effect switched off in
-        // turn, to see what each one adds or spoils: bounce light, contact shadows, micro-shadows, the wider ambient
-        // occlusion, and all of them with the old 512 shadow map ("before").
+        // The same two views (the grass by the base, the woods beside it) with each lighting effect switched in turn,
+        // to see what each one adds or spoils: bounce light and micro-shadows (both off in play, so switched on),
+        // contact shadows, the old 1.5 m ambient occlusion, and all of them with the old 512 shadow map ("before").
+        // Then the frame time over the woods for 1024 or 2048 shadows, each with and without bounce light.
         IEnumerator LightingCheck(SandboxGame game, RtsController rts)
         {
             var profile = Atmosphere.Profile;
@@ -2006,16 +2011,17 @@ namespace DroneSandbox
             var sun = RenderSettings.sun != null ? RenderSettings.sun.GetComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalLightData>() : null;
             if (bounce == null || contact == null || micro == null || ao == null || sun == null) { log.WriteLine("Lighting check: missing effects"); yield break; }
             float radius = ao.radius.value, intensity = ao.intensity.value;
-            void Set(bool gi, bool cs, bool ms, bool wideAo, bool sharp)
+            bool microOn = micro.enable.value, bounceOn = bounce.enable.value; // both off in play since critique 16
+            void Set(bool gi, bool cs, bool ms, bool aoNow, int shadow)
             {
                 bounce.enable.value = gi; contact.enable.value = cs; micro.enable.value = ms;
-                ao.radius.value = wideAo ? radius : 1.5f; ao.intensity.value = wideAo ? intensity : 0.8f;
-                sun.SetShadowResolution(sharp ? 2048 : 512);
+                ao.radius.value = aoNow ? radius : 1.5f; ao.intensity.value = aoNow ? intensity : 0.8f;
+                sun.SetShadowResolution(shadow);
             }
-            var variants = new (string name, bool gi, bool cs, bool ms, bool ao, bool sharp)[]
+            var variants = new (string name, bool gi, bool cs, bool ms, bool ao, int shadow)[]
             {
-                ("all", true, true, true, true, true), ("no_bounce", false, true, true, true, true), ("no_contact", true, false, true, true, true),
-                ("no_micro", true, true, false, true, true), ("narrow_ao", true, true, true, false, true), ("before", false, false, false, false, false),
+                ("all", bounceOn, true, microOn, true, 2048), ("bounce_on", true, true, microOn, true, 2048), ("no_contact", bounceOn, false, microOn, true, 2048),
+                ("micro_on", bounceOn, true, true, true, 2048), ("old_ao", bounceOn, true, microOn, false, 2048), ("before", false, false, false, false, 512),
             };
             var views = new (string name, float distance, float yaw)[] { ("grass", 18f * Scale.Lens, 30f), ("woods", 42f * Scale.Camera, 20f) };
             foreach (var view in views)
@@ -2023,12 +2029,25 @@ namespace DroneSandbox
                 rts.LookAt(game.basePosition, view.distance, view.yaw);
                 foreach (var v in variants)
                 {
-                    Set(v.gi, v.cs, v.ms, v.ao, v.sharp);
+                    Set(v.gi, v.cs, v.ms, v.ao, v.shadow);
                     yield return new WaitForSecondsRealtime(1.5f); // temporal AA and the bounce light settle
                     yield return Shot($"90_light_{view.name}_{v.name}");
                 }
             }
-            Set(true, true, true, true, true);
+            // What the sharper shadows and the bounce light each cost, over the woods (3 s each, after 1 s to settle).
+            var cost = new System.Text.StringBuilder("Lighting cost over the woods, mean frame ms:");
+            foreach (int shadow in new[] { 1024, 2048 })
+                foreach (bool gi in new[] { false, true })
+                {
+                    Set(gi, true, microOn, true, shadow);
+                    yield return new WaitForSecondsRealtime(1f);
+                    int frames = 0;
+                    float from = Time.realtimeSinceStartup;
+                    while (Time.realtimeSinceStartup - from < 3f) { frames++; yield return null; }
+                    cost.Append($" {shadow}{(gi ? "+bounce" : "")} {(Time.realtimeSinceStartup - from) * 1000f / frames:F2}");
+                }
+            log.WriteLine(cost.ToString());
+            Set(bounceOn, true, microOn, true, 2048);
             Atmosphere.ApplyQuality(Camera.main);
         }
 

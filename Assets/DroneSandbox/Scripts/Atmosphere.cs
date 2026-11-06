@@ -46,6 +46,7 @@ namespace DroneSandbox
             volume.sharedProfile = profile;
             ConfigureScenery(volume.profile); // also update existing saved profiles, without changing the asset
             Profile = volume.profile;
+            ApplyQuality(cam); // again, now the profile exists for its per-level ambient occlusion
         }
 
         // The game camera's live copy of the profile (the autotest switches effects in it to compare them).
@@ -94,7 +95,13 @@ namespace DroneSandbox
                 Set(FrameSettingsField.SSAO, q >= 1);
                 Set(FrameSettingsField.Volumetrics, q >= 2);
                 Set(FrameSettingsField.VolumetricClouds, q >= 1);
-                Set(FrameSettingsField.SSGI, q >= 2);
+                // Ambient occlusion close round things, not a broad dark halo (ChatGPT, critique 16): 1 m at High, 0.7 m
+                // and lighter at Medium.
+                if (Profile != null && Profile.TryGet(out ScreenSpaceAmbientOcclusion ao))
+                {
+                    ao.radius.Override(q >= 2 ? 1f : 0.7f);
+                    ao.intensity.Override(q >= 2 ? 0.7f : 0.5f);
+                }
                 data.allowDynamicResolution = Settings.Upscaling;
                 data.allowDeepLearningSuperSampling = true;
                 data.deepLearningSuperSamplingUseCustomQualitySettings = true;
@@ -176,11 +183,11 @@ namespace DroneSandbox
             var indirect = Get<IndirectLightingController>(profile);
             indirect.indirectDiffuseLightingMultiplier.Override(2f);
             indirect.reflectionLightingMultiplier.Override(1.2f);
-            // Ambient occlusion out to 2.5 m, so from a drone's height the ground still darkens round a trunk, under
-            // a hedge and along a wall's foot (1.5 m showed only up close).
+            // Ambient occlusion at the High setting's values (ApplyQuality sets each level's): 2.5 m darkened whole
+            // woods and hedgerows into broad halos.
             var ao = Get<ScreenSpaceAmbientOcclusion>(profile);
-            ao.intensity.Override(1f);
-            ao.radius.Override(2.5f);
+            ao.intensity.Override(0.7f);
+            ao.radius.Override(1f);
             // Contact shadows: the thin dark line where a wheel, a wall or a trunk meets the ground, finer than the
             // sun's shadow map can draw. Traced on screen out to 200 m, for low cameras and photo mode (High only).
             var contact = Get<ContactShadows>(profile);
@@ -190,14 +197,15 @@ namespace DroneSandbox
             contact.maxDistance.Override(200f);
             contact.fadeDistance.Override(40f);
             contact.opacity.Override(0.9f);
-            // Normal maps and ambient occlusion shadow themselves in sunlight: the leaves in the forest floor, the
-            // ridges of ploughed soil and the grain of rock stand up from the ground instead of lying painted on it.
-            Get<MicroShadowing>(profile).enable.Override(true);
-            // Sunlight bouncing off the ground into the shade: green light under trees beside a sunlit field, warm
-            // fill on a wall facing a bright yard. Traced on screen at half resolution and the low tier, and only at
-            // High graphics (ApplyQuality); photo mode adds its own at full quality.
+            // No micro-shadowing: it shadowed the grass tussocks' whole clumps from the sun and turned them black
+            // (hd142's lighting check), for little gain on the ground's normal maps.
+            Get<MicroShadowing>(profile).enable.Override(false);
+            // Sunlight bounced off the ground into the shade, traced on screen: off in play. Its gain in the A/B shots
+            // was small for its cost, it misses light from off screen and it replaces the probe lighting while on
+            // (ChatGPT, critique 16). Set up here at half resolution and the low tier for the lighting check; photo
+            // mode turns on its own at full quality.
             var bounce = Get<GlobalIllumination>(profile);
-            bounce.enable.Override(true);
+            bounce.enable.Override(false);
             bounce.tracing.Override(RayCastingMode.RayMarching);
             bounce.fullResolutionSS.Override(false);
             bounce.quality.Override((int)ScalableSettingLevelParameter.Level.Low);
@@ -298,7 +306,8 @@ namespace DroneSandbox
             // Real cloud shadows only take 15-30% off sunlit ground (the sky still lights it): at full opacity they
             // were near-black blotches that hid the fields' colours.
             clouds.shadowOpacity.Override(0.4f);
-            fog.meanFreePath.Override(weather == Weather.Fog ? Scale.D(110f) : weather == Weather.Rain ? 2200f : 3800f);
+            // Clear air: 6.5 km. At 3.8 km a wood 2.5 km off kept only half its own colour and read as pale as pasture.
+            fog.meanFreePath.Override(weather == Weather.Fog ? Scale.D(110f) : weather == Weather.Rain ? 2200f : 6500f);
             fog.maximumHeight.Override(weather == Weather.Fog ? Scale.D(60f) : 450f);
         }
 
