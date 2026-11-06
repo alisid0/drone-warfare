@@ -56,7 +56,8 @@ namespace DroneSandbox
                 if (!StandIns.TryGetValue(site.model, out var s)) s = (Vector3.one * 3f, new Color(0.5f, 0.5f, 0.48f));
                 Art.Part(PrimitiveType.Cube, t, new Vector3(0f, s.size.y / 2f, 0f), s.size, s.colour);
             };
-            World.Place(site.model, new Vector3(site.position.x, 0f, site.position.y), site.yaw, site.scale, 0.05f, root, fallback);
+            var placed = World.Place(site.model, new Vector3(site.position.x, 0f, site.position.y), site.yaw, site.scale, 0.05f, root, fallback);
+            LandmarkClutter.Tune(placed, site);
         }
 
         // ---- Railways ----

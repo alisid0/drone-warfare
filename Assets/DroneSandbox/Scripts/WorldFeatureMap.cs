@@ -23,7 +23,10 @@ namespace DroneSandbox
             var lists = new List<Entry>[bins.Length];
             foreach (var f in features)
             {
-                var entry = new Entry { area = f.Area, clearance = f.clearance, surfaces = f.surfaces.ToArray() };
+                var surfaces = f.surfaces.ToArray();
+                for (int i = 0; i < surfaces.Length; i++)
+                    if (surfaces[i].outline != null) surfaces[i].outline = (Vector2[])surfaces[i].outline.Clone();
+                var entry = new Entry { area = f.Area, clearance = f.clearance, surfaces = surfaces };
                 float reach = f.halfLength + f.halfWidth + f.clearance + 64f;
                 int first = Index(f.center.x - reach, f.center.y - reach), last = Index(f.center.x + reach, f.center.y + reach);
                 for (int z = first / WorldPlan.CellCount; z <= last / WorldPlan.CellCount; z++)
@@ -45,7 +48,7 @@ namespace DroneSandbox
             {
                 if (!entry.area.Contains(p, entry.clearance)) continue;
                 for (int i = entry.surfaces.Length - 1; i >= 0; i--)
-                    if (entry.surfaces[i].area.Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(entry.surfaces[i].kind); return true; }
+                    if (entry.surfaces[i].Contains(p)) { color = WorldLandmarkLayout.SurfaceColor(entry.surfaces[i].kind); return true; }
             }
             color = default; return false;
         }

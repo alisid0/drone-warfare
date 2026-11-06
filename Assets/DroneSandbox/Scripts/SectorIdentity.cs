@@ -25,7 +25,13 @@ namespace DroneSandbox
                 {
                     Vector2 at = b.position - p.world.center;
                     if (Mathf.Max(Mathf.Abs(at.x), Mathf.Abs(at.y)) > WorldSectors.Half - 5f) continue;
-                    Site(p, b.model, at, b.facing, b.flat);
+                    Site(p, b.model, at, b.facing, b.flat, b.scale > 0f ? b.scale : 1f);
+                }
+                foreach (var fence in f.fences)
+                {
+                    var line = new Vector2[fence.Length];
+                    for (int i = 0; i < line.Length; i++) line[i] = fence[i] - p.world.center;
+                    p.featureFences.Add(line);
                 }
                 if (f.kind == WorldFeatureKind.Airfield && f.Fits(p.world.center, WorldSectors.Half))
                 {
@@ -281,9 +287,9 @@ namespace DroneSandbox
         }
 
         // A structure's footprint is levelled by the existing Ground.FlatSite path; missions still find real sites.
-        static void Site(SectorPlan p, string model, Vector2 at, Vector2 facing, float flat)
+        static void Site(SectorPlan p, string model, Vector2 at, Vector2 facing, float flat, float scale = 1f)
         {
-            p.sites.Add(new Site { model = model, position = at, yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg, scale = 1f, flat = flat });
+            p.sites.Add(new Site { model = model, position = at, yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg, scale = scale, flat = flat });
         }
 
         // The forestry track is planned after the old bridge pass, so register its stream crossings too.

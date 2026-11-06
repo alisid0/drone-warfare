@@ -12,6 +12,7 @@ namespace DroneSandbox
         {
             var p = MapLayout.Plan;
             BuildWorldSurfaces(root);
+            LandmarkClutter.Build(root);
             var yards = new MeshBuilder(2);
             foreach (var surface in p.featureSurfaces)
             {
@@ -43,10 +44,10 @@ namespace DroneSandbox
                 var mesh = new Mesh { name = "World landmark surfaces", indexFormat = IndexFormat.UInt32 };
                 mesh.SetVertices(source.vertices); mesh.SetNormals(source.normals);
                 var materials = new List<Material>();
-                for (int i = 0; i < 5; i++) if (source.triangles[i].Count > 0) materials.Add(Art.Shared(LandmarkMesh.Color(i)));
+                for (int i = 0; i < source.triangles.Length; i++) if (source.triangles[i].Count > 0) materials.Add(Art.Shared(LandmarkMesh.Color(i)));
                 mesh.subMeshCount = materials.Count;
                 int sub = 0;
-                for (int i = 0; i < 5; i++) if (source.triangles[i].Count > 0) mesh.SetTriangles(source.triangles[i], sub++);
+                for (int i = 0; i < source.triangles.Length; i++) if (source.triangles[i].Count > 0) mesh.SetTriangles(source.triangles[i], sub++);
                 mesh.RecalculateBounds();
                 var go = new GameObject("World landmark " + f.id + " surfaces"); go.transform.SetParent(root, false);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -57,7 +58,7 @@ namespace DroneSandbox
         // Samples finished terrain so dressings neither float on hills nor cut through flattened building sites.
         static Vector3 SurfacePoint(Vector2 p, float lift) => Ground.OnGround(new Vector3(p.x, 0f, p.y)) + Vector3.up * lift;
 
-        // A 2 m industrial security fence, batched into one renderer rather than hundreds of separate panels.
+        // A 2.4 m industrial security fence, batched into one renderer rather than hundreds of separate panels.
         static void FeatureFences(Transform root)
         {
             var mesh = new MeshBuilder(1);
@@ -66,13 +67,15 @@ namespace DroneSandbox
                 {
                     Vector2 a = line[i - 1], b = line[i], d = (b - a).normalized;
                     Vector3 right = new Vector3(-d.y, 0f, d.x);
-                    int steps = Mathf.CeilToInt(Vector2.Distance(a, b) / 4f);
+                    int steps = Mathf.CeilToInt(Vector2.Distance(a, b) / 3.2f);
                     for (int k = 0; k <= steps; k++)
                     {
-                        Vector3 at = SurfacePoint(Vector2.Lerp(a, b, k / (float)steps), 1f);
-                        mesh.Box(0, at, right, Vector3.up, new Vector3(d.x, 0f, d.y), new Vector3(0.10f, 2f, 0.10f));
+                        Vector2 point = Vector2.Lerp(a, b, k / (float)steps);
+                        if (Mathf.Max(Mathf.Abs(point.x), Mathf.Abs(point.y)) > MapLayout.Edge - 4f) continue;
+                        Vector3 at = SurfacePoint(point, 1.2f);
+                        mesh.Box(0, at, right, Vector3.up, new Vector3(d.x, 0f, d.y), new Vector3(0.10f, 2.4f, 0.10f));
                         if (k == steps) continue;
-                        Vector3 end = SurfacePoint(Vector2.Lerp(a, b, (k + 1f) / steps), 1f);
+                        Vector3 end = SurfacePoint(Vector2.Lerp(a, b, (k + 1f) / steps), 1.2f);
                         foreach (float h in new[] { -0.6f, 0f, 0.85f }) mesh.Bar(0, at + Vector3.up * h, end + Vector3.up * h, right, 0.04f, 0.05f);
                         // Diagonal wires give the fence a readable mesh silhouette without a transparent material.
                         mesh.Bar(0, at - Vector3.up * 0.8f, end + Vector3.up * 0.8f, right, 0.025f, 0.025f);
