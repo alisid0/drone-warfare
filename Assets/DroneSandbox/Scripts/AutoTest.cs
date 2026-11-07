@@ -801,11 +801,13 @@ namespace DroneSandbox
             // Twice, as ChatGPT's gate asks: the second run is warmed and must be just as clean.
             yield return ContinuousFlight(game, rts, 1);
             yield return ContinuousFlight(game, rts, 2);
-            // Two experiment passes on the same route for the render stall near the rail junction (ChatGPT's isolation
-            // order): without the compounds' real instanced models, then without the drone feed's camera. Reported only.
-            LandmarkHlod.HideModels = true;
+            // Two experiment passes on the same route for the GPU spikes nearing compounds (up to 1.1 s of GPU time on a
+            // warmed pass, hd177): half-resolution textures, to see whether video-memory paging is the cause, then the
+            // baseline again. Reported only.
+            int mipLimit = QualitySettings.globalTextureMipmapLimit;
+            QualitySettings.globalTextureMipmapLimit = mipLimit + 1;
             yield return ContinuousFlight(game, rts, 3);
-            LandmarkHlod.HideModels = false;
+            QualitySettings.globalTextureMipmapLimit = mipLimit;
             yield return ContinuousFlight(game, rts, 4);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
@@ -2275,7 +2277,7 @@ namespace DroneSandbox
             float cruise = swift.altitude;
             foreach (int i in best) swift.MoveTo(stops[i].at, true);
             rts.selected.Clear();
-            if (pass != 4) rts.selected.Add(swift); // pass 4 flies unselected: no feed camera
+            rts.selected.Add(swift);
             int knownBefore = 0;
             var known = new HashSet<EnemyUnit>();
             foreach (var e in game.enemies) if (e != null && e.Known) { knownBefore++; known.Add(e); }
@@ -2299,6 +2301,7 @@ namespace DroneSandbox
             UnityEngine.Rendering.RenderPipelineManager.endContextRendering += Rendered;
             float frameBegan = 0f, lateRender = 0f, lateGpu = 0f;
             int lateFrames = 0;
+            bool spikeShot = false;
             var timing = new FrameTiming[1];
             float started = Time.realtimeSinceStartup;
             while (reached < best.Count && swift != null && swift.IsAlive && Time.realtimeSinceStartup - started < 900f)
@@ -2350,6 +2353,27 @@ namespace DroneSandbox
                         spikes.Append($" {ms:F0} ms at ({world.x:F0}, {world.y:F0}) {(fastHalf ? "4x" : "1x")} [update {scriptMs:F0}, render {renderMs:F0}, gap {gapMs:F0}] scatter {FarScatter.MainThreadMs:F1}/places {FarScatter.PlacesMs:F1}, " +
                                       $"tiles {FarDetail.LastFrameMs:F1}, canopy {ForestHlod.LastFrameMs:F1} ms, uploads {(FarDetail.UploadBytes + ForestHlod.UploadBytes) / 1024} KB{(gc != gcCount ? " GC" : "")};");
                     gcCount = gc;
+                    // The first frame over 200 ms in each pass: what the drone feed and the main view were looking at (hd175's
+                    // 1.5 s frames were GPU time, only with the feed camera on). Those frames' I/O is left out of the timing.
+                    if (ms > 200f && !spikeShot)
+                    {
+                        spikeShot = true;
+                        var picture = DroneFeed.Instance != null ? DroneFeed.Instance.Picture : null;
+                        if (picture != null)
+                        {
+                            var previous = RenderTexture.active;
+                            RenderTexture.active = picture;
+                            var feedShot = new Texture2D(picture.width, picture.height, TextureFormat.RGB24, false);
+                            feedShot.ReadPixels(new Rect(0, 0, picture.width, picture.height), 0, 0);
+                            RenderTexture.active = previous;
+                            File.WriteAllBytes(Path.Combine(outDir, $"92_spike_{pass}_feed.png"), feedShot.EncodeToPNG());
+                            Destroy(feedShot);
+                        }
+                        log.WriteLine($"Continuous flight {pass}: {ms:F0} ms frame at ({world.x:F0}, {world.y:F0}), Swift {swift.transform.position.y - Ground.HeightAt(swift.transform.position):F0} m up; " +
+                                      $"feed at ({DroneFeed.Instance?.FeedCamera?.transform.position}), looking {DroneFeed.Instance?.FeedCamera?.transform.forward}");
+                        yield return Shot($"92_spike_{pass}_main");
+                        settleUntil = Time.realtimeSinceStartup + 1f;
+                    }
                 }
                 peakTexture = System.Math.Max(peakTexture, (long)Texture.currentTextureMemory);
                 worstMissingBlocks = Mathf.Max(worstMissingBlocks, ForestHlod.MissingBlocks);

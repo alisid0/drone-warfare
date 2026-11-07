@@ -20,6 +20,13 @@ namespace DroneSandbox.EditorTools
             EnsureMainScene();
             // CPU render-thread and GPU frame times for the autotest's hitch report (FrameTimingManager); near-free.
             PlayerSettings.enableFrameTimingStats = true;
+            // Direct3D 11 first, 12 as the fallback. On the RTX 3050 laptop D3D12 piled up 6.4 GB of upload scratch
+            // buffers in long sessions until the device failed (hd173) or the machine thrashed (hd174), and compiled
+            // pipeline states mid-flight; D3D11 held shared GPU memory under 0.32 GB over the same run at the same
+            // frame rate (hd175).
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64,
+                new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11, UnityEngine.Rendering.GraphicsDeviceType.Direct3D12 });
             var options = new BuildPlayerOptions
             {
                 scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray(),

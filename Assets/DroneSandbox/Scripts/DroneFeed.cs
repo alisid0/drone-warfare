@@ -19,6 +19,9 @@ namespace DroneSandbox
         public float Zoom = 1f;                // 1-3x
         public Drone Source { get; private set; }
         public RenderTexture Picture { get; private set; }
+        // For the autotest's hitch experiments: render the feed every frame, and a shorter view (metres; 0 keeps 600 m).
+        public static bool EveryFrame;
+        public static float FarClip;
         public float LostAt { get; private set; } = -100f; // when the drone we were watching went (static for a moment)
         public string LostName { get; private set; }
 
@@ -68,7 +71,8 @@ namespace DroneSandbox
             if (Source != null && Source.IsKamikaze && Source.AttackTarget != null) pick = Source;
             Source = pick;
             bool on = Visible && Source != null && !PhotoMode.Active && game != null && !game.UiBlocking;
-            feed.enabled = on && Time.frameCount % 2 == 0; // the picture keeps between renders
+            feed.enabled = on && (EveryFrame || Time.frameCount % 2 == 0); // the picture keeps between renders
+            if (on) feed.farClipPlane = FarClip > 0f ? FarClip : 600f * Scale.Distance;
             if (!on) return;
 
             // Each type carries its camera its own way: a Scout's stabilised gimbal looks well down, and leans toward
