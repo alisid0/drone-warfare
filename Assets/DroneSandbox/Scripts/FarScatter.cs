@@ -15,14 +15,15 @@ namespace DroneSandbox
         const float CellSize = SectorForest.RenderCell;
         const int Batch = 511, CellLimit = 192, MovementGuard = 16; // non-uniform scales also need inverse matrices
         static readonly string[] Trees = { "Scenery_Tree", "Scenery_Birch", "Scenery_Spruce", "Scenery_Pine" };
-        static readonly string[] Houses = { "Scenery_House_A", "Scenery_House_B", "Scenery_House_C", "Scenery_House_D",
-            "Scenery_Townhouse_Row", "Scenery_Apartment", "Scenery_Shop", "Scenery_Church", "Scenery_OfficeBlock", "Scenery_Warehouse", "Scenery_Barn" };
+        static readonly string[] Houses = SettlementPattern.Models;
 
-        // A model may have several renderers at one LOD; retain every piece and its imported transform.
+        // A model may have several renderers at one LOD; retain every piece and its imported transform. A building's
+        // RoofTile submesh also keeps that material in each of the four roofs, so roofs vary within one instanced batch.
         sealed class Part
         {
             public Mesh mesh;
             public Material[] materials;
+            public Material[][] toned; // per submesh: null, or the roof in SettlementPattern.RoofMaterials order
             public Matrix4x4 local;
             public Vector3 center;
         }
@@ -35,6 +36,7 @@ namespace DroneSandbox
             public int triangles, tier;
             public bool fades;
             public readonly List<Matrix4x4> instances = new List<Matrix4x4>();
+            public List<Matrix4x4>[] tones; // a building's instances again by roof, when it has a toned roof
         }
 
         // Root transforms stay immutable when the camera changes tiers; the world grid owns the trees.
@@ -324,7 +326,12 @@ namespace DroneSandbox
             frameMs += renderTimer.Elapsed.TotalMilliseconds;
             MainThreadMs = (float)frameMs + Canopy.QueryMs; WorstMs = Mathf.Max(WorstMs, MainThreadMs);
             // Settlement accounting remains outside the forest timer and retains its existing model submission path.
-            for (int i = 36; i < models.Length; i++) if (models[i] != null) models[i].instances.Clear();
+            for (int i = 36; i < models.Length; i++)
+                if (models[i] != null)
+                {
+                    models[i].instances.Clear();
+                    if (models[i].tones != null) foreach (var tone in models[i].tones) tone.Clear();
+                }
             if (FarTerrain.Active) TimePlaces(cam);
             Draw(cam);
         }
@@ -571,8 +578,9 @@ namespace DroneSandbox
             var model = models[36 + house.kind];
             if (model == null) return;
             Vector2 p = house.world - FarTerrain.Origin;
-            model.instances.Add(Matrix4x4.TRS(new Vector3(p.x, GroundAt(p) - 0.2f, p.y),
-                Quaternion.Euler(0f, house.yaw, 0f), Vector3.one * house.Scale));
+            var matrix = Matrix4x4.TRS(new Vector3(p.x, GroundAt(p) - 0.2f, p.y), Quaternion.Euler(0f, house.yaw, 0f), Vector3.one * house.Scale);
+            model.instances.Add(matrix);
+            if (model.tones != null) model.tones[house.roof & 3].Add(matrix);
             HousesDrawn++;
         }
 
@@ -585,6 +593,7 @@ namespace DroneSandbox
             {
                 if (model == null || model.instances.Count == 0) continue;
                 foreach (var part in model.parts)
+                {
                     for (int start = 0; start < model.instances.Count; start += Batch)
                     {
                         int count = Mathf.Min(Batch, model.instances.Count - start);
@@ -592,13 +601,39 @@ namespace DroneSandbox
                         for (int sub = 0; sub < part.mesh.subMeshCount; sub++)
                         {
                             var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
-                            if (material == null) continue;
+                            if (material == null || model.tones != null && part.toned != null && sub < part.toned.Length && part.toned[sub] != null) continue;
                             var rp = new RenderParams(material) { camera = cam, worldBounds = bounds,
                                 matProps = properties, shadowCastingMode = model.tier < 2 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
                             Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, count);
                             InstanceDrawCalls++;
                         }
                     }
+                    if (model.tones != null && part.toned != null) DrawRoofs(cam, bounds, model, part);
+                }
+            }
+        }
+
+        // A building's roof submesh, one instanced draw per roof its houses wear: at most three more draws a kind.
+        void DrawRoofs(Camera cam, Bounds bounds, Model model, Part part)
+        {
+            for (int sub = 0; sub < part.toned.Length; sub++)
+            {
+                if (part.toned[sub] == null) continue;
+                for (int tone = 0; tone < model.tones.Length; tone++)
+                {
+                    var list = model.tones[tone];
+                    var material = part.toned[sub][tone];
+                    if (material == null) continue;
+                    for (int start = 0; start < list.Count; start += Batch)
+                    {
+                        int count = Mathf.Min(Batch, list.Count - start);
+                        for (int i = 0; i < count; i++) batch[i] = list[start + i] * part.local;
+                        var rp = new RenderParams(material) { camera = cam, worldBounds = bounds,
+                            matProps = properties, shadowCastingMode = model.tier < 2 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
+                        Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, count);
+                        InstanceDrawCalls++;
+                    }
+                }
             }
         }
 
@@ -672,7 +707,8 @@ namespace DroneSandbox
                     for (int shade = 0; shade < 3; shade++)
                         models[tier * 12 + species * 3 + shade] = LoadModel(tier == 1 ? Trees[species].Replace("Scenery_", "Forest_") + "_Reduced" : Trees[species],
                             tier == 1 ? 0 : tier, ForestPattern.Tint(shade), tier, species);
-            for (int i = 0; i < Houses.Length; i++) models[36 + i] = LoadModel(Houses[i], 1, 1f, 3, -1);
+            // Street trees use their crossed-card impostor (LOD2): a town holds a few hundred, seen from above.
+            for (int i = 0; i < Houses.Length; i++) models[36 + i] = LoadModel(Houses[i], i == SettlementPattern.Tree ? 2 : 1, 1f, 3, -1);
         }
 
         // Read every renderer of the selected LOD and use its transformed bounds to normalize tree height.
@@ -698,9 +734,23 @@ namespace DroneSandbox
                 if (filter == null || filter.sharedMesh == null || renderer.sharedMaterials.Length == 0) continue;
                 var materials = renderer.sharedMaterials;
                 var local = prefab.transform.worldToLocalMatrix * renderer.transform.localToWorldMatrix;
+                Material[][] toned = null;
                 for (int i = 0; i < materials.Length; i++)
                 {
                     if (materials[i] == null) continue;
+                    if (tier == 3 && materials[i].name == SettlementPattern.RoofMaterials[0])
+                    {
+                        // The other three roofs share the tile's photo texture, each with its own tint (World.Roofs).
+                        if (toned == null) toned = new Material[materials.Length][];
+                        toned[i] = new Material[SettlementPattern.RoofMaterials.Length];
+                        for (int tone = 1; tone < toned[i].Length; tone++)
+                        {
+                            var roof = Resources.Load<Material>("Materials/PBR/" + SettlementPattern.RoofMaterials[tone]);
+                            if (roof == null) continue;
+                            toned[i][tone] = new Material(roof) { enableInstancing = true };
+                            ownedMaterials.Add(toned[i][tone]);
+                        }
+                    }
                     var photo = Resources.Load<Material>("Materials/PBR/" + materials[i].name);
                     var material = tier < 3 ? ForestMaterials.Create(materials[i].name, photo != null ? photo : materials[i], tier)
                         : new Material(photo != null ? photo : materials[i]) { enableInstancing = true };
@@ -712,6 +762,7 @@ namespace DroneSandbox
                         colour.r *= correction.r; colour.g *= correction.g; colour.b *= correction.b;
                     }
                     material.color = colour; materials[i] = material; ownedMaterials.Add(material);
+                    if (toned != null && toned[i] != null) toned[i][0] = material;
                 }
                 var box = filter.sharedMesh.bounds;
                 for (int corner = 0; corner < 8; corner++)
@@ -720,7 +771,7 @@ namespace DroneSandbox
                         new Vector3((corner & 1) == 0 ? -1f : 1f, (corner & 2) == 0 ? -1f : 1f, (corner & 4) == 0 ? -1f : 1f)));
                     bottom = Mathf.Min(bottom, p.y); top = Mathf.Max(top, p.y);
                 }
-                parts.Add(new Part { mesh = filter.sharedMesh, materials = materials, local = local, center = box.center });
+                parts.Add(new Part { mesh = filter.sharedMesh, materials = materials, toned = toned, local = local, center = box.center });
                 for (int sub = 0; sub < filter.sharedMesh.subMeshCount; sub++) triangles += (int)filter.sharedMesh.GetIndexCount(sub) / 3;
             }
             if (species >= 0)
@@ -728,7 +779,15 @@ namespace DroneSandbox
                     foreach (var material in part.materials)
                         ForestMaterials.SetShape(material, part.local.inverse.MultiplyPoint3x4(Vector3.up * ((top - bottom) * 0.75f)),
                             part.local.inverse.MultiplyVector(Vector3.right * ((top - bottom) * ForestPalette.RadiusPerHeight[species])));
-            return parts.Count == 0 ? null : new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom), triangles = triangles, tier = tier, fades = fades };
+            if (parts.Count == 0) return null;
+            var model = new Model { parts = parts.ToArray(), height = Mathf.Max(1f, top - bottom), triangles = triangles, tier = tier, fades = fades };
+            foreach (var part in parts)
+                if (part.toned != null && model.tones == null)
+                {
+                    model.tones = new List<Matrix4x4>[SettlementPattern.RoofMaterials.Length];
+                    for (int tone = 0; tone < model.tones.Length; tone++) model.tones[tone] = new List<Matrix4x4>();
+                }
+            return model;
         }
     }
 }
