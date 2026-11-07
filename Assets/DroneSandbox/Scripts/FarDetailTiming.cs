@@ -9,7 +9,8 @@ namespace DroneSandbox
     {
         public enum Stage { Plan, Schedule, Sample, TileMesh, TilePixels, TileApply, ControlPixels, ControlApply,
             CollisionMesh, CollisionBakeDispatch, ColliderBind, ChunkMesh, MeshUpload, Publish,
-            RegionPlan, RegionPixels, RegionApply, RegionCopy, RegionPublish, Count }
+            RegionPlan, RegionPixels, RegionApply, RegionCopy, RegionPublish,
+            NearPlan, NearPixels, NearApply, NearCopy, NearPublish, Count }
         static readonly double[] worst = new double[(int)Stage.Count];
         static readonly long[] calls = new long[(int)Stage.Count];
         static readonly string[] names = Enum.GetNames(typeof(Stage));

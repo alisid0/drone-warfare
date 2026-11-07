@@ -54,3 +54,61 @@ float3 FarRegionBackground(float2 world, float2 dx, float2 dy, float distance)
     float3 picture = SAMPLE_TEXTURE2D_GRAD(_FarWorldPicture, sampler_FarWorldPicture, uv, dx / 56000, dy / 56000).rgb;
     return FarRegionColour(world, dx, dy, picture, distance);
 }
+
+// The near bubble (FarDetailNear): 4 by 4 toroidal 256 m pages of 0.5 m colour and 1 m surface control round a low
+// camera. Its colour uses the regional pages' sampler (Clamp, trilinear, aniso 4), so no pass gains a sampler.
+TEXTURE2D_ARRAY(_FarNearAlbedo);
+TEXTURE2D_ARRAY(_FarNearControl);
+float4 _FarNearPages[16];
+float _FarNearEnabled;
+
+// Signed modulo agrees with FarDetailNear.Index on both sides of the theatre origin.
+int FarNearIndex(int2 cell)
+{
+    int2 slot = (int2)((float2)cell - 4.0 * floor((float2)cell / 4.0));
+    return slot.y * 4 + slot.x;
+}
+
+// A page fades in over 0.6 s once complete (w 1) and out over 0.6 s before its slot is reused (w -1).
+float FarNearReady(int2 cell)
+{
+    float4 page = _FarNearPages[FarNearIndex(cell)];
+    if (any(page.xy != (float2)cell)) return 0;
+    float fade = smoothstep(0, 0.6, _FarRegionTime - page.z);
+    return page.w > 0 ? fade : (page.w < 0 ? 1 - fade : 0);
+}
+
+// Equal edge weights on both pages hide a neighbour that has not arrived, as FarRegionWeight does, over 16 m.
+float FarNearWeight(int2 cell, float2 local)
+{
+    float own = FarNearReady(cell);
+    float2 edge = min(local, 256 - local);
+    if (own <= 0 || min(edge.x, edge.y) >= 16) return own;
+    int2 side = int2(local.x < 128 ? -1 : 1, local.y < 128 ? -1 : 1);
+    float2 t = smoothstep(0, 16, edge);
+    float a = min(own, FarNearReady(cell + int2(side.x, 0)));
+    float b = min(own, FarNearReady(cell + int2(0, side.y)));
+    float c = min(min(a, b), FarNearReady(cell + side));
+    return lerp(lerp(c, b, t.x), lerp(a, own, t.x), t.y);
+}
+
+// How much of a pixel the bubble owns: its page's weight, fading out once a screen pixel spans about 2 m (the page's
+// coarsest mip), where the tile's full mip chain carries the same colour. The footprint is anisotropic filtering's
+// minor axis, at most 4:1.
+float FarNearCoverage(float2 world, float2 dx, float2 dy, out int2 cell, out float2 local)
+{
+    cell = (int2)floor(world / 256);
+    local = world - cell * 256;
+    if (_FarNearEnabled < 0.5) return 0;
+    float a = length(dx), b = length(dy);
+    float sharp = 1 - smoothstep(1.5, 2.5, max(min(a, b), max(a, b) * 0.25));
+    return sharp > 0 ? FarNearWeight(cell, local) * sharp : 0;
+}
+
+// The page's colour, trilinear over its three mips with explicit world gradients; texel centres every 0.5 m inside an
+// 8 m gutter.
+float3 FarNearColour(int2 cell, float2 local, float2 dx, float2 dy)
+{
+    float2 uv = (local * 2 + 16) / 544;
+    return SAMPLE_TEXTURE2D_ARRAY_GRAD(_FarNearAlbedo, sampler_FarRegionAlbedo, uv, FarNearIndex(cell), dx / 272, dy / 272).rgb;
+}
