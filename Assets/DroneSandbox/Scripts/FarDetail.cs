@@ -20,6 +20,8 @@ namespace DroneSandbox
         static FarDetail instance;
         public static int RegionalCommitted => instance?.regional?.Committed ?? 0;
         public static double RegionalWorkerMs => instance?.regional?.LastWorkerMs ?? 0;
+        public static int NearCommitted => instance?.near?.Committed ?? 0;
+        public static double NearWorkerMs => instance?.near?.LastWorkerMs ?? 0;
         public static int Live => instance != null ? instance.live.Count : 0;
         public static int Committed { get; private set; }
         public static int PressureEvictions { get; private set; }
@@ -97,14 +99,16 @@ namespace DroneSandbox
         readonly double[] latencies = new double[64], sorted = new double[64];
         FarDetailData plan;
         FarDetailRegional regional;
+        FarDetailNear near;
         FarDetailRoute route;
         Func<int, int, bool> isLive;
         Task<Result> worker;
         Result ready;
         Slot incoming, outgoing;
         FarDetailData.Tile incomingTile;
-        int stage, chunkStage, chunkIndex, mipStage, regionalWait, latencyCount, stages;
+        int stage, chunkStage, chunkIndex, mipStage, regionalWait, nearWait, latencyCount, stages;
         long bytes;
+        float eyeHeight;
         Vector2 origin, eye, focus, feed, velocity, feedVelocity, previousEye, previousFeed, planEye;
         bool hasPrevious, hasFeed, feedVisible;
         Drone previousDrone, followed;
@@ -117,6 +121,7 @@ namespace DroneSandbox
             if (instance == null) { FarDetailChunks.Clear(); return; }
             instance.enabled = false;
             instance.regional?.Clear(); instance.regional = null;
+            instance.near?.Clear(); instance.near = null;
             instance.worker = null; instance.ready = null; instance.incomingTile = null;
             foreach (var s in instance.live.Values) Release(s);
             foreach (var s in instance.pool) Release(s);
@@ -136,6 +141,7 @@ namespace DroneSandbox
             instance.origin = FarTerrain.Origin;
             instance.plan = WorldPlan.CaptureDetail(FarDetailChunks.Heights());
             instance.regional = new FarDetailRegional(instance.plan);
+            instance.near = new FarDetailNear(instance.plan);
             instance.route = new FarDetailRoute(Eligible);
             instance.isLive = instance.IsLive;
             for (int i = 0; i < PrepareLanes; i++) instance.lanes[i] = new Lane();
@@ -211,16 +217,22 @@ namespace DroneSandbox
             bool collisionChanged = timer.Elapsed.TotalMilliseconds < 0.25 && UpdateCollider();
             FarDetailTiming.End(Stage.ColliderBind, stamp);
             // A waiting regional texture stage takes every third frame, since tile work now rarely leaves one idle.
+            // A waiting near-bubble stage does too, but only once the camera's own tiles are all live; the regional
+            // queue goes first when both are due. Each frame still runs at most one texture stage.
             bool regionalWaiting = regional != null && regional.Pending, regionalTurn = regionalWaiting && regionalWait >= 2;
+            bool nearWaiting = near != null && near.Pending, nearTurn = nearWaiting && !regionalTurn && nearWait >= 2 && CameraMissing == 0;
             bool tileWork = false;
-            if (!collisionChanged && !regionalTurn && timer.Elapsed.TotalMilliseconds < BudgetMs)
+            if (!collisionChanged && !regionalTurn && !nearTurn && timer.Elapsed.TotalMilliseconds < BudgetMs)
             {
                 tileWork = Commit(timer);
                 if (timer.Elapsed.TotalMilliseconds < BudgetMs) tileWork |= Prepare(timer);
             }
-            bool regionalCommit = !tileWork && !collisionChanged && timer.Elapsed.TotalMilliseconds < .20;
+            bool regionalCommit = !tileWork && !collisionChanged && !nearTurn && timer.Elapsed.TotalMilliseconds < .20;
             regional?.Tick(eye, regionalCommit);
             regionalWait = regionalWaiting && !regionalCommit ? regionalWait + 1 : 0;
+            bool nearCommit = nearTurn || !tileWork && !collisionChanged && !regionalWaiting && timer.Elapsed.TotalMilliseconds < .20;
+            near?.Tick(eye, focus, eyeHeight, nearCommit, CameraMissing == 0);
+            nearWait = nearWaiting && !nearCommit ? nearWait + 1 : 0;
             Measure();
             double elapsed = timer.Elapsed.TotalMilliseconds;
             FarDetailTiming.EndFrame(elapsed, elapsed > WorstCommitMs);
@@ -257,13 +269,15 @@ namespace DroneSandbox
             previousDrone = drone; followed = hasFeed ? drone : null;
         }
 
-        // The ground point the camera looks at, within 4 km: the centre of the 600 m ready zone.
+        // The ground point the camera looks at, within 4 km: the centre of the 600 m ready zone. Also keeps the camera's
+        // height above the ground, which decides whether the near bubble builds.
         Vector2 Focus(Transform view)
         {
             Vector3 p = view.position, forward = view.forward;
             Vector2 at = new Vector2(p.x, p.z);
+            eyeHeight = Mathf.Max(0f, p.y - HeightAt(at));
             if (forward.y > -0.05f) return at + origin;
-            float metres = Mathf.Min(Mathf.Max(0f, p.y - HeightAt(at)) / -forward.y, 4000f);
+            float metres = Mathf.Min(eyeHeight / -forward.y, 4000f);
             return at + new Vector2(forward.x, forward.z) * metres + origin;
         }
 
