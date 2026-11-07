@@ -16,6 +16,9 @@ namespace DroneSandbox
         public string model;
         public bool old, core, cultivated, shed, logs, untended, roofChanged;
         public bool gable; // the house stands gable-end to the street, as about one newer house in five does
+        // Town plots: apartment-estate ground (blocks in green space, not on the street), a paved yard or forecourt, a
+        // terraced house sharing its side walls, and a building behind a street property, reached past it.
+        public bool estate, yard, attached, backland;
         public int shape, palette, boundary, identity, settlement;
         public int open; // boundary runs left out: 1 front, 2 right side, 4 rear, 8 left side
         public float scale, pathWidth, driveWidth, roadWidth;
@@ -44,8 +47,16 @@ namespace DroneSandbox
     // Immutable road-facing village and town plots. World snapshots never consult sector-local random state.
     public sealed partial class VillagePlan
     {
+        // One tree of a town's avenues, with the settlement that planted it.
+        public struct StreetTree
+        {
+            public Vector2 at;
+            public int owner;
+        }
+
         public readonly List<VillagePlot> plots = new List<VillagePlot>();
         public readonly List<FarDetailData.Segment> lanes = new List<FarDetailData.Segment>();
+        public readonly List<StreetTree> trees = new List<StreetTree>();
         readonly Dictionary<long, List<int>> cells = new Dictionary<long, List<int>>();
         readonly int seed;
         // Real through-roads carry the frontage; short side streets and back lanes complete each settlement.
@@ -57,7 +68,7 @@ namespace DroneSandbox
             {
                 var s = settlements[owner];
                 float nearest = float.MaxValue;
-                Vector2 anchor = s.center, along = Vector2.right;
+                Vector2 anchor = s.center;
                 foreach (var road in roads)
                 {
                     Vector2 a = new Vector2(road.ax, road.az), b = new Vector2(road.bx, road.bz), d = b - a;
@@ -68,129 +79,11 @@ namespace DroneSandbox
                         continue;
                     nearest = distance;
                     anchor = q;
-                    along = d.normalized;
                 }
 
                 anchors[owner] = anchor;
-                if (!s.town) { Grow(owner, s, roads, anchor); continue; }
-                float reach = s.radius * .85f;
-                var street = new List<FarDetailData.Segment>();
-                foreach (var road in roads)
-                {
-                    Vector2 mid = new Vector2((road.ax + road.bx) * .5f, (road.az + road.bz) * .5f);
-                    if ((mid - anchor).sqrMagnitude < reach * reach)
-                        street.Add(road);
-                }
-
-                int firstLane = lanes.Count;
-                // One perpendicular village lane, or a town street grid with lanes behind the gardens. Town streets keep
-                // their 120 m rhythm but each is set up to 18 m off it, so blocks run 84-156 m and the grid is not a lattice.
-                Vector2 across = new Vector2(-along.y, along.x);
-                int crossCount = s.town ? 2 * (int)(reach / 120f) + 1 : 1;
-                for (int i = 0; i < crossCount; i++)
-                {
-                    uint shift = unchecked((uint)(seed * 73856093 ^ owner * 19349663 ^ i * 83492791));
-                    shift = unchecked((shift ^ (shift >> 13)) * 1274126177u);
-                    float offset = (i - (crossCount - 1) * .5f) * 120f + (s.town && i != (crossCount - 1) / 2 ? ((shift >> 8 & 255) / 255f - .5f) * 36f : 0f);
-                    Vector2 at = anchor + along * offset;
-                    float length = s.town ? (float)Math.Sqrt(Math.Max(0f, reach * reach - offset * offset)) : 105f;
-                    AddLane(street, at - across * length, at + across * length, owner * 128 + i, 2f);
-                    if (s.town && Math.Abs(offset) > 1f)
-                        AddLane(street, anchor + across * offset - along * length, anchor + across * offset + along * length, owner * 128 + 32 + i, 2f);
-                    if (s.town)
-                    {
-                        float back = offset + 60f;
-                        if (Math.Abs(back) < reach)
-                        {
-                            float end = (float)Math.Sqrt(reach * reach - back * back);
-                            AddLane(null, anchor + across * back - along * end, anchor + across * back + along * end, owner * 128 + 64 + i, 1.5f);
-                        }
-                    }
-                }
-
-                bool church = false, square = false;
-                var localLanes = lanes.GetRange(firstLane, lanes.Count - firstLane).ToArray();
-                TownEdge(owner, s, roads, localLanes, anchor, reach);
-                foreach (var road in street)
-                {
-                    Vector2 a = new Vector2(road.ax, road.az), b = new Vector2(road.bx, road.bz), dir = (b - a).normalized;
-                    float length = (b - a).magnitude;
-                    // A route's 120 m blocks keep frontage stable when the same road is cropped elsewhere.
-                    for (int side = -1; side <= 1; side += 2)
-                    {
-                        int first = (int)Math.Floor(road.walked / 120f), last = (int)Math.Floor((road.walked + length) / 120f);
-                        for (int block = first; block <= last; block++)
-                        {
-                            var rng = new Random(unchecked(seed * 7919 + road.route * 104729 + block * 977 + side * 31));
-                            float station = block * 120f;
-                            int count = s.town ? 4 : 6;
-                            float remaining = 120f;
-                            for (int k = 0; k < count; k++)
-                            {
-                                float width = k == count - 1 ? remaining : s.town ? 30f : 16f + (float)rng.NextDouble() * 8f;
-                                float mid = station + width * .5f;
-                                station += width;
-                                remaining -= width;
-                                if (mid < road.walked || mid >= road.walked + length)
-                                    continue;
-                                Vector2 outward = new Vector2(-dir.y, dir.x) * side;
-                                var p = new VillagePlot
-                                {
-                                    front = a + dir * (mid - road.walked) + outward * (road.widthA + 1.4f),
-                                    along = dir,
-                                    outward = outward,
-                                    frontage = Math.Max(12f, Math.Min(30f, width)),
-                                    depth = s.town ? 35f + (float)rng.NextDouble() * 15f : 25f + (float)rng.NextDouble() * 35f,
-                                    setback = s.town ? 7f : 9f + (float)rng.NextDouble() * 3f,
-                                    roadWidth = road.widthA,
-                                    owner = owner,
-                                    town = s.town,
-                                    style = rng.Next(4)
-                                };
-                                float distance = (p.front - anchor).magnitude;
-                                if (distance > reach + 30f)
-                                    continue;
-                                p.model = s.town && distance < 300f ? "Scenery_Townhouse_Row" : "Scenery_House_" + (p.style == 2 ? "D" : p.style == 1 ? "B" : "A");
-                                if (!church && distance < 65f)
-                                {
-                                    p.church = true;
-                                    p.frontage = 30f;
-                                    p.depth = 55f;
-                                    p.setback = 19f;
-                                    p.model = "Scenery_Church";
-                                }
-                                else if (s.town && !square && distance < 80f)
-                                {
-                                    p.square = true;
-                                    p.depth = 34f;
-                                    p.model = null;
-                                }
-                                else if (distance > reach * .75f && p.style == 0)
-                                {
-                                    p.farm = !s.town;
-                                    p.depth = 60f;
-                                    p.frontage = 30f;
-                                    p.model = s.town ? ((road.route + block + k) % 2 == 0 ? "Scenery_OfficeBlock" : "Scenery_Warehouse") : "Scenery_House_A";
-                                    p.setback = s.town ? 18f : 11f;
-                                }
-
-                                // At town corners a shallower rear garden preserves a usable street frontage.
-                                bool clear = !Overlap(p) && !CrossesRoad(p, localLanes) && !CrossesRoad(p, roads) && Dry(p);
-                                while (!clear && p.town && !p.church && !p.square && p.depth > 25f)
-                                {
-                                    p.depth = Math.Max(25f, p.depth - 5f);
-                                    clear = !Overlap(p) && !CrossesRoad(p, localLanes) && !CrossesRoad(p, roads) && Dry(p);
-                                }
-                                if (!clear)
-                                    continue;
-                                Add(p);
-                                church |= p.church;
-                                square |= p.square;
-                            }
-                        }
-                    }
-                }
-                VillageUse.Assign(plots, owner, seed, anchor);
+                if (!s.town) Grow(owner, s, roads, anchor);
+                else Town(owner, s, roads, anchor);
             }
             // Spare ground is taken only after every settlement's houses, so it can never displace a property.
             for (int owner = 0; owner < settlements.Count; owner++)

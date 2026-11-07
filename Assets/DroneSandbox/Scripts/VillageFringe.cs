@@ -23,7 +23,10 @@ namespace DroneSandbox
             if (candidates.Count == 0) return;
             candidates.Sort((a, b) => (plots[b].front - anchor).sqrMagnitude.CompareTo((plots[a].front - anchor).sqrMagnitude));
             int limit = Math.Min(town ? 56 : 44, 10 + candidates.Count), placed = 0, orchards = 0, gardens = 0;
-            var local = lanes.ToArray();
+            // Only the roads and lanes within reach of this settlement's land can cross its spare plots.
+            float bound = reach * 1.5f + (town ? 800f : 300f);
+            roads = Around(roads, anchor, bound);
+            var local = Around(lanes, anchor, bound);
             for (int k = 0; k < candidates.Count && placed < limit / 2; k++)
             {
                 var house = plots[candidates[k]];
@@ -82,6 +85,19 @@ namespace DroneSandbox
             return true;
         }
 
+        // The segments whose bounds, with their widths, reach the square of half-size r round a point.
+        static FarDetailData.Segment[] Around(IList<FarDetailData.Segment> source, Vector2 c, float r)
+        {
+            var list = new List<FarDetailData.Segment>();
+            foreach (var s in source)
+            {
+                float pad = Math.Max(s.widthA, s.widthB) + r;
+                if (Math.Max(s.ax, s.bx) + pad < c.x || Math.Min(s.ax, s.bx) - pad > c.x || Math.Max(s.az, s.bz) + pad < c.y || Math.Min(s.az, s.bz) - pad > c.y) continue;
+                list.Add(s);
+            }
+            return list.ToArray();
+        }
+
         // Spare land is pasture or village ground, dry and unreserved.
         static bool Spare(VillagePlot p)
         {
@@ -93,6 +109,26 @@ namespace DroneSandbox
                     if (c != Cover.Pasture && c != Cover.Village && c != Cover.Town || WorldPlan.FeatureReserved(q, 4f)) return false;
                 }
             return true;
+        }
+
+        // How far a point lies outside every plot (house, garden or fringe land) near it, up to reach metres; 0 inside one.
+        public float Clearance(Vector2 p, float reach)
+        {
+            float best = reach;
+            int x0 = (int)Math.Floor((p.x - reach) / 128f), x1 = (int)Math.Floor((p.x + reach) / 128f);
+            int z0 = (int)Math.Floor((p.y - reach) / 128f), z1 = (int)Math.Floor((p.y + reach) / 128f);
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                    if (cells.TryGetValue(((long)x << 32) ^ (uint)z, out var list))
+                        foreach (int i in list)
+                        {
+                            plots[i].Coordinates(p, out float u, out float v);
+                            float du = Math.Max(0f, Math.Abs(u) - plots[i].frontage * .5f), dv = v < 0f ? -v : Math.Max(0f, v - plots[i].depth);
+                            if (du >= best || dv >= best) continue;
+                            best = Math.Min(best, (float)Math.Sqrt(du * du + dv * dv));
+                            if (best <= 0f) return 0f;
+                        }
+            return best;
         }
 
         // Inside a paddock, orchard or rough patch by at least inset metres; village props may stand there.

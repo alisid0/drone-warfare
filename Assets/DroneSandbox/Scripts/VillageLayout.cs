@@ -97,7 +97,7 @@ namespace DroneSandbox
                     continue;
                 p.owner = owner;
                 MapLayout.VillagePlots.Add(p);
-                if (p.landUse >= 6) continue; // paddocks, orchards and rough grass have no street frontage of their own
+                if (p.landUse >= 6 || p.backland || p.estate) continue; // fringe land, backland and estates front no street of their own
                 var line = new List<Vector2>
                 {
                     p.front - p.outward * p.StreetOffset - p.along * (p.frontage * .5f),
@@ -107,12 +107,28 @@ namespace DroneSandbox
                 MapLayout.VillageOfStreet.Add(owner);
             }
 
+            // A street's consecutive segments make one road line, so a town's streets stay whole lines with their bends.
+            var street = new List<Vector2>();
+            int route = int.MinValue;
             foreach (var lane in source.lanes)
             {
                 Vector2 a = new Vector2(lane.ax, lane.az) - origin, b = new Vector2(lane.bx, lane.bz) - origin;
-                if (!ClipLine(ref a, ref b))
-                    continue;
-                MapLayout.RoadLines.Add(MapLayout.Smooth(new[] { a, b }, 2f));
+                Vector2 start = a, end = b;
+                bool kept = ClipLine(ref a, ref b);
+                bool joins = kept && lane.route == route && street.Count > 0 && (street[street.Count - 1] - a).sqrMagnitude < .01f && (start - a).sqrMagnitude < .01f;
+                if (!joins && street.Count > 1) MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f));
+                if (!joins) street.Clear();
+                route = lane.route;
+                if (!kept) { street.Clear(); continue; }
+                if (street.Count == 0) street.Add(a);
+                street.Add(b);
+                if ((end - b).sqrMagnitude > .01f) { MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f)); street.Clear(); }
+            }
+            if (street.Count > 1) MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f));
+            foreach (var tree in source.trees)
+            {
+                Vector2 at = tree.at - origin;
+                if (Math.Abs(at.x) < 950f && Math.Abs(at.y) < 950f) MapLayout.VillageTrees.Add(at);
             }
         }
 
