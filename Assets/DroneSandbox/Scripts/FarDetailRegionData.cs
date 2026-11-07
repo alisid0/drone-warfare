@@ -43,11 +43,18 @@ namespace DroneSandbox
             return result;
         }
 
-        // Deterministic opaque BC1 blocks use the farthest colour pair; no driver compression or packages are needed.
+        // A regional page's mip gets its own new array.
         static byte[] Encode(Color32[] pixels, int n)
         {
             var bytes = new byte[n * n / 2];
-            var colours = new Color32[4];
+            Encode(pixels, n, bytes, new Color32[4]);
+            return bytes;
+        }
+
+        // Deterministic opaque BC1 blocks use the farthest colour pair; no driver compression or packages are needed.
+        // Near pages pass their own reused buffer and four-colour scratch.
+        internal static void Encode(Color32[] pixels, int n, byte[] bytes, Color32[] colours)
+        {
             int offset = 0;
             for (int z = 0; z < n; z += 4) for (int x = 0; x < n; x += 4)
             {
@@ -78,7 +85,6 @@ namespace DroneSandbox
                 bytes[offset++] = (byte)a; bytes[offset++] = (byte)(a >> 8); bytes[offset++] = (byte)b; bytes[offset++] = (byte)(b >> 8);
                 for (int k = 0; k < 4; k++) bytes[offset++] = (byte)(indices >> (k * 8));
             }
-            return bytes;
         }
 
         // The audit decodes actual uploaded blocks, so comparison pictures include compression error.
