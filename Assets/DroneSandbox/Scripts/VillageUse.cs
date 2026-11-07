@@ -42,7 +42,7 @@ namespace DroneSandbox
         public const int Lawn = 0, Soil = 1, Gravel = 2, Rough = 3, Stain = 4, Mud = 5, Meadow = 6;
 
         // Farms, sheds and about half the houses have a drive; town land uses and the village fringe have none of their own.
-        public bool HasDrive => (landUse == 0 || landUse == 5) && (farm || shed || (identity & 1) == 0);
+        public bool HasDrive => (landUse == 0 || landUse == 5) && !attached && !estate && !yard && !backland && (farm || shed || (identity & 1) == 0);
         // About three drives in five have a car standing by the house, with a dark drip patch on the gravel.
         public bool HasStain => HasDrive && !farm && (identity >> 11) % 5 < 3;
         // The farm's muck heap stands on the far side of the yard from the drive.
@@ -57,6 +57,7 @@ namespace DroneSandbox
         {
             if (landUse > 0 && landUse < 5) return TownUse(u, v);
             if (landUse >= 6) return FringeUse(u, v);
+            if (estate || yard) return TownGround(u, v);
             if (square) return Gravel;
             if (Math.Abs(u) < pathWidth * .5f && v < setback) return Gravel;
             if (HasDrive && Math.Abs(u - DriveU) < DriveHalf(v) && v < YardEnd) return StainAt(u, v) ? Stain : Gravel;
@@ -68,7 +69,9 @@ namespace DroneSandbox
         {
             if (landUse > 0 && landUse < 5) return TownUse(u, v);
             if (landUse >= 6) return FringeUse(u, v);
+            if (estate || yard) return TownGround(u, v);
             if (square) return Gravel;
+            if (attached) return CoreYard(u, v);
             if (StainAt(u, v)) return Stain;
             if (farm && (Point(u, v) - MuckHeap).sqrMagnitude < 30f) return Mud;
             float mid = (YardStart + YardEnd) * .5f, ry = (YardEnd - YardStart) * .5f;

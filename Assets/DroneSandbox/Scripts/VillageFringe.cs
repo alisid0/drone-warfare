@@ -23,7 +23,10 @@ namespace DroneSandbox
             if (candidates.Count == 0) return;
             candidates.Sort((a, b) => (plots[b].front - anchor).sqrMagnitude.CompareTo((plots[a].front - anchor).sqrMagnitude));
             int limit = Math.Min(town ? 56 : 44, 10 + candidates.Count), placed = 0, orchards = 0, gardens = 0;
-            var local = lanes.ToArray();
+            // Only the roads and lanes within reach of this settlement's land can cross its spare plots.
+            float bound = reach * 1.5f + (town ? 800f : 300f);
+            roads = Around(roads, anchor, bound);
+            var local = Around(lanes, anchor, bound);
             for (int k = 0; k < candidates.Count && placed < limit / 2; k++)
             {
                 var house = plots[candidates[k]];
@@ -80,6 +83,19 @@ namespace DroneSandbox
             if (use == 7) orchards++;
             if (use == 9) gardens++;
             return true;
+        }
+
+        // The segments whose bounds, with their widths, reach the square of half-size r round a point.
+        static FarDetailData.Segment[] Around(IList<FarDetailData.Segment> source, Vector2 c, float r)
+        {
+            var list = new List<FarDetailData.Segment>();
+            foreach (var s in source)
+            {
+                float pad = Math.Max(s.widthA, s.widthB) + r;
+                if (Math.Max(s.ax, s.bx) + pad < c.x || Math.Min(s.ax, s.bx) - pad > c.x || Math.Max(s.az, s.bz) + pad < c.y || Math.Min(s.az, s.bz) - pad > c.y) continue;
+                list.Add(s);
+            }
+            return list.ToArray();
         }
 
         // Spare land is pasture or village ground, dry and unreserved.

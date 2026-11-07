@@ -8,9 +8,10 @@ namespace DroneSandbox
     // Working and community land occupies road-connected town margins before crop parcels are fitted.
     public sealed partial class VillagePlan
     {
-        // Reserve a balanced set along each outgoing route, then fill gaps with ribbon houses and larger farmyards.
+        // Reserve a balanced set along each outgoing route, then fill gaps with ribbon houses and larger farmyards, from
+        // `inner` of the town's reach outwards: the streets inside it are the town's own.
         void TownEdge(int owner, WorldSettlement settlement, FarDetailData.Segment[] roads,
-            FarDetailData.Segment[] local, Vector2 anchor, float reach)
+            FarDetailData.Segment[] local, Vector2 anchor, float reach, float inner)
         {
             var routes = new SortedDictionary<int, List<FarDetailData.Segment>>();
             foreach (var road in roads)
@@ -31,7 +32,7 @@ namespace DroneSandbox
                 {
                     if (!OnRoute(line, station, out var at, out var along, out float width)) continue;
                     float distance = (at-anchor).magnitude;
-                    if (distance < reach * .68f || distance > reach + 650f) continue;
+                    if (distance < reach * inner || distance > reach + 650f) continue;
                     foreach (float side in new[] { -1f, 1f })
                     {
                         Vector2 outward = new Vector2(-along.y, along.x) * side;
