@@ -1,6 +1,7 @@
-"""Town terraces, apartments and village houses with distinct roof shapes and repaint-compatible slots."""
+"""Town terraces, apartments, village houses, semis, old-core terraces and a filling station with repaint-compatible slots."""
 import math
 
+from common import material
 from world_asset_common import door, rail, roof, window
 
 
@@ -169,5 +170,109 @@ def house_d(k, m, lod):
             k.box(m['Galvanized'],(7.6,.12,.1),(0,s*3.35,3.12))
 
 
+def extra(m):
+    """Adds the plaster and roof tones the old-core terrace uses; their names match the project's photo materials."""
+    for name, colour in (('PlasterOchre', (.60, .46, .26)), ('PlasterPink', (.62, .50, .46)),
+                         ('RoofTileDark', (.20, .06, .03)), ('RoofTileWarm', (.36, .12, .05))):
+        if name not in m:
+            m[name] = material(name, colour, roughness=.72)
+    return m
+
+
+def house_semi(k, m, lod):
+    """A two-storey semi-detached pair, 12.4 m of frontage under one tile roof, with a party-wall chimney and two doors."""
+    k.box(m['Concrete'], (12.6, 9.2, .4), (0, 0, .2))
+    k.box(m['PlasterWhite'], (12.4, 9, 5.8), (0, 0, 3.1))
+    roof(k, m['RoofTile'], 0, 0, 9, 12.4, 6, 3, axis='x', over=.35)
+    k.box(m['Brick'], (.8, .8, 2.2), (0, .6, 8.2))
+    for s in (-1, 1):
+        door(k, m, s * 4.1, -4.55, 1, 2.2, lod, .4, 'Wood')
+        roof(k, m['RoofTile'], s * 4.1, -5.1, 1.2, 2, 2.75, .45, axis='x', over=.1)
+    if lod == 2:
+        for z in (1.8, 4.6):
+            for side in (-1, 1):
+                k.box(m['WindowGlass'], (11, .08, 1.2), (0, side * 4.55, z))
+        return
+    for s in (-1, 1):
+        for z in (1.9, 4.7):
+            for x in ((1.2, 2.9) if z < 3 else (1.2, 3.0, 4.6)):
+                window(k, m, (s * x, -4.54, z), 1.1, 1.3, lod)
+            for x in (1.4, 4.2):
+                window(k, m, (s * x, 4.54, z), 1.1, 1.3, lod)
+        window(k, m, (s * 6.24, 0, 4.7), 1, 1.2, lod, 'x')
+    if lod == 0:
+        k.box(m['Concrete'], (.9, .9, .15), (0, .6, 9.35))
+        for s in (-1, 1):
+            k.box(m['Concrete'], (1.6, 1.2, .3), (s * 4.1, -5.1, .15))
+            k.box(m['Galvanized'], (.12, .12, 5.6), (s * 6.15, -4.45, 3.2))
+
+
+def townhouse_old(k, m, lod):
+    """Three attached old-core burgher houses of unequal width and height, eaves to the street, each its own plaster and
+    roof; RoofTile and PlasterWhite stay on the middle house for Repaint."""
+    extra(m)
+    units = ((-6.3, 5.6, 6.4, 3.6, 'PlasterOchre', 'RoofTileDark'), (-.1, 6.8, 8.8, 3.4, 'PlasterWhite', 'RoofTile'),
+             (6.2, 5.8, 7.2, 3.2, 'PlasterPink', 'RoofTileWarm'))
+    k.box(m['Concrete'], (18.4, 11.2, .3), (0, 0, .15))
+    for x, w, eave, rise, wall, tile in units:
+        k.box(m[wall], (w, 11, eave), (x, 0, eave / 2 + .2))
+        roof(k, m[tile], x, 0, 11, w, eave + .2, rise, axis='x', over=.04)
+        k.box(m['Brick'], (.6, .6, 1.6), (x + w * .3, 1.5, eave + rise * .7))
+    # The middle house's dormer, a gable breaking the roofline toward the street.
+    k.box(m['PlasterWhite'], (2.2, 1.6, 1.6), (-.1, -4.3, 9.9))
+    roof(k, m['RoofTile'], -.1, -4.3, 2.2, 1.9, 10.7, .9, over=.12)
+    door(k, m, -7.5, -5.56, 1, 2.2, lod, .3, 'Wood')
+    door(k, m, 7.4, -5.56, 1, 2.2, lod, .3, 'Wood')
+    k.box(m['WindowGlass'], (4.6, .1, 2.2), (-.1, -5.55, 1.6))
+    if lod == 2:
+        for x, w, eave, _, _, _ in units:
+            for z in [z for z in (3.8, 6.6) if z < eave - .8]:
+                k.box(m['WindowGlass'], (w - 1.4, .08, 1.1), (x, -5.55, z))
+        return
+    k.box(m['TealMark'], (5.4, .2, .5), (-.1, -5.62, 3.05))
+    for x, w, eave, _, _, _ in units:
+        floors = [z for z in (3.9, 6.6) if z < eave - .9]
+        for z in floors:
+            for dx in (-w * .25, w * .25):
+                window(k, m, (x + dx, -5.54, z), 1, 1.35, lod)
+                window(k, m, (x + dx, 5.54, z), 1, 1.35, lod)
+        if x != -.1:
+            window(k, m, (x + (1.2 if x < 0 else -1.2), -5.54, 1.7), 1, 1.3, lod)
+    if lod == 0:
+        for x, w, eave, _, _, _ in units:
+            k.box(m['Concrete'], (w, .25, .18), (x, -5.6, eave + .05))
+            k.box(m['Galvanized'], (.1, .1, eave), (x + w / 2 - .12, -5.62, eave / 2 + .2))
+
+
+def filling_station(k, m, lod):
+    """A small filling station: a canopy on four posts over two pump islands, and a flat-roofed kiosk behind."""
+    k.box(m['Concrete'], (16.4, 9.4, .25), (0, -3.5, .125))
+    k.box(m['Concrete'], (16, 9, .7), (0, -3.5, 5.05))
+    k.box(m['TealMark'], (16.1, 9.1, .3), (0, -3.5, 4.85))
+    for x in (-5.8, 5.8):
+        for y in (-6.5, -.5):
+            k.box(m['SteelDark'], (.35, .35, 4.6), (x, y, 2.5))
+    for x in (-3, 3):
+        k.box(m['Concrete'], (1.2, 4.6, .25), (x, -3.5, .37))
+        for y in (-4.8, -2.2):
+            k.box(m['SteelDark'], (.6, .45, 1.6), (x, y, 1.3))
+    k.box(m['PlasterWhite'], (8.6, 6, 3.4), (0, 6, 1.95))
+    k.box(m['Concrete'], (8.9, 6.3, .3), (0, 6, 3.8))
+    k.box(m['WindowGlass'], (6.2, .1, 2.2), (-.6, 2.97, 1.55))
+    k.box(m['TealMark'], (8.7, .15, .5), (0, 2.95, 3.35))
+    if lod == 2:
+        return
+    door(k, m, 3.2, 2.93, 1.2, 2.2, lod, .25, 'WindowGlass')
+    k.box(m['SteelDark'], (.25, .25, 6), (7.5, -8, 3))
+    k.box(m['TealMark'], (1.6, .3, 1.6), (7.5, -8, 6.6))
+    if lod == 0:
+        for x in (-3, 3):
+            for y in (-4.8, -2.2):
+                k.box(m['WindowGlass'], (.4, .47, .5), (x, y, 1.6))
+        k.box(m['Galvanized'], (1.5, .9, 2), (-3.5, 9.4, 1.2))
+        k.box(m['SteelDark'], (2.4, .6, 1.4), (2.5, 9.3, .9))
+
+
 BUILDS = [('Scenery_Townhouse_Row',townhouse_row),('Scenery_Apartment',apartment),('Scenery_Shop',shop),
-          ('Scenery_House_C',house_c),('Scenery_House_D',house_d)]
+          ('Scenery_House_C',house_c),('Scenery_House_D',house_d),('Scenery_House_Semi',house_semi),
+          ('Scenery_Townhouse_Old',townhouse_old),('Scenery_FillingStation',filling_station)]
