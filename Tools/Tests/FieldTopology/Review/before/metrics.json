@@ -1,0 +1,54 @@
+{
+  "spots": [
+    {
+      "name": "wheat",
+      "at": {
+        "x": -9000,
+        "z": -12000
+      },
+      "medianMs": 246.165,
+      "worstMs": 254.9825
+    },
+    {
+      "name": "ploughed",
+      "at": {
+        "x": -5928,
+        "z": -12000
+      },
+      "medianMs": 202.3751,
+      "worstMs": 215.2796
+    },
+    {
+      "name": "road-farm",
+      "at": {
+        "x": -12854.826,
+        "z": 16772.557
+      },
+      "medianMs": 211.97,
+      "worstMs": 215.1817
+    },
+    {
+      "name": "village",
+      "at": {
+        "x": -11057.904,
+        "z": 4400.2354
+      },
+      "medianMs": 189.7635,
+      "worstMs": 267.5078
+    },
+    {
+      "name": "river-crossing",
+      "at": {
+        "x": -12063.079,
+        "z": 16067.159
+      },
+      "medianMs": 400.3187,
+      "worstMs": 406.6094
+    }
+  ],
+  "worldSeconds": 2.8079947,
+  "layoutSeconds": 1.1617991,
+  "fields": 440,
+  "fieldTimings": "blocked map 375 ms, parcels 599 ms, district occupancy 79%",
+  "note": "CPU albedo, 45 degree vertical FOV. Managed Perlin; no HDRP lighting, props or frame-time claim."
+}

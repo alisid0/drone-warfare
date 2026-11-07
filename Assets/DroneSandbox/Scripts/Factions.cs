@@ -93,14 +93,15 @@ namespace DroneSandbox
             return enemyFlagMaterial != null ? enemyFlagMaterial : (enemyFlagMaterial = Textured(EnemyFlag, true));
         }
 
-        // A copy of the Decal material (alpha cut-out URP Lit, made by Configure Project) with this texture.
+        // A copy of the Decal material (alpha cut-out HDRP Lit, made by Configure Project) with this texture.
         static Material Textured(Texture2D texture, bool doubleSided)
         {
             var template = Resources.Load<Material>("Materials/Decal");
             var m = template != null ? new Material(template) : Art.NewMaterial(Color.white);
             m.mainTexture = texture;
             m.color = Color.white;
-            m.SetFloat("_Cull", doubleSided ? 0f : 2f);
+            m.SetFloat("_DoubleSidedEnable", doubleSided ? 1f : 0f);
+            UnityEngine.Rendering.HighDefinition.HDMaterial.ValidateMaterial(m);
             return m;
         }
 

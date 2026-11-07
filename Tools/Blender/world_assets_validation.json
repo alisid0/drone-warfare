@@ -1,0 +1,212 @@
+[
+  {
+    "name": "Drone_Recon",
+    "triangles": [
+      1568,
+      984,
+      194
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_AircraftShelter",
+    "triangles": [
+      4552,
+      816,
+      168
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_Apartment",
+    "triangles": [
+      6480,
+      1152,
+      156
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_ControlTower",
+    "triangles": [
+      4108,
+      1252,
+      80
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_CoolingTower",
+    "triangles": [
+      2876,
+      1100,
+      260
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_FactoryHall",
+    "triangles": [
+      5532,
+      1060,
+      204
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_FreightShed",
+    "triangles": [
+      2456,
+      832,
+      152
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_FuelFarm",
+    "triangles": [
+      2632,
+      1180,
+      156
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_GantryCrane",
+    "triangles": [
+      1516,
+      740,
+      168
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_HangarLarge",
+    "triangles": [
+      2820,
+      632,
+      68
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_House_C",
+    "triangles": [
+      2632,
+      496,
+      100
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_House_D",
+    "triangles": [
+      1140,
+      276,
+      84
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_OfficeBlock",
+    "triangles": [
+      7428,
+      1244,
+      120
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_PipeRack",
+    "triangles": [
+      792,
+      222,
+      102
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_RailContainerWagon",
+    "triangles": [
+      3220,
+      844,
+      60
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_RailHopper",
+    "triangles": [
+      2288,
+      1048,
+      128
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_Shop",
+    "triangles": [
+      1308,
+      216,
+      108
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_SignalBox",
+    "triangles": [
+      1604,
+      424,
+      88
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_StorageTank",
+    "triangles": [
+      3854,
+      1250,
+      114
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_Townhouse_Row",
+    "triangles": [
+      4828,
+      1052,
+      260
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  },
+  {
+    "name": "Scenery_Windsock",
+    "triangles": [
+      296,
+      208,
+      78
+    ],
+    "status": "PASS",
+    "mesh_depth": 1
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "samples": 3042,
+  "wrong": 0,
+  "seconds": 0.6370602,
+  "fields": 338,
+  "timings": "blocked map 33 ms, parcels 100 ms, district occupancy 93%"
+}

@@ -1,0 +1,58 @@
+Predictive streaming replay of hd167's route; 12.5 ms frames; cap 25 tiles; fake timed work
+######## A. The brief: generation 180-400 ms (p99 about 391 ms), second half at 4x
+== before (e666e0f scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0
+4x: 2470 frames; under the drone missing 0/2470 (100.00% ready); camera 600 m zone frames with a gap 1624 (34.25% complete, tile-frames missing 6187/24320); 250 m core frames with a gap 727
+committed 170 tiles in 182 transactions (mean 68.1 frames from start to publish), pressure evictions 156, discarded prepared tiles 12; modelled streaming main thread mean 0.068 ms, worst 0.363 ms, frames over budget+0.05 ms 0; regional pages 102, frames with the camera's own 2 km page missing 0
+
+== after (predictive scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.30 s, frames under 1 s 0, under 3 s 0
+4x: 2470 frames; under the drone missing 0/2470 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/24320); 250 m core frames with a gap 0; ReadyAhead min 6.47 s, frames under 1 s 0, under 3 s 0
+committed 189 tiles in 204 transactions (mean 24.6 frames from start to publish), pressure evictions 180, discarded prepared tiles 58; modelled streaming main thread mean 0.085 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 537 ms, prefetch lead 2000 m
+
+== after (predictive scheduler) + illustrative ReadyAhead throttle ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s, throttled 0 frames
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.30 s, frames under 1 s 0, under 3 s 0
+4x: 2470 frames; under the drone missing 0/2470 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/24320); 250 m core frames with a gap 0; ReadyAhead min 6.47 s, frames under 1 s 0, under 3 s 0
+committed 189 tiles in 204 transactions (mean 24.6 frames from start to publish), pressure evictions 180, discarded prepared tiles 58; modelled streaming main thread mean 0.085 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 537 ms, prefetch lead 2000 m
+
+######## B. Calibrated to hd167's ~1.1 s per tile: generation 300-600 ms (mean 400, p99 about 597 ms), 4x
+== before (e666e0f scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0
+4x: 2470 frames; under the drone missing 374/2470 (84.86% ready); camera 600 m zone frames with a gap 2005 (18.83% complete, tile-frames missing 9341/24320); 250 m core frames with a gap 1484
+committed 158 tiles in 168 transactions (mean 82.3 frames from start to publish), pressure evictions 129, discarded prepared tiles 10; modelled streaming main thread mean 0.065 ms, worst 0.363 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0
+
+== after (predictive scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.33 s, frames under 1 s 0, under 3 s 0
+4x: 2470 frames; under the drone missing 0/2470 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/24320); 250 m core frames with a gap 0; ReadyAhead min 5.97 s, frames under 1 s 0, under 3 s 0
+committed 179 tiles in 191 transactions (mean 24.4 frames from start to publish), pressure evictions 166, discarded prepared tiles 57; modelled streaming main thread mean 0.083 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 787 ms, prefetch lead 2000 m
+
+== after (predictive scheduler) + illustrative ReadyAhead throttle ==
+route: wood at 35 s; rail junction at 203 s; works at 235 s; village at 247 s; 20106 frames, 4x half 35 real s, throttled 0 frames
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.33 s, frames under 1 s 0, under 3 s 0
+4x: 2470 frames; under the drone missing 0/2470 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/24320); 250 m core frames with a gap 0; ReadyAhead min 5.97 s, frames under 1 s 0, under 3 s 0
+committed 179 tiles in 191 transactions (mean 24.4 frames from start to publish), pressure evictions 166, discarded prepared tiles 57; modelled streaming main thread mean 0.083 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 787 ms, prefetch lead 2000 m
+
+######## C. Stress: B's generation with the second half at 8x
+== before (e666e0f scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 221 s; village at 229 s; 18708 frames, 8x half 17 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0
+8x: 1072 frames; under the drone missing 806/1072 (24.81% ready); camera 600 m zone frames with a gap 1019 (4.94% complete, tile-frames missing 7649/10603); 250 m core frames with a gap 927
+committed 141 tiles in 151 transactions (mean 82.5 frames from start to publish), pressure evictions 118, discarded prepared tiles 10; modelled streaming main thread mean 0.064 ms, worst 0.363 ms, frames over budget+0.05 ms 0; regional pages 102, frames with the camera's own 2 km page missing 0
+
+== after (predictive scheduler) ==
+route: wood at 35 s; rail junction at 203 s; works at 221 s; village at 229 s; 18708 frames, 8x half 17 real s
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.33 s, frames under 1 s 0, under 3 s 0
+8x: 1072 frames; under the drone missing 0/1072 (100.00% ready); camera 600 m zone frames with a gap 19 (98.23% complete, tile-frames missing 19/10603); 250 m core frames with a gap 0; ReadyAhead min 0.00 s, frames under 1 s 354, under 3 s 922
+committed 174 tiles in 184 transactions (mean 25.4 frames from start to publish), pressure evictions 158, discarded prepared tiles 37; modelled streaming main thread mean 0.083 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 775 ms, prefetch lead 2000 m
+
+== after (predictive scheduler) + illustrative ReadyAhead throttle ==
+route: wood at 35 s; rail junction at 203 s; works at 222 s; village at 231 s; 18825 frames, 8x half 19 real s, throttled 234 frames
+1x: 15201 frames; under the drone missing 0/11330 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/114161); 250 m core frames with a gap 0; ReadyAhead min 25.33 s, frames under 1 s 0, under 3 s 0
+8x: 1189 frames; under the drone missing 0/1189 (100.00% ready); camera 600 m zone frames with a gap 0 (100.00% complete, tile-frames missing 0/11781); 250 m core frames with a gap 0; ReadyAhead min 1.47 s, frames under 1 s 0, under 3 s 1021
+committed 174 tiles in 182 transactions (mean 25.3 frames from start to publish), pressure evictions 157, discarded prepared tiles 40; modelled streaming main thread mean 0.083 ms, worst 0.380 ms, frames over budget+0.05 ms 0; regional pages 103, frames with the camera's own 2 km page missing 0; generation latency p99 (last 64) 775 ms, prefetch lead 2000 m
+

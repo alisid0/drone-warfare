@@ -1,0 +1,2 @@
+Passed: 3/9 dash energy (including negative chainage), 2.5–3.5 m track envelope, 0.4–0.6 m rut widths, grass centre, junction splay, finite caps and bucket seam.
+Immutable segment snapshot; coarse versus 32x32 quadrature max linear RGB distance 0.008559 (2 m / 4 m / 13.67 m).

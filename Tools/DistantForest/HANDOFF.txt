@@ -1,0 +1,199 @@
+Forest visibility recovery and distant-forest handoff, 6 November 2026
+
+Work is on codex/distant-forest, based on 9f8a34b. The original uncommitted
+distant-forest work was preserved in bbb626d. Claude should restore the dense
+forest by reverting 60e605d in the integration checkout, then merge this branch.
+Codex has not pushed, merged, switched branches, or launched Unity.
+Canopy.cs is already integrated here: do not apply the old DenseForest canopy
+integration patch again. FarDetail*, FarField*, FarTerrain, Ground, Atmosphere,
+AutoTest and the other protected game files were not edited.
+
+Confirmed code defects and fixes:
+
+1. ForestFade read input.positionRWS in every raster pass. HDRP's LitDepthPass
+   omits that varying for ordinary opaque materials, and VaryingMesh initializes
+   the missing value to zero. Canopy then measures distance zero from the camera
+   in depth, while colour passes measure real distance. That clips away canopy
+   depth and breaks colour passes using depth-equal shading. Dithered opaque
+   trunk depth also disagreed with colour. ForestLit now requires world position
+   before the pass varying layouts are declared. Dither noise also no longer
+   relies on a large-coordinate sine hash, and complete coverage skips the hash.
+
+2. The four ShaderLab Properties were ALREADY present at 9f8a34b. Missing
+   declarations were not the defect. Their HLSL values were outside
+   UnityPerMaterial, making the shader incompatible with the SRP Batcher layout.
+   They now share HDRP's UnityPerMaterial buffer through ForestLitProperties.hlsl.
+   Explicit RenderMeshInstanced/RenderMesh calls retain per-camera property
+   blocks; no global SRP Batcher or GPU Resident Drawer setting is changed.
+
+3. The first World.Build could create a local FarScatter before FarTerrain
+   created its persistent one. Both could submit forests. The local renderer
+   now yields ownership while FarTerrain is active. Clear now invalidates its
+   adopted version, and uploads copy the prepared-data descriptor instead of
+   consuming/clearing SectorForest.PreparedCanopy. A later Clear or replacement
+   renderer can therefore re-adopt the same completed canopy.
+
+4. Ready used to mean an index array had merely been allocated, and a camera
+   could cache cells while sector ownership was incomplete. Ready is now
+   published after stems/indices are complete, with a new version. Rendering
+   waits for Ready. Cell records are published atomically after their iterator
+   finishes. The 120 m/s readiness ramp is gone: actual completed cells determine
+   readiness, with a 16 m movement guard around the nominal 350 m tree bubble.
+   Missing trees keep canopy coverage rather than opening an empty bubble.
+
+5. Coarse HLOD previously paid for dense perimeter samples and detailed crown
+   textures, and a fine build could block newly visible coverage. Missing blocks
+   now receive a small 256 m bootstrap mesh/texture first. Temporary skirts hide
+   coarse/fine edge mismatches. Missing coverage preempts refinement on a camera
+   turn as well as a teleport. Refined 8/16/64/128 m meshes keep a common 8 m
+   perimeter and matching normals. Geometry within 256 m tiles adapts around the
+   camera; nearby textures are 260 square instead of 516 square. Existing blocks
+   crossfade into replacements while coarse coverage remains available.
+
+6. FarScatter walked, copied and sorted cached tree records and multiplied all
+   draw matrices every camera/frame. Generation and selection now run in small
+   timed slices. One-metre cost bins replace sorting. Completed camera batches
+   submit cached arrays directly; the guard and both sides of every transition
+   count against the tree budgets. Camera jumps discard stale bubble selections.
+   Nearby cells are retained for multiple observers, with a bounded cache.
+
+7. Canopy.Blocks sampled every metre with nine spatial lookups per sample, even
+   above all tree crowns. It now indexes overlapping columns, skips empty or
+   vertically disjoint spans and preserves the original metre samples and
+   consecutive-hit rule for possible intersections. This is a demonstrated CPU
+   reduction, not proof that it alone caused hd145's player-frame regression.
+
+Ruled out or hardened:
+
+- The installed HDRP/Core sources apply camera translation to UNITY_MATRIX_M
+  for ordinary, regular-instanced AND DOTS-instanced variants. GetObjectToWorldMatrix
+  returns that matrix. GetAbsolutePositionWS on its translation, and on
+  positionRWS, restores absolute Unity scene positions exactly once. Comparing
+  these with cam.transform.position is correct; adding/removing another camera
+  translation would introduce a bug. The existing pivot conversion is retained.
+- All 12 Resources/Materials/Forest assets already retained instancing variants.
+  They remain serialized with instancing enabled and the foliage cutout/double-
+  sided keywords. Runtime clones now use those assets without swapping shaders.
+- ForestMaterials checks Shader.Find, isSupported, properties and material/MPB
+  value storage. Failures use the existing HDRP Lit PBR/BaseLit assets, with
+  instancing enabled and no custom fade. ForceFallback permits a build test.
+  Shader fading defaults off. Material camera/distance defaults are zero after
+  validation; if a backend drops the property block, the shader draws full
+  coverage instead of clipping everything. CPU readback cannot prove GPU binding.
+- World.TreeCount counts decorative GameObject trees, not logical sector stems.
+  A lower World.TreeCount alone is not evidence that the forest is missing.
+
+The preserved distant recipe remains: young irregular margins, mixed species
+districts, crown-scale relief and larger masses, darker shared photo/canopy
+colours, and stitched refinement. The exact task15-distant-forest.md companion
+brief was not found in the worktree or likely task folders; its path was requested
+during the task. These changes continue the preserved implementation, but exact
+compliance with that unavailable brief has not been verified.
+
+Verification completed without Unity:
+
+- prepare.py: C# 9 compilation against Unity 6000.6.7f1 assemblies, zero warnings
+  and errors. A second integration build compiles all current FarDetail* and
+  FarField* files, including FarDetailCover and FarDetailRegional, plus FarTerrain
+  and the forest. Unrelated scene services and Water's HDRP surface use stubs.
+- check_shader.py: installed HDRP transform/depth inputs, common constant buffer,
+  fail-open parameters, and 12 serialized instancing material contracts checked.
+  This is a source/asset audit, not a native shader compilation.
+- run.py after: repeated-build determinism, logical occupancy, crown clearance,
+  101 flight-budget samples, 1,028 matching refined boundary vertices/normals,
+  and adaptive boundary identity. The adaptive sample uses 28,471 vertices versus
+  66,049 uniformly refined vertices. Refined/coarse mean luminance ratio: 0.995.
+- 4,000 crown rays exactly match the old production algorithm, including long,
+  vertical and negative-coordinate boundary cases. Last managed run: 212.31 ms
+  before, 21.73 ms after; 651,219 metre samples skipped, 57,170 tested.
+- check_render.py executes production scheduling with recording engine doubles:
+  no pre-ready cells, startup trees, Clear/re-adoption, duplicate-owner suppression,
+  flight budgets, stale-bubble rejection, jump coverage, forced Lit submissions,
+  and missing/unsupported shader, absent properties and failed setter fallbacks.
+  Last 600-frame managed flight: mean 0.388 ms, p95 0.549 ms, worst 2.132 ms;
+  436 frames visited no tree records. Jump coverage settled in 39 simulated frames.
+  Native uploads, real frusta, GPU shading, and Unity allocation behavior are not
+  simulated. Earlier managed runs had timing outliers up to about 25 ms; iterator
+  slice targets are not hard upper bounds on GC/OS/native-operation duration.
+- Headless Blender reference renders at 300/1,000/2,500/9,000 m and greyscale
+  comparisons are in Review/index.html. Forest/pasture linear luminance ratios
+  are 0.422/0.424/0.440/0.406; greyscale ratios are 0.654/0.656/0.669/0.644.
+  These show fixed-tier reference surfaces, without HDRP, fog, native uploads or
+  live streaming. Runtime adaptive tiles can have lower detail away from the view.
+
+Claude's next player build is the acceptance test:
+
+1. Import the new ForestLitProperties.hlsl and ForestMaterials.cs with their meta
+   files, and the updated serialized Forest materials. Build with the same HDRP
+   settings, GPU Resident Drawer setting and DX11/DX12 targets as hd145. Confirm
+   no shader/material errors and fallback materials remain zero in the normal run.
+2. Inspect 02a_base at 42 m and 31_sector_01_DeepForest at 140 m. Woods must be
+   visible, with positive logical stem counts and visible canopy beyond the
+   camera's tree bubble. Individual trees/cards should appear wherever forest
+   lies inside the distance budget. Roads, glades and mission clearings stay open.
+3. For 80, 81 and 88, inspect actual canopy coverage/triangles across the view.
+   MissingBlocks must reach zero within 2-3 real seconds after a 2.5 km jump.
+   Do not declare settling merely because BlocksDrawn stayed at one for several
+   frames. Refinement may still be building after coverage has settled. Cached
+   blocks include empty land, and crossfades can submit two meshes per block.
+4. Exercise 87_world_low_forest_edge at a location actually classified Forest by
+   Codex B's detail snapshot. This branch does not edit its probe logic or cover
+   classifier. If the fixed flight path still has no Forest probe, log the sampled
+   cover and use a confirmed woodland point; do not treat an absent probe as a
+   successful forest-edge render. ForestHlod.LargestForest() remains available.
+5. Before the measured 4x low-flight interval, call FarScatter.ResetTimings().
+   On the RTX 3050 at the same 1600x900 settings, require overall frame p95 <=16.7
+   ms excluding screenshot I/O, and forest MeanMs <=1.0 ms. The forest timer now
+   aggregates camera render work plus Canopy queries before the render callbacks;
+   it excludes settlement/landmark work. Check positive Samples and normal draw
+   budgets: full <=200, reduced <=1,000, cards <=5,000, tree triangles <=1,800,000.
+6. Set ForestMaterials.ForceFallback = true in a separate diagnostic run. The
+   renderer reloads its materials automatically. Woods and canopy must still draw,
+   without fading; FallbackCount must rise. Restore false for the accepted build.
+7. Check 350-700 m hand-over, a low forest-edge flight, rapid turns, the 2.5 km
+   jump, sector reloads and the drone-feed camera. Look for empty tree holes,
+   doubled trunks, floating bases, persistent block seams, popping or pink foliage.
+
+Exact additional AutoTest line, after the target camera has rendered:
+
+log.WriteLine($"forest drawn: mesh trees {FarScatter.MeshTreesDrawn}, cards {FarScatter.CardTreesDrawn}, canopy blocks {ForestHlod.BlocksDrawn} of {ForestHlod.CachedBlocks} cached, {SectorForest.Stems.Count} sector trees; ready {SectorForest.Ready}, cells {FarScatter.ReadyCells}, tree reach {FarScatter.TierDistances.z:F0} m, missing canopy {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, visited {FarScatter.RecordsVisited}, tree triangles {FarScatter.TreeTrianglesDrawn}, canopy triangles {ForestHlod.TrianglesDrawn}, forest CPU {FarScatter.MainThreadMs:F3} ms (mean {FarScatter.MeanMs:F3}, worst {FarScatter.WorstMs:F3}, {FarScatter.Samples} frames), crown CPU {Canopy.QueryMs:F3} ms, fallback materials {ForestMaterials.FallbackCount}");
+
+Draw counts/readiness belong to the last eligible camera; CPU time aggregates
+eligible cameras in a frame. Ensure a feed camera has not overwritten the shot's
+draw counts. FallbackCount is cumulative since process startup.
+
+For shots 81/88, with a local float forestWaitStarted set before the jump, wait
+for MissingBlocks == 0 after rendering the target camera (with a 3 s deadline),
+then use this exact line even on timeout so incomplete coverage is explicit:
+
+log.WriteLine($"forest masses {(ForestHlod.MissingBlocks == 0 ? "settled" : "timed out")} at {ForestHlod.BlocksDrawn} blocks after {Time.unscaledTime - forestWaitStarted:F2} s; missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, cached {ForestHlod.CachedBlocks}, builds {ForestHlod.CompletedBuilds}, refining {ForestHlod.Building}, last build slice {ForestHlod.BuildMs:F3} ms");
+
+Reproduction commands from this worktree:
+
+  py -3.13 -I Tools/DistantForest/prepare.py
+  py -3.13 -I Tools/DistantForest/check_shader.py
+  py -3.13 -I Tools/DistantForest/run.py after
+  py -3.13 -I Tools/DistantForest/check_render.py
+  py -3.13 -I Tools/DistantForest/report.py --textures-only
+  "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --factory-startup --python Tools/DistantForest/render.py -- after 300 1000 2500 9000
+  py -3.13 -I Tools/DistantForest/report.py
+
+Run these sequentially: they share Temp/distant-forest scaffolding. On accounts
+where py cannot find Python, use the installed Python313/python.exe with -I.
+
+Source references used:
+
+  Installed HDRP 49ad9dd6ab9a: Runtime/Material/Lit/ShaderPass/LitDepthPass.hlsl,
+  Runtime/RenderPipeline/ShaderPass/VaryingMesh.hlsl, ShaderVariables.hlsl,
+  ShaderVariablesFunctions.hlsl, and LitProperties.hlsl (read-only).
+  Installed Core 13460d8ea9e5: ShaderLibrary/UnityInstancing.hlsl and
+  ShaderLibrary/SpaceTransforms.hlsl (read-only).
+  https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Graphics/Graphics.cs
+  https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Shaders/Material.cs
+  https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Shaders/MaterialPropertyBlock.cs
+  https://docs.unity.cn/2023.3/Documentation/Manual/SRPBatcher.html
+  https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.high-definition/Documentation~/make-object-compatible-gpu-rendering.md
+
+Remaining verification: the native shader compilation, player visibility and
+performance targets above require Claude's Unity build. Offline counters cannot
+establish the complete cause of hd145's invisible woods or its 75.9 ms frame p95.

@@ -1,0 +1,19 @@
+{
+  "districts": 500,
+  "parcels": 4627,
+  "idle": 739,
+  "idleFraction": 0.15971471795980116,
+  "gardens": 22,
+  "estates": 44,
+  "minArea": 602.078125,
+  "minEdge": 18.109954833984375,
+  "minAngle": 44.99998975471808,
+  "minStrip": 42.50332,
+  "maxStrip": 323,
+  "minHedge": 0.13988827,
+  "maxHedge": 0.81470984,
+  "outside": 0,
+  "probes": 5630955,
+  "woodSamples": 100000,
+  "maxForestError": 0
+}

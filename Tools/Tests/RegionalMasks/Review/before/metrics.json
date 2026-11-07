@@ -1,0 +1,34 @@
+{
+  "worldSeconds": 2.2468598,
+  "tiles": [
+    {
+      "name": "road-farm",
+      "x": -12854.826,
+      "z": 16772.557,
+      "medianMs": 62.1731,
+      "worstMs": 67.6486
+    },
+    {
+      "name": "farmland-forest",
+      "x": -9000,
+      "z": -12000,
+      "medianMs": 59.4698,
+      "worstMs": 71.3137
+    },
+    {
+      "name": "village",
+      "x": -11057.904,
+      "z": 4400.2354,
+      "medianMs": 62.604,
+      "worstMs": 64.3401
+    },
+    {
+      "name": "river",
+      "x": -12063.079,
+      "z": 16067.159,
+      "medianMs": 73.0672,
+      "worstMs": 86.1609
+    }
+  ],
+  "note": "CPU albedo, actual BC1 decode after; 45 degree vertical FOV. No HDRP lighting, props, GPU or native upload timing."
+}

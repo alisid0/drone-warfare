@@ -1,27 +1,25 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox
 {
-    // Time of day. A clock moves the sun from east to west (the same light becomes a dim blue moon after dark),
-    // dims and tints the sky, ambient light, fog and reflections, and switches night lights on after sunset:
-    // vehicle headlights, base floodlights and village windows.
-    // Also the thermal view: a white-hot camera where vehicles and drones glow. It needs a Scout in the air.
+    // Time of day. A clock moves the sun from east to west (the same light becomes a blue moon after dark) and
+    // switches night lights on after sunset: vehicle headlights, base floodlights, the dam's lamps and lit windows.
+    // HDRP's physically based sky does the rest from the sun's height: sunrise and sunset colours, the dimming
+    // sky and ambient light, haze colour, and automatic exposure (see Atmosphere).
+    // Also the thermal view: a white-hot camera where vehicles and drones glow. It needs a drone with a thermal
+    // camera in the air (see Drone.HasThermal).
     public class DayNight : MonoBehaviour
     {
         const float NoonElevation = 50f;   // degrees above the horizon at midday
         const float MoonElevation = 38f;
         const float Sunrise = 5f, Sunset = 21f; // a long summer day
 
-        static readonly Color DuskSun = new Color(1f, 0.55f, 0.3f);
-        static readonly Color NoonSun = new Color(1f, 0.93f, 0.8f);
-        static readonly Color MoonLight = new Color(0.55f, 0.66f, 0.95f);
-        static readonly Color DuskSky = new Color(1f, 0.72f, 0.55f);
-        static readonly Color NightSky = new Color(0.45f, 0.55f, 0.95f);
-        static readonly Color DuskFog = new Color(0.62f, 0.5f, 0.45f);
-        static readonly Color NightFog = new Color(0.06f, 0.08f, 0.12f);
+        const float MoonLux = 8f;            // far brighter than a real moon (about 0.3 lux), so nights stay playable
+        const float LumensPerUnit = 400f;    // night-light intensities are given on the old 0-10 scale
+        static readonly Color MoonLight = new Color(0.62f, 0.72f, 1f);
         static readonly Color WindowGlow = new Color(0.95f, 0.66f, 0.3f);
 
         public static DayNight Instance { get; private set; }
@@ -39,11 +37,9 @@ namespace DroneSandbox
         static Material windowMaterial;
 
         Light sun;
-        Material sky;
-        ReflectionProbe probe;
         Volume nightVolume, thermalVolume;
         ColorAdjustments thermalColour;
-        Material hot;
+        Material hot, warm; // thermal: engines running, and idle kit
         readonly Dictionary<Renderer, Material[]> cooled = new Dictionary<Renderer, Material[]>();
         float heatTimer;
 
@@ -56,13 +52,14 @@ namespace DroneSandbox
                 {
                     windowMaterial = Art.NewMaterial(new Color(0.02f, 0.025f, 0.03f), glow: true);
                     windowMaterial.SetFloat("_Smoothness", 0.85f);
-                    windowMaterial.SetColor("_EmissionColor", Color.black);
+                    Art.Glow(windowMaterial, Color.black);
                 }
                 return windowMaterial;
             }
         }
 
-        // Lights that only shine after dark. They start switched off.
+        // Lights that only shine after dark. They start switched off. Intensity is on a 0-10 scale (about 400
+        // lumens a step).
         public static Light AddNightLight(Transform parent, Vector3 localPosition, Vector3 localEuler, LightType type,
             Color colour, float intensity, float range, float spotAngle = 60f)
         {
@@ -71,9 +68,11 @@ namespace DroneSandbox
             go.transform.localPosition = localPosition;
             go.transform.localRotation = Quaternion.Euler(localEuler);
             var light = go.AddComponent<Light>();
+            if (go.GetComponent<HDAdditionalLightData>() == null) go.AddComponent<HDAdditionalLightData>();
             light.type = type;
             light.color = colour;
-            light.intensity = intensity;
+            light.lightUnit = LightUnit.Lumen;
+            light.intensity = intensity * LumensPerUnit;
             light.range = range;
             light.spotAngle = spotAngle;
             light.shadows = LightShadows.None;
@@ -86,15 +85,9 @@ namespace DroneSandbox
         {
             Instance = this;
             sun = sunLight;
-            // Work on a copy of the sky, so dimming it never touches the saved material.
-            if (RenderSettings.skybox != null)
-            {
-                sky = new Material(RenderSettings.skybox);
-                RenderSettings.skybox = sky;
-            }
-            probe = Object.FindAnyObjectByType<ReflectionProbe>();
 
-            // Night: a little brighter and less colourful than the raw light, so it stays playable.
+            // Night: brighter and less colourful than the raw light (exposure already adapts), so the ground stays
+            // readable: dark fields at roughly a sixth of full brightness rather than near black.
             var night = ScriptableObject.CreateInstance<VolumeProfile>();
             var nightColour = night.Add<ColorAdjustments>(true);
             nightColour.postExposure.Override(1.2f);
@@ -112,7 +105,9 @@ namespace DroneSandbox
             thermalVolume.weight = 0f;
 
             hot = Art.NewMaterial(new Color(0.95f, 0.95f, 0.95f), glow: true);
-            hot.SetColor("_EmissionColor", new Color(0.75f, 0.75f, 0.75f));
+            Art.Glow(hot, new Color(0.75f, 0.75f, 0.75f));
+            warm = Art.NewMaterial(new Color(0.6f, 0.6f, 0.6f), glow: true);
+            Art.Glow(warm, new Color(0.3f, 0.3f, 0.3f));
             Apply();
         }
 
@@ -170,51 +165,55 @@ namespace DroneSandbox
             float moonYaw = -90f + Mathf.Min(nightHour, nightLength) / nightLength * 180f;
 
             Daylight = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-6f, 12f, sunElevation));
-            float sunStrength = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-2f, 12f, sunElevation));
+            float sunStrength = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-4f, 3f, sunElevation));
             float moonStrength = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-12f, -3f, sunElevation));
 
             if (sun != null)
             {
+                // White sunlight in lux; the physically based sky reddens it near the horizon and colours the sky.
                 if (sunElevation > -4f)
                 {
-                    sun.transform.rotation = Quaternion.Euler(Mathf.Max(sunElevation, 2f), sunYaw, 0f);
-                    sun.color = Color.Lerp(DuskSun, NoonSun, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 25f, sunElevation)));
-                    sun.intensity = 1.6f * sunStrength;
+                    sun.transform.rotation = Quaternion.Euler(Mathf.Max(sunElevation, 1f), sunYaw, 0f);
+                    sun.color = Color.white;
+                    sun.intensity = Atmosphere.NoonLux * sunStrength * Atmosphere.SunScale; // dimmed by cloud, rain or fog
                 }
                 else
                 {
                     sun.transform.rotation = Quaternion.Euler(moonElevation, moonYaw, 0f);
                     sun.color = MoonLight;
-                    sun.intensity = 0.8f * moonStrength;
+                    sun.intensity = MoonLux * moonStrength;
                 }
-                sun.shadowStrength = Mathf.Lerp(0.6f, 0.9f, Daylight);
+                sun.shadowStrength = Mathf.Lerp(0.6f, 0.95f, Daylight) * Mathf.Lerp(0.45f, 1f, Atmosphere.SunScale);
             }
 
-            if (sky != null)
+            // The grade's warm highlights belong to a low sun: full at 10 degrees and below, none from 30 up, so a clear
+            // midday reads neutral (ChatGPT, critique 19). The cool shade stays: it carries most of a mid grey, and without
+            // it the grey card went warm again (110, 97, 91 in hd164).
+            SplitToning split = null; // looked up each frame: a new sector brings a new profile
+            if (Atmosphere.Profile != null && Atmosphere.Profile.TryGet(out split))
             {
-                float lit = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-10f, 10f, sunElevation));
-                sky.SetFloat("_Exposure", Mathf.Lerp(0.035f, 1f, lit));
-                Color tint = sunElevation > 0f
-                    ? Color.Lerp(DuskSky, Color.white, Mathf.InverseLerp(2f, 20f, sunElevation))
-                    : Color.Lerp(NightSky, DuskSky, Mathf.InverseLerp(-10f, 2f, sunElevation));
-                sky.SetColor("_Tint", tint * 0.5f); // the panoramic shader's neutral tint is grey 0.5
+                float low = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(10f, 30f, sunElevation));
+                split.highlights.value = Color.Lerp(Color.grey, Atmosphere.SplitHighlights, low);
             }
-
-            RenderSettings.ambientIntensity = Mathf.Lerp(0.35f, 1.2f, Daylight);
-            Color dayFog = Atmosphere.HazeColor;
-            RenderSettings.fogColor = sunElevation > 0f
-                ? Color.Lerp(DuskFog, dayFog, Mathf.InverseLerp(2f, 18f, sunElevation))
-                : Color.Lerp(NightFog, DuskFog, Mathf.InverseLerp(-10f, 2f, sunElevation));
-            if (probe != null) probe.intensity = Mathf.Lerp(0.06f, 1f, Daylight);
 
             nightVolume.weight = Thermal ? 0f : 1f - Daylight;
             thermalVolume.weight = Thermal ? 1f : 0f;
-            thermalColour.postExposure.value = Mathf.Lerp(2.4f, 0.2f, Daylight); // the camera sees heat, not light
+            thermalColour.postExposure.value = Mathf.Lerp(1.2f, -0.3f, Daylight); // the camera sees heat, not light
 
+            // Grass tufts: the terrain draws them without the sky's ambient light, so in a low sun they'd go black
+            // against the lit ground. They thin out as the sun drops below 20 degrees and are gone below 8, and the
+            // thermal camera, which sees the grass as one cool even field, doesn't show them at all. Keep the
+            // range in real detail metres (Atmosphere.GrassDistance), independent of map and camera scale.
+            if (Ground.Current != null)
+            {
+                float grass = Thermal ? 0f : Mathf.Round(Atmosphere.GrassDistance * Mathf.InverseLerp(8f, 20f, sunElevation) / 10f) * 10f;
+                if (!Mathf.Approximately(Ground.Current.detailObjectDistance, grass)) Ground.Current.detailObjectDistance = grass;
+            }
             bool dark = IsDark;
             nightLights.RemoveAll(l => l == null);
-            foreach (var light in nightLights) light.enabled = dark;
-            if (windowMaterial != null) windowMaterial.SetColor("_EmissionColor", dark ? WindowGlow * 0.9f : Color.black);
+            // A thermal camera sees heat, not light: lamps and lit windows don't show in it.
+            foreach (var light in nightLights) light.enabled = dark && !Thermal;
+            if (windowMaterial != null) Art.Glow(windowMaterial, dark && !Thermal ? WindowGlow * 0.9f : Color.black);
         }
 
         // ---- Thermal ----
@@ -224,18 +223,20 @@ namespace DroneSandbox
         {
             var game = SandboxGame.Instance;
             if (game == null) return;
-            foreach (var e in game.enemies) if (e != null) HeatUp(e.gameObject);
-            foreach (var d in game.drones) if (d != null) HeatUp(d.gameObject);
+            // Engines running (driving, firing, crews on alert) glow hot; parked and idle kit only warm.
+            foreach (var e in game.enemies) if (e != null) HeatUp(e.gameObject, e.IsMoving || e.Engaging || e.Alerted ? hot : warm);
+            foreach (var d in game.drones) if (d != null) HeatUp(d.gameObject, hot);
         }
 
-        void HeatUp(GameObject unit)
+        void HeatUp(GameObject unit, Material heat)
         {
             foreach (var r in unit.GetComponentsInChildren<Renderer>(true))
             {
-                if (cooled.ContainsKey(r)) continue;
-                cooled[r] = r.sharedMaterials;
+                if (r.sharedMaterial != null && r.sharedMaterial.name == "PropBlur") continue; // the blur of a drone's props
+                if (!cooled.ContainsKey(r)) cooled[r] = r.sharedMaterials;
+                if (r.sharedMaterial == heat) continue;
                 var materials = new Material[r.sharedMaterials.Length];
-                for (int i = 0; i < materials.Length; i++) materials[i] = hot;
+                for (int i = 0; i < materials.Length; i++) materials[i] = heat;
                 r.sharedMaterials = materials;
             }
         }

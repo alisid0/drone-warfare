@@ -29,6 +29,8 @@ TEXTURES = {
     "wood": "wood_planks_grey",
     "rough_wood": "rough_wood",
     "bark": "bark_brown_02",
+    "oak_bark": "jolcham_oak_bark_01",
+    "willow_bark": "bark_willow",
     "pine_bark": "pine_bark",
     "hessian": "hessian_230",
     "mossy_rock": "mossy_rock",
@@ -59,6 +61,30 @@ def main():
             with open(path, "wb") as f:
                 f.write(data)
             print(f"{name}_{suffix}: {asset} ({len(data) // 1024} KB)")
+    fetch_skies(only)
+
+
+# Extra skies the day/night sky blends to: local name -> Poly Haven HDRI (2K, sky only). The daytime sky.hdr
+# is Kloofendal 48d Partly Cloudy (Pure Sky).
+SKIES = {
+    "sky_sunset": "qwantani_sunset_puresky",
+    "sky_night": "qwantani_night_puresky",
+}
+SKY_DIR = os.path.join("Assets", "DroneSandbox", "Resources", "Sky")
+
+
+def fetch_skies(only):
+    for name, asset in SKIES.items():
+        if only and name not in only:
+            continue
+        path = os.path.join(SKY_DIR, name + ".hdr")
+        if os.path.exists(path):
+            continue
+        files = json.loads(fetch(f"https://api.polyhaven.com/files/{asset}"))
+        data = fetch(files["hdri"]["2k"]["hdr"]["url"])
+        with open(path, "wb") as f:
+            f.write(data)
+        print(f"{name}: {asset} ({len(data) // 1024} KB)")
 
 
 main()

@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "IndustrialZone",
+    "id": 10,
+    "center": [
+      -13415.654,
+      15127.669
+    ],
+    "draws": 7,
+    "triangles": 330
+  },
+  {
+    "kind": "Airfield",
+    "id": 2,
+    "center": [
+      19294.078,
+      -13513.273
+    ],
+    "draws": 6,
+    "triangles": 196
+  },
+  {
+    "kind": "RailJunction",
+    "id": 20,
+    "center": [
+      -15275.676,
+      20971.547
+    ],
+    "draws": 6,
+    "triangles": 344
+  }
+]

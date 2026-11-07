@@ -136,11 +136,16 @@ namespace DroneSandbox
                 World.Place("Enemy_" + d.type, d.position, 0f, 1f, 0f, root);
             var vehicles = new (string model, Vector3 at, float yaw)[]
             {
-                ("Enemy_Tank", new Vector3(10f, 0f, 20f), 30f), ("Enemy_Tank", new Vector3(30f, 0f, -10f), 120f),
-                ("Enemy_Tank", new Vector3(60f, 0f, 20f), 250f), ("Enemy_Truck", new Vector3(-5f, 0f, 30f), 200f),
-                ("Enemy_Truck", new Vector3(40f, 0f, 70f), 90f),
+                ("Enemy_Tank", new Vector3(Scale.D(10f), 0f, Scale.D(20f)), 30f), ("Enemy_Tank", new Vector3(Scale.D(30f), 0f, Scale.D(-10f)), 120f),
+                ("Enemy_Tank", new Vector3(Scale.D(60f), 0f, Scale.D(20f)), 250f), ("Enemy_Truck", new Vector3(Scale.D(-5f), 0f, Scale.D(30f)), 200f),
+                ("Enemy_Truck", new Vector3(Scale.D(40f), 0f, Scale.D(70f)), 90f),
             };
-            foreach (var v in vehicles) World.Place(v.model, v.at, v.yaw, 1f, 0f, root);
+            foreach (var v in vehicles)
+            {
+                var at = new Vector3(Mathf.Clamp(v.at.x, -MapLayout.Edge, MapLayout.Edge), 0f,
+                    Mathf.Clamp(v.at.z, -MapLayout.Edge, MapLayout.Edge));
+                World.Place(v.model, at, v.yaw, 1f, 0f, root);
+            }
             var b = MapLayout.BasePosition;
             string[] drones = { "Drone_Scout", "Drone_Strike", "Drone_Kamikaze" };
             for (int i = 0; i < 3; i++)
@@ -183,26 +188,57 @@ namespace DroneSandbox
             return result;
         }
 
+        // The barrier round a compound: not a drawn circle but a dozen straight runs of hesco, each corner up to
+        // 3 m out (never in, where the compound's things stand), as laid out on the ground by hand; a gap and a
+        // gate where each road comes in.
         static void HescoRing(Transform root, Vector3 center, float radius)
         {
             var gaps = Entrances(center);
-            int count = Mathf.RoundToInt(2f * Mathf.PI * radius / HescoUnit);
-            for (int i = 0; i < count; i++)
+            const int corners = 12;
+            var rng = new System.Random(Mathf.RoundToInt(center.x * 7f + center.z * 13f));
+            var ring = new Vector2[corners];
+            for (int k = 0; k < corners; k++)
             {
-                float a = 2f * Mathf.PI * i / count;
-                var dir = new Vector2(Mathf.Sin(a), Mathf.Cos(a));
-                bool gap = false;
-                foreach (var g in gaps)
-                    if (Vector2.Angle(dir, g) * Mathf.Deg2Rad * radius < 3.2f) gap = true;
-                if (gap) continue;
-                var pos = center + new Vector3(dir.x, 0f, dir.y) * radius;
-                World.Place("Prop_Hesco", pos, a * Mathf.Rad2Deg, 1f, 0.05f, root);
+                float a = 2f * Mathf.PI * (k + ((float)rng.NextDouble() - 0.5f) * 0.4f) / corners;
+                ring[k] = new Vector2(Mathf.Sin(a), Mathf.Cos(a)) * (radius + 0.3f + (float)rng.NextDouble() * 2.7f);
+            }
+            for (int k = 0; k < corners; k++)
+            {
+                Vector2 a = ring[k], b = ring[(k + 1) % corners];
+                float length = Vector2.Distance(a, b);
+                Vector2 outward = new Vector2(b.y - a.y, a.x - b.x) / length;
+                if (Vector2.Dot(outward, a + b) < 0f) outward = -outward;
+                float yaw = Mathf.Atan2(outward.x, outward.y) * Mathf.Rad2Deg;
+                int count = Mathf.Max(1, Mathf.RoundToInt(length / HescoUnit));
+                for (int i = 0; i < count; i++)
+                {
+                    Vector2 p = Vector2.Lerp(a, b, (i + 0.5f) / count);
+                    bool gap = false;
+                    foreach (var g in gaps)
+                        if (Vector2.Angle(p, g) * Mathf.Deg2Rad * p.magnitude < 3.2f) gap = true;
+                    if (!gap) World.Place("Prop_Hesco", center + new Vector3(p.x, 0f, p.y), yaw, 1f, 0.05f, root);
+                }
             }
             foreach (var g in gaps)
             {
-                var pos = center + new Vector3(g.x, 0f, g.y) * radius;
+                float reach = RingReach(ring, g, radius);
+                var pos = center + new Vector3(g.x, 0f, g.y) * reach;
                 World.Place("Prop_Gate", pos, Mathf.Atan2(g.x, g.y) * Mathf.Rad2Deg, 1f, 0f, root);
             }
+        }
+
+        // How far from the middle the ring is in direction dir (unit).
+        static float RingReach(Vector2[] ring, Vector2 dir, float fallback)
+        {
+            for (int k = 0; k < ring.Length; k++)
+            {
+                Vector2 a = ring[k], e = ring[(k + 1) % ring.Length] - a;
+                float denom = dir.x * e.y - dir.y * e.x;
+                if (Mathf.Abs(denom) < 1e-5f) continue;
+                float t = (a.x * e.y - a.y * e.x) / denom, s = (a.x * dir.y - a.y * dir.x) / denom;
+                if (t > 0f && s >= 0f && s <= 1f) return t;
+            }
+            return fallback;
         }
 
         // Czech hedgehogs scattered outside each gate.
@@ -233,7 +269,9 @@ namespace DroneSandbox
             for (int i = 0; i < segments; i++)
             {
                 float a = 2f * Mathf.PI * i / segments;
-                vertices[i + 1] = new Vector3(Mathf.Sin(a) * radius, 0.03f, Mathf.Cos(a) * radius);
+                // A ragged edge, kept inside the walls: gravel spread by hand and worn back by vehicles.
+                float r = radius * Mathf.Min(1f, 0.82f + 0.6f * (Ground.SiteEdge(Mathf.Sin(a) * radius, Mathf.Cos(a) * radius) - 0.95f) + 0.08f);
+                vertices[i + 1] = new Vector3(Mathf.Sin(a) * r, 0.03f, Mathf.Cos(a) * r);
                 uvs[i + 1] = new Vector2(vertices[i + 1].x, vertices[i + 1].z); // metres, like the models
                 triangles[i * 3] = 0;
                 triangles[i * 3 + 1] = i + 1;

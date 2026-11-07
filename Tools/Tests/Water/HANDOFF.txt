@@ -1,0 +1,150 @@
+Water review for Claude -- codex/water, based on da49170
+
+The river now uses stronger HDRP ambient scattering, a shorter absorption length,
+and glossy ripples that persist across the strategy camera's slant distance. HDRP
+still supplies Fresnel, sky/SSR reflections, shadows and sun highlights. No custom
+shader, extra water surface, reflection pass, simulation, or per-frame script was
+added. The existing material remains the renderer; no custom-shader fallback is
+needed. The separate lake and pond surface settings are unchanged.
+
+Varrow's river and plunge pool share a WaterSurface, so its scattering changes
+also affect the plunge pool. Its wave amplitudes and spillway foam are retained.
+The dam's close view MUST be compared in Unity; the Blender reviews cannot prove
+that it remains as convincing. All times of day and actual frame time are also
+unverified until the integration build runs.
+
+Far water uses a shared grey-blue/green palette and physical shallow-water bands.
+The tile, regional and final world picture share this painter. Lake polygons own
+their true shore instead of the 32 m water-cover raster. This also removes the
+old dry ribbon through the middle of lakes where river-cover suppression erased
+the lake. River mouths stay open through the shoreline band. The sector colour
+collar no longer overwrites water with land colours. Texture sizes and residency
+budgets are unchanged.
+
+The far shore cache stores signed distances on a small 16 m grid per lake. A
+conservative distance bound skips polygon work only where colour/coverage cannot
+change; the band itself remains exact. The 1024-square lake-heavy paint was
+byte-identical with and without the cache:
+SHA256 73A4E94A38093CB902A94DA183B9DABE5236A18284BBE1E112A8319FEE25BA60
+
+Protected-file patches (not applied in this worktree)
+
+1. Claude-Ground-water.patch
+   - Builds an immutable WatercourseProfile after the water levels are known.
+   - Narrows/widens within 80-100% of the existing channel envelope over broad
+     180/270 m patterns; pools are deeper than riffles. WorldPlan data is not
+     changed. The far painter uses the same width rule at river stations.
+   - Makes 1-4 m shelves wider on inner bends and outer banks steeper. Roads,
+     building pads, lake inlets and the existing dam gorge are protected.
+   - Adds 1-2 m wet darkening, pale gravel and a 5 m reservoir draw-down strip;
+     natural lakes/ponds get narrower 2.5 m margins. Islands use signed shores too.
+   - Reuses the dirt texture for terrain layer 6 (wet mud) and 7 (shore gravel).
+     The six-layer terrain already uses HDRP's eight-layer shader variant, so
+     this does not introduce another terrain pass. Peak splat staging grows by
+     32 MiB (2048 x 2048 x 2 floats); confirm actual GPU cost in Unity.
+   - FarDetailEdge handles either the current six layers or these eight layers.
+     Keep layer numbers 0-5 unchanged, especially litter at 5.
+   - One Ground.PaintForestFloor mask line also respects layers 6/7 so subsequent
+     litter painting cannot erase the exposed banks. Reconcile that hunk with
+     Codex A's work; no tree placement or forest visibility code is changed.
+
+2. Claude-Grass-water.patch
+   - Keeps existing instanced reeds and their distance/density limits.
+   - Uses the same waterline, favouring slow, broad-margin reaches.
+   - Keeps grass off the exposed river bars and lake draw-down strip.
+   - No forest files, canopy logic, Atmosphere or World.BuildWoods edits.
+
+Apply both after integrating this branch. Check them with:
+  git apply --check --ignore-space-change Tools/Tests/Water/Claude-Ground-water.patch
+  git apply --check --ignore-space-change Tools/Tests/Water/Claude-Grass-water.patch
+They were generated against da49170's protected files and compiled as temporary
+copies. Do not replace the whole Ground.cs/Grass.cs with those copies: reconcile
+the small hunks with any newer integration changes. ground_patch.py can regenerate
+them from the checked-out protected sources and asserts its replacement context.
+
+The terrain patch is required for the new physical banks/depths and near shore
+paint; the branch itself does not modify Ground.cs. The water mesh remains wide
+enough for the terrain to define its shoreline. Existing movement and placement
+exclusions use the larger surveyed envelope, so they stay conservative.
+
+Review images and reproduction
+
+Review/Varrow_before.png and Varrow_after.png
+Review/Bend_before.png and Bend_after.png
+Review/Reservoir_before.png and Reservoir_after.png
+Review/Far_before.png and Far_after.png
+
+These are explicitly labelled Blender geometry/paint reviews, NOT game renders.
+Before is da49170. After includes the proposed Ground patch. Near views are 200 m
+above their target at 45 degrees. Far is 2.5 km slant distance at 45 degrees over
+the generated Varrow reservoir. Vegetation, buildings, HDRP waves/refraction,
+exposure, sky reflection, and Unity shadows are not reproduced. The water material
+is a simple approximation from the actual scattering parameters. The real layer
+paint is sampled cell-by-cell, without allocating a full 2048-square splat array.
+
+Targets in local Unity coordinates (x,z):
+  Varrow bridge: -241.66666, -137.5
+  Bend:          -199.8441, -192.3882
+  Reservoir:     -707.7794, 311.6998
+Far target is absolute WorldPlan (11843.617, 16136.022), water level 198.57916,
+world seed 1200. Subtract FarTerrain.Origin for a Unity local camera position.
+
+Reproduce without Unity, one process/job at a time:
+  "C:/Program Files/Blender Foundation/Blender 5.2/5.2/python/bin/python.exe" -I Tools/Tests/Water/run.py --renders
+Omit --renders for the lean C# exports and checks. Python is Blender's bundled
+3.13.13. DOTNET_PROCESSOR_COUNT=2; Blender uses two CPU threads and 12 samples.
+Generated build files and binary scene data stay under ignored Temp/water.
+
+Validation completed
+
+- C# 9 / netstandard2.1 compilation against installed Unity 6000.6.7f1 modules:
+  zero warnings/errors, including both proposed protected-file patches and the
+  changed FarDetailEdge. HDRP-only signatures are checked against the installed
+  17.6 package source, then represented by a contract in the offline compile.
+  This is not compilation against the full HDRP runtime DLL or a Unity build.
+- Managed harness: 56 Varrow stations, half widths 3.63-4.49 m, margins inside
+  1-4 m, deeper channels, and inner/outer margin differences up to 1.18 m.
+- Finite-width river integration at 2, 4 and 13.671875 m footprints: largest
+  measured width error 0.0001 m; narrow tributaries are not enlarged to a pixel.
+- Lake snapshot ownership survives changes to the source polygon.
+- Shore-cache paint matches exact polygon paint byte-for-byte (hash above).
+- Sequential local exports peak at 175 MiB; the far export peaks at 131 MiB.
+  Latest loaded-machine far paint/export: before 3.600 s, after 3.783 s. These
+  are worker/export timings under Unity contention, not a frame-rate benchmark.
+- Eight review images inspected. Both patches pass git apply --check. All new
+  and changed source text uses CRLF; no packages or System.Linq added.
+
+Unity build checklist
+
+1. Integrate commits and reconcile/apply the Ground and Grass patches. Let Unity
+   compile the real HDRP assembly and import the three new scripts/metas. Check
+   the log for errors, missing layers, and pink water/terrain.
+2. Repeat 02c_bridge at 100/200/400 m and 30/45/60 degrees. Inspect 10:00, dawn,
+   dusk and night. Expect visible grey-green water, pale margins, a darker
+   channel, sky response and a glint when the sun is behind the water. Check a
+   shaded tree reach as well as open water, and High/Medium/Low quality.
+3. Compare 20_photo_dam_morning and 25_photo_lake_shore directly with hd149 and
+   hd139. Reject a loss of reflection, blown-out foam, milky plunge-pool water,
+   disconnected spillway water, or new seams at the gorge protection boundary.
+4. At the bend, confirm the inner gravel shelf is broader and the outer bank
+   steeper; inspect the last 1-2 m of damp ground. Confirm reeds remain in slow
+   margins and grass does not cover the draw-down strip. Check pond/lake edges
+   and reservoir islands, plus bridge approaches and road ownership.
+5. Repeat 80/81/83 and a 2.5 km reservoir view. Check true narrow river widths,
+   continuous lake shores/mouths, tile/regional/world transitions, and water
+   crossing the sector collar. Check world Reservoir and LakeDistrict sectors.
+6. Compare fixed-camera CPU/GPU timings with the baseline, including water-filled
+   views and streaming across lake tiles. Confirm no frame-rate regression;
+   no additional water draw/simulation passes should appear. Check splat-build
+   memory (+32 MiB staging only) on the constrained machine. The 32 MiB may be
+   avoided later with row-banded splat construction, outside this patch's scope.
+7. Keep the existing autotest streaming log checks and run the normal autotest.
+
+API source references: installed HDRP WaterSurface.cs, WaterSurface.Simulation.cs,
+WaterSurface.Presets.cs and Runtime/Material/Water/Water.hlsl. Unity's material
+guide explains the depth/absorption/scattering controls:
+https://docs.unity.cn/Packages/com.unity.render-pipelines.high-definition@17.6/manual/water-use-the-water-system-in-your-project.html
+
+No Unity process was launched, no main-checkout source was read or changed, and no
+push, merge or rebase was performed. The pre-existing staged FieldsVillages work
+and make_garden_props.py change were left intact and excluded from these commits.

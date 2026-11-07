@@ -1,0 +1,136 @@
+Canopy relief - codex/canopy-relief, based on 0542d98
+
+Runtime commits: c459e5a (stand geometry/budgets), e195db0 (stochastic shader),
+146d377 (low grove support and glade-only persistent shadow).
+
+Integration
+
+The branch contains forest code, shaders, one additional crown data texture,
+and the review harness. Ground.cs is unchanged, as requested. Apply the exact
+Tools/CanopyRelief/ground-integration.patch when integrating. It compiles in a
+temporary Ground.patched.cs for candidate harness runs. The after captures
+include that proposed floor change; merging the branch alone does not apply it.
+
+The Ground patch removes Varrow's independently culled decorative trees from
+the forest-floor inputs and changes litter to shadowed olive (49,70,45), with
+the matching linear LitterMean for existing consumers. It preserves occupancy
+and all rendered trees. HasFloorCoverage validates exact logical stems, including
+candidates that round onto an adjacent hashing cell at large world coordinates.
+The patch currently passes git apply --check.
+
+What changed and why
+
+* Age uses a warped 64 m lattice, giving correlated stands roughly 40-120 m
+  across. Interior mean tree height spans 12-24 m (18 +/-6 m), and the canopy
+  surface follows at approximately +/-4.2 m. Older crowns are larger. Individual
+  crown radius varies +/-22%, with the existing conservative 2 m edge minimum.
+* 12 m crown and 80 m stand colour noise share the existing three material tint
+  batches. Species districts retain their soft 50 m mixing boundary. The glade
+  planting recipe, lean, thinning and accepted stem positions are unchanged.
+* The same age/cover field drives HLOD geometry, finite-difference normals and
+  its 16/32 m macro colour/glade map. Prepared world surfaces start at 32 m;
+  streamed bootstrap geometry and its macro map start at 64 m with normals
+  derived from the sampled heights. Fine rims retain their stitched boundaries.
+* Two independent 512-square crown data maps receive world-block rotations and
+  offsets. Three smooth triangular weights blend blocks without visible tile
+  edges; transformed normals rotate back into world space. Raster colour now
+  uses three detail samples, versus two before. Explicit gradients avoid mip
+  seams when the selected block changes. No per-frame texture generation.
+* Procedural glades retain dark low understorey, including through the close
+  canopy fade. Ordinary grove rims fade normally; the macro alpha distinguishes
+  glades from those rims. Recipe woods get low support under their actual crown
+  footprints where a narrow strip falls between surface nodes. This support is
+  capped at 2.5 m above the floor to avoid opaque walls at grove edges. No extra
+  tree instances.
+* Reduced trees hand over at 15 projected pixels and cards at 4, before budget
+  pressure. SelectProjected reserves one third of each caller's triangle limit
+  and one fifth of its card limit for the richer canopy. Existing full/reduced
+  count caps, fast-flight deferral and feed-specific budgets still apply.
+
+Evidence
+
+Open Review/index.html for the paired views. The full-resolution PNGs include
+Deep Forest and Border Line at 100, 300 and 2,500 m, plus Varrow base, bridge
+and farmland at the hd153 strategy camera poses after 0.5 simulated seconds.
+The forest cameras are that height above the target, at a 45-degree pitch;
+slant distance is sqrt(2) times height. The 2 km crop boundary is an export edge.
+
+These are Blender harness views of production-selected roots and canopy meshes,
+using repository FBXs and a replay of the detail shader. Lighting, floor shading
+and midpoint fades are approximations. They omit settlement/mission scenery
+and HDRP temporal rendering. They are not Unity screenshots or GPU benchmarks.
+
+Review/measurements.json contains every before/after measurement. Baseline code
+comes from git object 0542d98 without switching this checkout. Logical counts
+match exactly: Deep Forest 104,889; Border Line 104,462; Varrow 9,066.
+The sampled glade interior fraction is 8.93% (65,536 samples). Age change over
+96 m is about seven times its change over 8 m. All 224 tested dense Varrow
+patches have startup canopy; 207 decorative inputs are omitted from its floor.
+
+The flight harness runs two cameras at 240 m/s with the feed every other frame.
+Its report includes peak combined tree + canopy triangles, not only trees.
+All five candidate routes reduce that combined peak and start no new fine
+refinements during fast flight. See the JSON for final counts and CPU p95.
+Final peak combined triangles and managed forest CPU p95 (before -> after):
+  Deep Forest:     591,429 -> 459,696; 0.420 -> 0.629 ms
+  Border Line:     664,223 -> 489,262; 0.431 -> 0.596 ms
+  Varrow base:     548,383 -> 443,526; 0.408 -> 0.416 ms
+  Varrow bridge:   569,447 -> 447,814; 0.532 -> 0.520 ms
+  Varrow farmland: 590,327 -> 426,534; 0.772 -> 0.474 ms
+Managed CPU did increase in the two dense sectors; this is not a claim of a
+whole-frame performance improvement. Streaming slice completion also affects
+which cached surfaces are present, so native controlled comparison is required.
+Varrow routes cross open land, so both versions have some zero-tree frames.
+Coarse coverage remains present independently of individual tree submission.
+
+Validation completed
+
+* C# 9 forest/terrain integration compiled against Unity 6000.6.7f1 assemblies,
+  with the proposed Ground patch, zero warnings and zero errors. Unity was not
+  opened. Unchanged HDRP water types use the existing harness signature stubs.
+* D3DCompile compiled the new HLSL helpers with warnings as errors, both raster
+  and derivative-free paths. The complete HDRP pass/variant build is still needed.
+* Production-source checks cover glade fraction, age correlation, exact floor
+  ownership, conservative crown radius, startup coverage, raised-edge stitching,
+  camera jumps, fast-flight selection budgets and combined geometry regressions.
+
+Build checklist for Claude
+
+1. Integrate this branch and apply ground-integration.patch. Include the new
+   ForestDetail.hlsl/.meta and ForestDetailB.png/.meta. Do not rerun the historical
+   DenseForest shader generator; it predates the current adapter properties.
+2. Build the HDRP player, check shader stripping/fallback logs and both depth and
+   colour passes. Verify the canopy cover alpha never cuts unrelated tree tiers.
+3. Capture Deep Forest and Border Line at 100/300/2,500 m, after 0.5 s and after
+   streaming settles. Inspect stand relief, mixed species, crown repetition,
+   understorey, block seams and moving card-to-canopy transitions in both cameras.
+4. Revisit hd153 02a_base, 02c_bridge and 02e_farmland, especially the bridge's
+   two riverbank patches and the wood near Grisham Farm. Check floor coverage
+   with the Ground patch applied; the forest-only harness omits nearby buildings.
+5. Run the 1600x900 low 4x flight with disk cleanup and other harnesses stopped.
+   Compare GPU time against hd153; require net-neutral GPU and p95 <=15 ms,
+   target >=0.2 ms saved. Check sector load/upload latency and memory too.
+   These native performance acceptance criteria are NOT verified by this branch.
+
+Exact existing interval log lines (already integrated at the base commit)
+
+Retain the flight interval counters in AutoTest; do not replace them with the
+camera's last stationary sample:
+
+log.WriteLine($"forest flight budget: fast frames {FarScatter.FastFrames}, samples {FarScatter.Samples}, peak per-camera full/reduced/card {FarScatter.PeakFullTrees}/{FarScatter.PeakReducedTrees}/{FarScatter.PeakCards}, peak tree triangles {FarScatter.PeakTreeTriangles}; selection start/complete/cancel {FarScatter.SelectionStarts}/{FarScatter.SelectionCompletes}/{FarScatter.SelectionCancels}");
+log.WriteLine($"forest flight phases: generation {FarScatter.GenerationMeanMs:F3}, selection {FarScatter.SelectionMeanMs:F3}, submission {FarScatter.SubmissionMeanMs:F3}, canopy {FarScatter.CanopyMeanMs:F3} ms mean/frame (all cameras)");
+log.WriteLine($"forest flight canopy: build mean {ForestHlod.BuildMeanMs:F3} ms, worst {ForestHlod.BuildWorstMs:F3} ms, refinements {ForestHlod.RefinementsStarted}, cancelled {ForestHlod.CancelledBuilds}, deferred frames {ForestHlod.DeferredFrames}");
+
+The following optional snapshot adds combined geometry using public properties:
+
+log.WriteLine($"forest relief: logical {SectorForest.Stems.Count}, canopy blocks {ForestHlod.BlocksDrawn}, canopy triangles {ForestHlod.TrianglesDrawn}, tree triangles {FarScatter.TreeTrianglesDrawn}, combined {ForestHlod.TrianglesDrawn + FarScatter.TreeTrianglesDrawn}; missing {ForestHlod.MissingBlocks}, near coarse {ForestHlod.NearCoarseBlocks}");
+log.WriteLine($"forest motion: camera {FarScatter.CameraSpeed:F1} m/s, canopy slice {ForestHlod.SliceBudgetMs:F2} ms; recipe cells {SectorForest.LocalCells.Count}, logical stems {SectorForest.Stems.Count}, woods build {SectorForest.BuildMilliseconds:F1} ms");
+
+Reproduce sequentially
+
+Use Python 3.13 with -I for Tools/CanopyRelief/prepare.py, check_shader.py,
+run_all.py, audit.py and render_all.py, in that order. run_all accepts a subset
+of sector names; render_all accepts 'after' to refresh only candidate captures.
+make_detail.py regenerates the alternate procedural crown map. render_all uses
+one hidden Blender process at a time with two threads and worktree-local caches.
+All assemblies, generated scenes and logs stay in ignored Temp/canopy-relief.

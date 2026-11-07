@@ -1,0 +1,24 @@
+{
+  "owner": 4,
+  "name": "Esterhay",
+  "houses": 29,
+  "renderers": 89,
+  "fields": 424,
+  "hedgeEdges": 677,
+  "hedgeShareOfFieldPerimeter": 0.5466502585334712,
+  "fringe": 0,
+  "marginBlocks": 230,
+  "blocksWithTracks": 0,
+  "models": {
+    "Scenery_Barn": 1,
+    "Scenery_House_A": 9,
+    "Scenery_House_D": 20,
+    "Scenery_Hut": 20,
+    "Scenery_LogPile": 2,
+    "Scenery_Tree": 2
+  },
+  "layoutMs": 231.9109,
+  "groundMs": 78.8043,
+  "villagesMs": 51.5067,
+  "marginsMs": 43.239
+}

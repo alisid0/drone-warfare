@@ -3,16 +3,19 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Rolling farmland terrain built in code from MapLayout: hills in the play area, wooded ridges around
-    // the edge opening into a river valley, a river channel, dirt roads, and flat sites (bases, fixed
-    // defences) levelled to y = 0. Also answers "how high is the ground here?".
+    // Rolling farmland terrain built in code from MapLayout: hills in the play area (as high as the sector's type
+    // makes them), ridges around the edge opening into a river valley, a river channel, the reservoir, lakes and
+    // pools, dirt roads, railway beds, a quarry pit or a trench line where the sector has them, and flat sites
+    // (bases, defences, buildings) levelled to y = 0. Also answers "how high is the ground here?".
+    // The land's shapes (hills, ridges, the lake's banks, the quarry) are the old 480 m map's, made Scale.Distance
+    // times bigger; the river's channel, the roads and the dam are real sizes and stay as they were.
     public static class Ground
     {
-        public const float Size = 480f;   // terrain is Size x Size metres, centred on the map
-        const float Sink = 8f;            // terrain sits this far below y = 0, so the river and hollows can dip below the flat sites
-        const float HeightRange = 60f;
-        const int HeightRes = 513;
-        const int SplatRes = 1024;
+        public const float Size = 480f * Scale.Distance;   // terrain is Size x Size metres, centred on the map
+        const float Sink = 8f * Scale.Distance;            // terrain sits this far below y = 0, so the river and hollows can dip below the flat sites
+        const float HeightRange = 80f * Scale.Distance;
+        const int HeightRes = 1025;                        // about 2 m between heights
+        const int SplatRes = 2048;                         // about 1 m per texel
 
         public struct FlatSite
         {
@@ -23,12 +26,19 @@ namespace DroneSandbox
         }
 
         static Terrain terrain;
+        static WatercourseProfile watercourse;
+        static float terrainBottom = -Sink, terrainRange = HeightRange;
         static readonly List<FlatSite> sites = new List<FlatSite>();
 
         public static Terrain Current => terrain;
 
-        public static float HeightAt(Vector3 p) =>
-            terrain != null ? terrain.SampleHeight(p) + terrain.transform.position.y : 0f;
+        // Beyond the sector's terrain, in the big world, the far terrain's ground (drones fly out over it).
+        public static float HeightAt(Vector3 p)
+        {
+            if (terrain == null) return 0f;
+            if (FarTerrain.Active && (Mathf.Abs(p.x) > Size / 2f || Mathf.Abs(p.z) > Size / 2f)) return FarDetail.HeightAt(new Vector2(p.x, p.z));
+            return terrain.SampleHeight(p) + terrain.transform.position.y;
+        }
 
         public static Vector3 OnGround(Vector3 p) => new Vector3(p.x, HeightAt(p), p.z);
 
@@ -48,6 +58,7 @@ namespace DroneSandbox
                 point = hit.point;
                 return true;
             }
+            if (FarTerrain.Active && FarDetail.Raycast(ray, out point)) return true;
             var plane = new Plane(Vector3.up, Vector3.zero);
             if (plane.Raycast(ray, out float enter))
             {
@@ -63,20 +74,35 @@ namespace DroneSandbox
             MapLayout.Prepare();
             sites.Clear();
             sites.AddRange(MapLayout.FlatSites);
+            if (MapLayout.Plan.world != null)
+                for (int i = 0; i < sites.Count; i++)
+                {
+                    var site = sites[i];
+                    site.center.y = MapLayout.Plan.world.Height(site.center.x, site.center.z);
+                    sites[i] = site;
+                }
+            IndexSites();
+            ClearWorn();
+            canopy = stems = null; // the last sector's woods
 
+            FieldPlot.Warp(Vector2.zero); // its lookup grid is made on first use: make it before the parallel loops
             var data = new TerrainData { heightmapResolution = HeightRes, alphamapResolution = SplatRes };
-            data.size = new Vector3(Size, HeightRange, Size);
-            data.SetHeights(0, 0, BuildHeights());
+            var heights = BuildHeights();
+            data.size = new Vector3(Size, terrainRange, Size);
+            data.SetHeights(0, 0, heights);
             data.terrainLayers = BuildLayers();
+            lieHeights = BoxAverage(worldHeights, Mathf.RoundToInt(40f / (Size / (HeightRes - 1))));
             data.SetAlphamaps(0, 0, BuildSplat(data));
 
             var go = Terrain.CreateTerrainGameObject(data);
             go.name = "Terrain";
             go.transform.SetParent(parent, false);
-            go.transform.position = new Vector3(-Size / 2f, -Sink, -Size / 2f);
+            go.transform.position = new Vector3(-Size / 2f, terrainBottom, -Size / 2f);
             terrain = go.GetComponent<Terrain>();
             terrain.heightmapPixelError = 2f;
-            terrain.basemapDistance = 600f;
+            // The full shader at every distance: the base map Unity bakes for far terrain mixes only the first four
+            // layers, so from the wide view the sector came out pale against the far terrain round it.
+            terrain.basemapDistance = 20000f;
             var lit = Resources.Load<Material>("Materials/TerrainLit");
             if (lit != null) terrain.materialTemplate = lit;
             // Draw without GPU instancing. Instanced terrain takes its normals from a texture Unity generates, and
@@ -90,98 +116,460 @@ namespace DroneSandbox
 
         static float[,] BuildHeights()
         {
+            var source = MapLayout.Plan.world;
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
             float step = Size / (HeightRes - 1);
             var world = new float[HeightRes, HeightRes]; // metres above y = 0
 
             // Hills, opened into a valley along the river and levelled under the flat sites.
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
+                    if (source == null) world[zi, xi] = Hills(x, z, river.Distance(x, z)) * FlatMask(x, z, out _);
+                    else
+                    {
+                        float wx = x + source.center.x, wz = z + source.center.y;
+                        float detail = (Mathf.PerlinNoise(wx * 0.024f + 17.3f, wz * 0.024f + 63.1f) - 0.5f) * 1.6f
+                                     + (Mathf.PerlinNoise(wx * 0.09f + 5.5f, wz * 0.09f + 91.2f) - 0.5f) * 0.6f;
+                        if (source.NearWater(new Vector2(x, z), 0f)) detail = 0f;
+                        world[zi, xi] = FlattenToSiteElevation(x, z, source.Height(x, z) + detail);
+                    }
                 }
+            });
+            if (source == null)
+            {
+                if (MapLayout.HasDam) Reservoir(world, step); // before the roads, so a road past the lake follows its banks
+                Ponds(world, step);
             }
+            Quarry(world, step);
 
             // Roads follow a smoothed copy of the ground, sunk in a little.
             for (int i = 0; i < roads.points.Count; i++) roads.values[i] = Sample(world, roads.points[i]);
             SmoothValues(roads, 6);
-            for (int zi = 0; zi < HeightRes; zi++)
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
             {
                 for (int xi = 0; xi < HeightRes; xi++)
                 {
                     float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    float d = roads.Query(x, z, out float level, out _);
-                    if (d > MapLayout.RoadHalfWidth + 6f) continue;
-                    float weight = 1f - Mathf.SmoothStep(0f, 1f, (d - MapLayout.RoadHalfWidth - 0.5f) / 5.5f);
-                    float dip = 0.12f * Mathf.Clamp01(1f - d / MapLayout.RoadHalfWidth);
+                    float d = roads.Query(x, z, out float level, out int segment);
+                    float roadWidth = MapLayout.RoadWidth(segment);
+                    if (d > roadWidth + 6f) continue;
+                    float weight = 1f - Mathf.SmoothStep(0f, 1f, (d - roadWidth - 0.5f) / 5.5f);
+                    float dip = 0.12f * Mathf.Clamp01(1f - d / roadWidth);
                     weight *= FlatMask(x, z, out _); // flat sites stay flat
                     world[zi, xi] = Mathf.Lerp(world[zi, xi], level - dip, weight);
                 }
+            });
+
+            // Railway beds: smoother still (trains can't climb much).
+            var rails = MapLayout.RailField;
+            if (rails.points.Count > 0)
+            {
+                for (int i = 0; i < rails.points.Count; i++) rails.values[i] = Sample(world, rails.points[i]);
+                SmoothValues(rails, 20);
+                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+                {
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float d = rails.Query(x, z, out float level, out _);
+                        if (d > MapLayout.RailHalfWidth + 8f) continue;
+                        float weight = (1f - Mathf.SmoothStep(0f, 1f, (d - MapLayout.RailHalfWidth - 0.5f) / 7.5f)) * FlatMask(x, z, out _);
+                        world[zi, xi] = Mathf.Lerp(world[zi, xi], level, weight);
+                    }
+                });
             }
+            Trench(world, step);
 
             // The river: a water level that only ever falls downstream, kept below the banks on both sides,
             // then a channel carved under it.
             float hw = MapLayout.RiverHalfWidth;
             var line = river.points;
-            for (int i = 0; i < line.Count; i++)
+            if (source != null)
             {
-                Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(i - 1, 0)]).normalized;
-                Vector2 side = new Vector2(-dir.y, dir.x);
-                float lowest = Sample(world, line[i]);
-                foreach (float offset in new[] { hw + 3f, hw + 10f })
+                for (int i = 0; i < line.Count; i++)
                 {
-                    lowest = Mathf.Min(lowest, Sample(world, line[i] + side * offset));
-                    lowest = Mathf.Min(lowest, Sample(world, line[i] - side * offset));
+                    source.RiverDistance(line[i], out _, out float level);
+                    river.values[i] = level;
                 }
-                river.values[i] = lowest - 0.7f;
             }
-            MakeFalling(river.values);
-            SmoothValues(river, 8);
-            MakeFalling(river.values);
+            else
+            {
+                for (int i = 0; i < line.Count; i++)
+                {
+                    Vector2 dir = (line[Mathf.Min(i + 1, line.Count - 1)] - line[Mathf.Max(i - 1, 0)]).normalized;
+                    Vector2 side = new Vector2(-dir.y, dir.x);
+                    float lowest = Sample(world, line[i]);
+                    foreach (float offset in new[] { hw + 3f, hw + 10f })
+                    {
+                        lowest = Mathf.Min(lowest, Sample(world, line[i] + side * offset));
+                        lowest = Mathf.Min(lowest, Sample(world, line[i] - side * offset));
+                    }
+                    river.values[i] = lowest - 0.7f;
+                }
+                MakeFalling(river.values);
+                SmoothValues(river, 8);
+                MakeFalling(river.values);
 
-            for (int zi = 0; zi < HeightRes; zi++)
-            {
-                for (int xi = 0; xi < HeightRes; xi++)
+                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
                 {
-                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
-                    float d = river.Query(x, z, out float water, out _);
-                    if (d > hw + 45f) continue;
-                    float h = world[zi, xi];
-                    if (d <= hw)
+                    for (int xi = 0; xi < HeightRes; xi++)
                     {
-                        float k = d / hw;
-                        h = Mathf.Min(h, water - 0.3f - 1.5f * (1f - k * k)); // river bed
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float d = river.Query(x, z, out float water, out _);
+                        if (d > hw + 45f * Scale.Distance || MapLayout.DamLocal(x, z).x < -1f) continue; // the lake side of the dam is shaped already
+                        float h = world[zi, xi];
+                        float wet = MapLayout.RiverWidthAt(x, z); // the water's own width here, inside the full channel
+                        if (d <= wet)
+                        {
+                            float k = d / wet;
+                            h = Mathf.Min(h, water - 0.3f - 1.5f * (1f - k * k)); // river bed
+                        }
+                        else
+                        {
+                            // Banks aren't a trench: in places a low shelf of gravel and mud up to 2.5 m wide just
+                            // above the water, then a slope gentle in some reaches and steeper in others (a flat
+                            // site beside the river keeps its level ground).
+                            float shelf = BankShelf(x, z);
+                            float slope = 0.32f + 0.28f * Mathf.PerlinNoise(x * 0.03f + 5f, z * 0.03f + 61f);
+                            float bank = water + 0.18f + Mathf.Min(d - wet, shelf) * 0.04f + Mathf.Max(0f, d - wet - shelf) * slope;
+                            if (d < wet + 2.5f) bank = Mathf.Max(bank, water + 0.12f); // never below the water right at the edge
+                            h = Mathf.Lerp(h, Mathf.Min(h, bank), FlatMask(x, z, out _));
+                        }
+                        world[zi, xi] = h;
                     }
-                    else
-                    {
-                        h = Mathf.Min(h, water + 0.3f + (d - hw) * 0.5f); // banks no steeper than this
-                        if (d < hw + 2.5f) h = Mathf.Max(h, water + 0.12f); // and never below the water right at the edge
-                    }
-                    world[zi, xi] = h;
-                }
+                });
+
+                if (MapLayout.HasDam && line.Count > 0) BelowDam(world, step, river.values[0]);
             }
+
+            // Real channel sizes and bend shelves, after levels are known. The dam gorge keeps its established shape.
+            watercourse = new WatercourseProfile();
+            if (MapLayout.HasRiver)
+                System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+                {
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        if (MapLayout.HasDam && MapLayout.NearDam(new Vector2(x, z), 60f)) continue;
+                        if (!watercourse.Sample(x, z, out float distance, out float level, out float width,
+                            out float margin, out float depth, out float slope) || distance > width + margin + 14f) continue;
+                        if (MapLayout.LakeDistance(x, z) < 8f) continue;
+                        float edge = distance - width;
+                        // Preserve bridge approaches, graded roads and all flat building sites on dry ground.
+                        if (edge > 0f && roads.Distance(x, z) < MapLayout.RoadWidthAt(x, z) + 3f) continue;
+                        float shape = edge <= 0f ? level - depth
+                            : level + .12f + Mathf.Min(edge, margin) * .045f + Mathf.Max(0f, edge - margin) * slope;
+                        float weight = (1f - WaterAppearance.Smooth((edge - margin) / 14f)) * FlatMask(x, z, out _);
+                        world[zi, xi] = Mathf.Lerp(world[zi, xi], shape, weight);
+                    }
+                });
+
+            terrainBottom = -Sink;
+            terrainRange = HeightRange;
+            if (source != null)
+            {
+                // Fade every earthwork, including pads and roads, back to the same absolute world boundary.
+                float min = float.MaxValue, max = float.MinValue;
+                for (int zi = 0; zi < HeightRes; zi++)
+                    for (int xi = 0; xi < HeightRes; xi++)
+                    {
+                        float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                        float h = Mathf.Lerp(source.Height(x, z), world[zi, xi], source.DetailWeight(x, z));
+                        world[zi, xi] = h;
+                        min = Mathf.Min(min, h); max = Mathf.Max(max, h);
+                    }
+                terrainBottom = min - 8f;
+                terrainRange = Mathf.Max(32f, max - terrainBottom + 8f);
+            }
+            worldHeights = world;
+            steepness = Slopes(world, step);
 
             var heights = new float[HeightRes, HeightRes];
             for (int zi = 0; zi < HeightRes; zi++)
                 for (int xi = 0; xi < HeightRes; xi++)
-                    heights[zi, xi] = Mathf.Clamp01((world[zi, xi] + Sink) / HeightRange);
+                    heights[zi, xi] = Mathf.Clamp01((world[zi, xi] - terrainBottom) / terrainRange);
             return heights;
         }
 
-        // Height above y = 0 before flattening, in metres.
+        // The land's height above y = 0 and its slope in degrees at each heightmap point, kept from the build so the
+        // painter and the grass can ask from any thread (the terrain's own GetSteepness is main-thread only).
+        static float[,] worldHeights, steepness;
+
+        // The lie of the land: the average height within about 40 m of each heightmap point, so the painter can tell
+        // a hollow (where water gathers and the grass grows dark) from a rise. Made once per sector, before the splat.
+        static float[,] lieHeights;
+
+        public static float SteepnessAt(float x, float z) => steepness != null ? Sample(steepness, new Vector2(x, z)) : 0f;
+
+        // How far the ground at a sector point lies below the lie of the land round it, in metres (0 on rises): the
+        // hollows the sector's light shows, where damp gathers in its crops (Farmland). Safe from worker threads.
+        public static float LowAt(Vector2 p) => lieHeights != null && worldHeights != null ? Mathf.Max(0f, Sample(lieHeights, p) - Sample(worldHeights, p)) : 0f;
+
+        // A box average of a grid over +-radius points, from a summed-area table (one pass, any radius).
+        static float[,] BoxAverage(float[,] grid, int radius)
+        {
+            int rows = grid.GetLength(0), cols = grid.GetLength(1);
+            var sums = new double[rows + 1, cols + 1];
+            for (int z = 0; z < rows; z++)
+            {
+                double line = 0.0;
+                for (int x = 0; x < cols; x++)
+                {
+                    line += grid[z, x];
+                    sums[z + 1, x + 1] = sums[z, x + 1] + line;
+                }
+            }
+            var result = new float[rows, cols];
+            for (int z = 0; z < rows; z++)
+            {
+                int z0 = Mathf.Max(0, z - radius), z1 = Mathf.Min(rows, z + radius + 1);
+                for (int x = 0; x < cols; x++)
+                {
+                    int x0 = Mathf.Max(0, x - radius), x1 = Mathf.Min(cols, x + radius + 1);
+                    double total = sums[z1, x1] - sums[z0, x1] - sums[z1, x0] + sums[z0, x0];
+                    result[z, x] = (float)(total / ((z1 - z0) * (x1 - x0)));
+                }
+            }
+            return result;
+        }
+
+        static float[,] Slopes(float[,] world, float step)
+        {
+            var slopes = new float[HeightRes, HeightRes];
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                int z0 = Mathf.Max(zi - 1, 0), z1 = Mathf.Min(zi + 1, HeightRes - 1);
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    int x0 = Mathf.Max(xi - 1, 0), x1 = Mathf.Min(xi + 1, HeightRes - 1);
+                    float dx = (world[zi, x1] - world[zi, x0]) / ((x1 - x0) * step), dz = (world[z1, xi] - world[z0, xi]) / ((z1 - z0) * step);
+                    slopes[zi, xi] = Mathf.Atan(Mathf.Sqrt(dx * dx + dz * dz)) * Mathf.Rad2Deg;
+                }
+            });
+            return slopes;
+        }
+
+        // The lake: a basin under the water with a shallow shelf at the edge, then banks rising gently out of it
+        // (about 12 degrees) and easing into the natural hills further out. Where the dam's ends meet the valley
+        // sides the ground comes up to the road on its crest.
+        static void Reservoir(float[,] world, float step)
+        {
+            float level = MapLayout.LakeLevel, crest = level + 2.1f;
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float s = MapLayout.LakeDistance(x, z);
+                    Vector2 local = MapLayout.DamLocal(x, z);
+                    bool nearDam = local.x > -20f && local.x < 25f && Mathf.Abs(local.y) < 80f;
+                    if (s > 60f * Scale.Distance && !nearDam) continue;
+                    float h = world[zi, xi];
+                    float bumps = (Mathf.PerlinNoise(x * 0.07f + 13f, z * 0.07f + 77f) - 0.5f) * 2.5f;
+                    if (s < 0f)
+                    {
+                        h = Mathf.Min(h, level - Mathf.Min(14f, 0.4f - s * 0.28f) + bumps * 0.3f);
+                    }
+                    else if (local.x < -1f || Mathf.Abs(local.y) > MapLayout.DamHalfSpan)
+                    {
+                        float bank = level + 0.3f + s * 0.21f + bumps * Mathf.Clamp01(s / 8f);
+                        float natural = Mathf.SmoothStep(0f, 1f, (s - 10f * Scale.Distance) / (45f * Scale.Distance));
+                        float upstream = 1f - Mathf.SmoothStep(0f, 1f, (local.x - 5f) / 25f); // nothing to bank downstream
+                        h = Mathf.Lerp(h, Mathf.Lerp(bank, h, natural), upstream);
+                    }
+                    // The valley sides the dam is built into, up to the road on its crest.
+                    float side = Mathf.Abs(local.y);
+                    if (nearDam && side > MapLayout.DamHalfSpan)
+                    {
+                        float abutment = crest + Mathf.Max(0f, side - 44f) * 0.35f + bumps * 0.5f;
+                        float weight = (1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(local.x - 2f) - 14f) / 8f))
+                                     * (1f - Mathf.SmoothStep(0f, 1f, (side - 70f) / 10f));
+                        h = Mathf.Lerp(h, Mathf.Max(h, abutment), weight);
+                    }
+                    world[zi, xi] = h;
+                }
+            });
+        }
+
+        // Lakes and pools: each sits a little below the lowest ground round its shore, with a basin under the
+        // water and banks easing up from it into the natural ground. Their levels go back into the plan for Water.
+        static void Ponds(float[,] world, float step)
+        {
+            var ponds = MapLayout.Plan.ponds;
+            if (ponds.Count == 0) return;
+            for (int i = 0; i < ponds.Count; i++)
+            {
+                var pond = ponds[i];
+                float level = float.MaxValue;
+                for (int k = 0; k < 32; k++)
+                {
+                    float a = k * Mathf.PI * 2f / 32f;
+                    level = Mathf.Min(level, Sample(world, pond.center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * pond.radius * 1.2f));
+                }
+                pond.level = level - 0.35f;
+                ponds[i] = pond;
+            }
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float s = MapLayout.PondDistance(x, z, out int i);
+                    if (i < 0 || s > 40f * Scale.Distance) continue;
+                    float level = ponds[i].level, h = world[zi, xi];
+                    float bumps = (Mathf.PerlinNoise(x * 0.09f + 17f, z * 0.09f + 41f) - 0.5f) * 1.5f;
+                    if (s < 0f)
+                    {
+                        // A shallow shelf for the first 3 m out from the shore (down to half a metre), then sloping
+                        // to the deepest: a pond you can see the bottom of near its edges, as farm ponds are.
+                        float deepest = ponds[i].radius > 60f * Scale.Distance ? 7f : 1.7f;
+                        float depth = -s < 3f ? 0.08f - s * 0.14f : Mathf.Min(deepest, 0.5f + (-s - 3f) * 0.2f);
+                        h = Mathf.Min(h, level - depth + bumps * 0.15f);
+                    }
+                    else
+                    {
+                        float bank = level + 0.25f + s * 0.12f + bumps * Mathf.Clamp01(s / 10f);
+                        h = Mathf.Lerp(bank, h, Mathf.SmoothStep(0f, 1f, (s - 4f) / (32f * Scale.Distance)));
+                    }
+                    world[zi, xi] = h;
+                }
+            });
+        }
+
+        // A stone quarry: a pit cut down in benches, its floor about 50 m below the ground round it.
+        static void Quarry(float[,] world, float step)
+        {
+            var plan = MapLayout.Plan;
+            if (!plan.Has(SectorFeature.Quarry)) return;
+            float r = plan.quarryRadius, rim = Sample(world, plan.quarry);
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float d = Vector2.Distance(new Vector2(x, z), plan.quarry);
+                    if (d > r + 12f * Scale.Distance) continue;
+                    float depth = 1f - Mathf.SmoothStep(0f, 1f, (d / r - 0.45f) / 0.55f);
+                    float benches = Mathf.Floor(depth * 4f) / 4f;
+                    float pit = rim - 12f * Scale.Distance * Mathf.Lerp(depth, benches, 0.7f);
+                    float outside = Mathf.SmoothStep(0f, 1f, (d - r) / (12f * Scale.Distance));
+                    world[zi, xi] = Mathf.Lerp(Mathf.Min(world[zi, xi], pit), world[zi, xi], outside);
+                }
+            });
+        }
+
+        // A trench dug along the line behind the dragon's teeth, broken where roads cross it.
+        static void Trench(float[,] world, float step)
+        {
+            var line = MapLayout.Plan.trenchLine;
+            if (line == null) return;
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    float d = DistanceToLine(new Vector2(x, z), line);
+                    if (d > 1.6f || MapLayout.RoadField.Distance(x, z) < MapLayout.RoadHalfWidth + 3f) continue;
+                    float k = d / 1.6f;
+                    world[zi, xi] -= 1.7f * (1f - k * k * k * k);
+                }
+            });
+        }
+
+        static float DistanceToLine(Vector2 p, Vector2[] line)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < line.Length - 1; i++)
+            {
+                Vector2 a = line[i], ab = line[i + 1] - a;
+                float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+                best = Mathf.Min(best, Vector2.Distance(p, a + ab * t));
+            }
+            return best;
+        }
+
+        // Below the dam: a rocky gorge whose sides climb from the river to the ends of the dam, opening out
+        // downstream, and a wide plunge pool where the spillway lands.
+        static void BelowDam(float[,] world, float step, float water)
+        {
+            float crest = MapLayout.LakeLevel + 2.1f;
+            System.Threading.Tasks.Parallel.For(0, HeightRes, zi =>
+            {
+                for (int xi = 0; xi < HeightRes; xi++)
+                {
+                    float x = -Size / 2f + xi * step, z = -Size / 2f + zi * step;
+                    Vector2 local = MapLayout.DamLocal(x, z);
+                    if (local.x < -2f || local.x > 50f || Mathf.Abs(local.y) > 60f) continue;
+                    float h = world[zi, xi];
+                    float side = Mathf.Abs(local.y);
+                    float bumps = (Mathf.PerlinNoise(x * 0.11f + 31f, z * 0.11f + 5f) - 0.5f) * 2f;
+                    float open = 1f - Mathf.SmoothStep(0f, 1f, (local.x - 22f) / 26f);
+                    if (side > 12f)
+                    {
+                        float wall = Mathf.Lerp(water + 0.5f, crest, Mathf.SmoothStep(0f, 1f, (side - 12f) / 20f)) + bumps;
+                        h = Mathf.Lerp(h, Mathf.Max(h, wall), open);
+                    }
+                    float pool = Mathf.Pow((local.x - 12f) / 13f, 2f) + Mathf.Pow(local.y / 12f, 2f);
+                    if (pool < 1.2f) h = Mathf.Min(h, water - 0.3f - 1.6f * Mathf.Clamp01(1.2f - pool));
+                    world[zi, xi] = h;
+                }
+            });
+        }
+
+        // Height above y = 0 before flattening, in metres. The sector's type sets how high the hills and the
+        // ridges round the edge are; its seed moves the noise, so no two sectors share a landscape.
         static float Hills(float x, float z, float riverDistance)
         {
-            float h = (Mathf.PerlinNoise(x * 0.008f + 11.3f, z * 0.008f + 3.7f) - 0.42f) * 9f;  // broad hills
-            h += (Mathf.PerlinNoise(x * 0.024f + 41.1f, z * 0.024f + 7.9f) - 0.5f) * 3f;       // bumps
-            h += (Mathf.PerlinNoise(x * 0.09f + 5.5f, z * 0.09f + 91.2f) - 0.5f) * 0.6f;       // roughness
+            var plan = MapLayout.Plan;
+            const float S = Scale.Distance;
+            float k = plan.hills / 9f, nx = x / S + plan.noiseOffset.x, nz = z / S + plan.noiseOffset.y; // the old map's noise, stretched
+            float h = (Mathf.PerlinNoise(nx * 0.008f + 11.3f, nz * 0.008f + 3.7f) - 0.42f) * 9f * S * k;                    // broad hills
+            h += (Mathf.PerlinNoise(nx * 0.024f + 41.1f, nz * 0.024f + 7.9f) - 0.5f) * 3f * S * Mathf.Clamp(k, 0.4f, 1.6f); // bumps
+            // Real-sized undulation and roughness on top, the ground a walker would feel.
+            h += (Mathf.PerlinNoise(x * 0.024f + 17.3f, z * 0.024f + 63.1f) - 0.5f) * 1.6f;
+            h += (Mathf.PerlinNoise(x * 0.09f + 5.5f, z * 0.09f + 91.2f) - 0.5f) * 0.6f;
             // Ridges beyond the playable area so the battlefield sits in a valley, with a gap for the river.
-            float edge = Mathf.InverseLerp(95f, 230f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
-            float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f) / 55f);
-            h += edge * edge * 32f * (0.7f + 0.6f * Mathf.PerlinNoise(x * 0.015f, z * 0.015f)) * valley;
+            float edge = Mathf.InverseLerp(95f * S, 230f * S, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
+            float valley = Mathf.SmoothStep(0f, 1f, (riverDistance - 20f * S) / (55f * S));
+            h += edge * edge * plan.ridges * S * (0.7f + 0.6f * Mathf.PerlinNoise(nx * 0.015f, nz * 0.015f)) * valley;
             return h;
+        }
+
+        // Where a bare site's worn ground stops, as a share of its radius in the direction (dx, dz): ragged, from
+        // about 0.75 to 1.2, so a compound's trodden earth spills out in places and grass creeps in at others.
+        public static float SiteEdge(float dx, float dz)
+        {
+            float a = Mathf.Atan2(dz, dx);
+            return 0.95f + 0.12f * Mathf.Sin(3f * a + 1.3f) + 0.07f * Mathf.Sin(5f * a + 0.4f) + 0.04f * Mathf.Sin(9f * a + 2.2f)
+                   + 0.12f * (Mathf.PerlinNoise(dx * 0.15f + 40f, dz * 0.15f + 9f) - 0.5f);
+        }
+
+        // Which flat sites reach each 64 m square (their own ground and the slope easing out of it), so the millions
+        // of FlatMask questions while the land is shaped and painted each look at only the few nearby.
+        const float SiteCell = 64f;
+        static readonly int siteCellCount = Mathf.CeilToInt(Size / SiteCell);
+        static List<FlatSite>[] siteCells;
+
+        static float SiteReach(FlatSite s) => s.radius * 1.25f + (s.radius * 0.6f + 6f) * Scale.Distance;
+
+        static void IndexSites()
+        {
+            siteCells = new List<FlatSite>[siteCellCount * siteCellCount];
+            foreach (var s in sites)
+            {
+                float reach = SiteReach(s);
+                int x0 = Mathf.Max(0, Mathf.FloorToInt((s.center.x - reach + Size / 2f) / SiteCell));
+                int x1 = Mathf.Min(siteCellCount - 1, Mathf.FloorToInt((s.center.x + reach + Size / 2f) / SiteCell));
+                int z0 = Mathf.Max(0, Mathf.FloorToInt((s.center.z - reach + Size / 2f) / SiteCell));
+                int z1 = Mathf.Min(siteCellCount - 1, Mathf.FloorToInt((s.center.z + reach + Size / 2f) / SiteCell));
+                for (int cz = z0; cz <= z1; cz++)
+                    for (int cx = x0; cx <= x1; cx++)
+                        (siteCells[cz * siteCellCount + cx] ??= new List<FlatSite>()).Add(s);
+            }
         }
 
         // 0 inside a flat site, easing up to 1 a little outside it.
@@ -189,15 +577,319 @@ namespace DroneSandbox
         {
             float mask = 1f;
             bare = false;
-            foreach (var s in sites)
+            int cx = Mathf.Clamp(Mathf.FloorToInt((x + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            int cz = Mathf.Clamp(Mathf.FloorToInt((z + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            var near = siteCells != null ? siteCells[cz * siteCellCount + cx] : sites;
+            if (near == null) return mask;
+            foreach (var s in near)
             {
                 float d = Vector2.Distance(new Vector2(x, z), new Vector2(s.center.x, s.center.z));
-                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / (s.radius * 0.6f + 6f));
+                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / ((s.radius * 0.6f + 6f) * Scale.Distance));
                 if (m < mask) mask = m;
-                if (s.bare && d < s.radius * 0.9f) bare = true;
+                if (s.bare && d < s.radius * SiteEdge(x - s.center.x, z - s.center.z)) bare = true;
             }
             return mask;
         }
+
+        // A pad keeps its regional elevation, with the same controlling site's radius and blend as FlatMask.
+        static float FlattenToSiteElevation(float x, float z, float height)
+        {
+            float mask = 1f, level = height;
+            int cx = Mathf.Clamp(Mathf.FloorToInt((x + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            int cz = Mathf.Clamp(Mathf.FloorToInt((z + Size / 2f) / SiteCell), 0, siteCellCount - 1);
+            var near = siteCells != null ? siteCells[cz * siteCellCount + cx] : sites;
+            if (near == null) return height;
+            foreach (var s in near)
+            {
+                float d = Vector2.Distance(new Vector2(x, z), new Vector2(s.center.x, s.center.z));
+                float m = Mathf.SmoothStep(0f, 1f, (d - s.radius) / ((s.radius * 0.6f + 6f) * Scale.Distance));
+                if (m < mask) { mask = m; level = s.center.y; }
+            }
+            return Mathf.Lerp(level, height, mask);
+        }
+
+        // Wears bare ground into the finished terrain, for things placed after it was painted (a garden path, a
+        // farmyard, a vegetable patch): earth along the line from `from` to `to`, `width` wide with soft, uneven
+        // edges, by `strength` (1 for bare earth). Grass is planted afterwards and keeps off it (Worn); writing
+        // the grass layers a second time brought back the black tussocks.
+        // Painting waits for FlushWear (World calls it after the villages), which writes every strip with one
+        // GetAlphamaps and one SetAlphamaps: each SetAlphamaps re-uploads the terrain's whole splat textures, and a
+        // village cluster's few hundred paths, one call each, queued over 5 GB in one frame and lost the GPU (hd127).
+        public static void Wear(Vector2 from, Vector2 to, float width, float strength)
+        {
+            if (terrain == null) return;
+            var strip = Strip(from, to, width, strength, 2);
+            IndexWorn(strip, worn.Count);
+            worn.Add(strip);
+            pending.Add(strip);
+        }
+
+        // Paints a strip of another ground layer the same way (1, the dark damp grass, draws the hedge lines between
+        // village gardens). Grass still grows on it.
+        public static void Paint(Vector2 from, Vector2 to, float width, float strength, int layer)
+        {
+            if (terrain != null) pending.Add(Strip(from, to, width, strength, layer));
+        }
+
+        // Writes the strips Wear and Paint have collected into the terrain's layers, over the one rectangle that
+        // holds them all.
+        public static void FlushWear()
+        {
+            if (terrain == null || pending.Count == 0) return;
+            var data = terrain.terrainData;
+            int res = data.alphamapResolution;
+            float cell = Size / res;
+            Vector2 lo = pending[0].lo, hi = pending[0].hi;
+            foreach (var strip in pending)
+            {
+                lo = Vector2.Min(lo, strip.lo);
+                hi = Vector2.Max(hi, strip.hi);
+            }
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x + Size / 2f) / cell), 0, res - 1), x1 = Mathf.Clamp(Mathf.CeilToInt((hi.x + Size / 2f) / cell), 0, res - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y + Size / 2f) / cell), 0, res - 1), z1 = Mathf.Clamp(Mathf.CeilToInt((hi.y + Size / 2f) / cell), 0, res - 1);
+            int w = x1 - x0 + 1, h = z1 - z0 + 1;
+            var maps = data.GetAlphamaps(x0, z0, w, h);
+            int layers = maps.GetLength(2);
+            foreach (var strip in pending)
+            {
+                int i0 = Mathf.Max(0, Mathf.FloorToInt((strip.lo.x + Size / 2f) / cell) - x0), i1 = Mathf.Min(w - 1, Mathf.CeilToInt((strip.hi.x + Size / 2f) / cell) - x0);
+                int j0 = Mathf.Max(0, Mathf.FloorToInt((strip.lo.y + Size / 2f) / cell) - z0), j1 = Mathf.Min(h - 1, Mathf.CeilToInt((strip.hi.y + Size / 2f) / cell) - z0);
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                    {
+                        var p = new Vector2(-Size / 2f + (x0 + i + 0.5f) * cell, -Size / 2f + (z0 + j + 0.5f) * cell);
+                        float wear = WearAt(p, strip.a, strip.b, strip.width) * strip.strength;
+                        if (wear <= 0f) continue;
+                        for (int k = 0; k < layers; k++) maps[j, i, k] *= 1f - wear;
+                        maps[j, i, strip.layer] += wear;
+                    }
+            }
+            data.SetAlphamaps(x0, z0, maps);
+            pending.Clear();
+        }
+
+        // ---- The forest floor ----
+
+        // How thickly wooded each 2 m square is: about 4 inside a wood planted at real spacing, falling off over its
+        // last 10 m. Made from where the woods could grow (World's candidates, so a wood thinned by the tree budget
+        // still has its floor) plus, at half weight, every tree actually planted.
+        const float CanopyCell = 2f;
+        static float[] canopy;
+        static float[] stems; // the trees actually planted alone, at full weight: where the litter lies
+        static int canopyRes;
+
+        // How wooded the ground at (x, z) is (see canopy); 0 before the woods are planted. Safe from worker threads.
+        public static float CanopyAt(float x, float z) => canopy == null ? 0f : Grid(canopy, x, z);
+
+        // Bilinear sample of one of the 2 m wood grids.
+        static float Grid(float[] grid, float x, float z)
+        {
+            float gx = (x + Size / 2f) / CanopyCell - 0.5f, gz = (z + Size / 2f) / CanopyCell - 0.5f;
+            int i = Mathf.Clamp(Mathf.FloorToInt(gx), 0, canopyRes - 2), j = Mathf.Clamp(Mathf.FloorToInt(gz), 0, canopyRes - 2);
+            float u = Mathf.Clamp01(gx - i), v = Mathf.Clamp01(gz - j);
+            float a = grid[j * canopyRes + i], b = grid[j * canopyRes + i + 1];
+            float c = grid[(j + 1) * canopyRes + i], d = grid[(j + 1) * canopyRes + i + 1];
+            return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
+        }
+
+        // The woods stood on the meadow layer and looked like trees in a park. Under them now: fallen leaves and
+        // needles (the litter layer) where trees actually stand, shaded damp grass and moss (layer 1) in a wood's
+        // thinner parts, and a ragged edge where the wood gives way to open ground; litter wherever the wood could
+        // grow lay as brown blotches between a thinned wood's trees (hd142's Deep Forest). Paths, yards and rock keep
+        // their own layers. Written in bands of 512 rows over the woods' bounds, so neither the copy of the splat nor
+        // the uploads grow with the whole map (hd127).
+        public static void PaintForestFloor(List<Vector2> woodland, IReadOnlyList<Vector2> trees)
+        {
+            if (terrain == null) return;
+            canopyRes = Mathf.CeilToInt(Size / CanopyCell);
+            canopy = new float[canopyRes * canopyRes];
+            stems = new float[canopyRes * canopyRes];
+            Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
+            var stand = new Stand(woodland);
+            foreach (var p in woodland)
+            {
+                float weight = stand.Weight(p);
+                if (weight <= 0f) continue;
+                Spread(canopy, p, weight); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p);
+            }
+            for (int t = 0; t < trees.Count; t++)
+            {
+                // Varrow's decorative bank/garden trees cull independently; only logical woods keep a distant floor.
+                if (MapLayout.Plan.kind == SectorKind.VarrowValley && !SectorForest.HasFloorCoverage(trees[t])) continue;
+                float weight = stand.Weight(trees[t]);
+                if (weight <= 0f) continue;
+                Spread(canopy, trees[t], 0.5f * weight);
+                Spread(stems, trees[t], weight);
+                lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]);
+            }
+            if (lo.x > hi.x) return;
+
+            var data = terrain.terrainData;
+            int res = data.alphamapResolution;
+            float cell = Size / res;
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x - 12f + Size / 2f) / cell), 0, res - 1), x1 = Mathf.Clamp(Mathf.CeilToInt((hi.x + 12f + Size / 2f) / cell), 0, res - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y - 12f + Size / 2f) / cell), 0, res - 1), z1 = Mathf.Clamp(Mathf.CeilToInt((hi.y + 12f + Size / 2f) / cell), 0, res - 1);
+            int w = x1 - x0 + 1;
+            for (int band = z0; band <= z1; band += 512)
+            {
+                int h = Mathf.Min(512, z1 - band + 1);
+                var maps = data.GetAlphamaps(x0, band, w, h);
+                if (maps.GetLength(2) <= LitterLayer) return;
+                System.Threading.Tasks.Parallel.For(0, h, j =>
+                {
+                    for (int i = 0; i < w; i++)
+                    {
+                        float x = -Size / 2f + (x0 + i + 0.5f) * cell, z = -Size / 2f + (band + j + 0.5f) * cell;
+                        float ragged = (Mathf.PerlinNoise(x * 0.11f + 41f, z * 0.11f + 7f) - 0.5f) * 1.4f;
+                        float floor = Mathf.SmoothStep(0f, 1f, (CanopyAt(x, z) + ragged - 1.2f) / 1.8f);
+                        // Not past the trees' own reach: a copse's floor stopped as a dark halo well outside its crowns.
+                        floor *= Mathf.SmoothStep(0f, 1f, (Grid(stems, x, z) - 0.25f) / 0.5f);
+                        float shore = maps.GetLength(2) > 7 ? maps[j, i, 6] + maps[j, i, 7] : 0f;
+                        floor *= 1f - Mathf.Clamp01((maps[j, i, 2] + maps[j, i, 3] + shore) * 1.5f); // preserve exposed banks too
+                        if (floor <= 0.001f) continue;
+                        // Litter under the trees that stand (about 1.5 at 10 m spacing, 0.4 at the 17 m of a thinned wood),
+                        // with moss and damp grass in patches 10-25 m across; shaded grass in the rest.
+                        float litter = Mathf.SmoothStep(0f, 1f, (Grid(stems, x, z) + ragged * 0.4f - 0.5f) / 1.5f);
+                        litter *= 1f - 0.55f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.045f + 3f, z * 0.045f + 19f) - 0.5f) / 0.2f);
+                        for (int k = 0; k < maps.GetLength(2); k++) maps[j, i, k] *= 1f - floor;
+                        maps[j, i, LitterLayer] += floor * litter;
+                        maps[j, i, 1] += floor * (1f - litter);
+                    }
+                });
+                data.SetAlphamaps(x0, band, maps);
+            }
+        }
+
+        // How much of a wood a point stands in, from the woodland stems within 25 m: a lone tree, a pair or three (a
+        // field or garden tree, an orchard, a wood's stray outlier) lay a floor with no tree over it, or a dark disc wider
+        // than the crowns, which read as isolated shadow blobs from the air (hd162 02d_village). They now add nothing,
+        // a copse adds a little, and from about ten stems, any wood's edge or corner included, the floor is as before.
+        sealed class Stand
+        {
+            const float Reach = 25f;
+            readonly int columns;
+            readonly int[] first, order;
+            readonly List<Vector2> points;
+
+            // Counting-sorts the stems into 25 m cells over the sector.
+            public Stand(List<Vector2> woodland)
+            {
+                points = woodland;
+                columns = Mathf.CeilToInt(Size / Reach) + 1;
+                first = new int[columns * columns + 1];
+                order = new int[woodland.Count];
+                foreach (var p in woodland) first[Cell(p) + 1]++;
+                for (int i = 1; i < first.Length; i++) first[i] += first[i - 1];
+                var next = (int[])first.Clone();
+                for (int i = 0; i < woodland.Count; i++) order[next[Cell(woodland[i])]++] = i;
+            }
+
+            int Cell(Vector2 p)
+            {
+                int i = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / Reach), 0, columns - 1), j = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / Reach), 0, columns - 1);
+                return j * columns + i;
+            }
+
+            // 0 with two or fewer other stems within reach (a group of three at most), 1 with ten; counting stops at ten.
+            public float Weight(Vector2 p)
+            {
+                int ci = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / Reach), 0, columns - 1), cj = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / Reach), 0, columns - 1);
+                int count = 0;
+                for (int j = Mathf.Max(0, cj - 1); j <= Mathf.Min(columns - 1, cj + 1) && count < 10; j++)
+                    for (int i = Mathf.Max(0, ci - 1); i <= Mathf.Min(columns - 1, ci + 1) && count < 10; i++)
+                        for (int k = first[j * columns + i], end = first[j * columns + i + 1]; k < end && count < 10; k++)
+                        {
+                            float d = (points[order[k]] - p).sqrMagnitude;
+                            if (d > 0.01f && d < Reach * Reach) count++;
+                        }
+                return Mathf.Clamp01((count - 2) / 8f);
+            }
+        }
+
+        // Adds one wood point's share to a wood grid: a 4.5 m Gaussian, cut off at 9 m.
+        static void Spread(float[] grid, Vector2 p, float weight)
+        {
+            const float reach = 9f, spread = 2f * 4.5f * 4.5f;
+            int r = Mathf.CeilToInt(reach / CanopyCell);
+            int ci = Mathf.FloorToInt((p.x + Size / 2f) / CanopyCell), cj = Mathf.FloorToInt((p.y + Size / 2f) / CanopyCell);
+            for (int j = Mathf.Max(0, cj - r); j <= Mathf.Min(canopyRes - 1, cj + r); j++)
+                for (int i = Mathf.Max(0, ci - r); i <= Mathf.Min(canopyRes - 1, ci + r); i++)
+                {
+                    float dx = -Size / 2f + (i + 0.5f) * CanopyCell - p.x, dz = -Size / 2f + (j + 0.5f) * CanopyCell - p.y;
+                    float d2 = dx * dx + dz * dz;
+                    if (d2 < reach * reach) grid[j * canopyRes + i] += weight * Mathf.Exp(-d2 / spread);
+                }
+        }
+
+        struct WornStrip
+        {
+            public Vector2 a, b, lo, hi;
+            public float width, strength;
+            public int layer;
+        }
+        static readonly List<WornStrip> worn = new List<WornStrip>();    // bare earth, which grass keeps off
+        static readonly List<WornStrip> pending = new List<WornStrip>(); // painted at the next FlushWear
+        // Which worn strips reach each 16 m square, so Worn looks at a handful instead of every path on the map.
+        const float WornCell = 16f;
+        static List<int>[] wornCells;
+        static int WornCellCount => Mathf.CeilToInt(Size / WornCell);
+
+        static WornStrip Strip(Vector2 from, Vector2 to, float width, float strength, int layer)
+        {
+            float reach = width * 0.5f + 1.2f;
+            return new WornStrip { a = from, b = to, width = width, strength = strength, layer = layer,
+                lo = Vector2.Min(from, to) - Vector2.one * reach, hi = Vector2.Max(from, to) + Vector2.one * reach };
+        }
+
+        static void IndexWorn(WornStrip strip, int index)
+        {
+            int n = WornCellCount;
+            wornCells ??= new List<int>[n * n];
+            int x0 = Mathf.Clamp(Mathf.FloorToInt((strip.lo.x + Size / 2f) / WornCell), 0, n - 1), x1 = Mathf.Clamp(Mathf.FloorToInt((strip.hi.x + Size / 2f) / WornCell), 0, n - 1);
+            int z0 = Mathf.Clamp(Mathf.FloorToInt((strip.lo.y + Size / 2f) / WornCell), 0, n - 1), z1 = Mathf.Clamp(Mathf.FloorToInt((strip.hi.y + Size / 2f) / WornCell), 0, n - 1);
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                    (wornCells[z * n + x] ??= new List<int>()).Add(index);
+        }
+
+        // Forgets the last sector's worn strips (Build, before anything wears the new one).
+        static void ClearWorn()
+        {
+            worn.Clear();
+            pending.Clear();
+            wornCells = null;
+        }
+
+        // Whether Wear has worn the ground at p bare enough that no grass grows there.
+        public static bool Worn(Vector2 p)
+        {
+            if (wornCells == null) return false;
+            int n = WornCellCount;
+            int x = Mathf.FloorToInt((p.x + Size / 2f) / WornCell), z = Mathf.FloorToInt((p.y + Size / 2f) / WornCell);
+            if (x < 0 || z < 0 || x >= n || z >= n) return false;
+            var near = wornCells[z * n + x];
+            if (near == null) return false;
+            foreach (int i in near)
+            {
+                var s = worn[i];
+                if (p.x >= s.lo.x && p.x <= s.hi.x && p.y >= s.lo.y && p.y <= s.hi.y && WearAt(p, s.a, s.b, s.width) * s.strength > 0.35f) return true;
+            }
+            return false;
+        }
+
+        static float WearAt(Vector2 p, Vector2 a, Vector2 b, float width)
+        {
+            Vector2 ab = b - a;
+            float t = ab.sqrMagnitude > 0.0001f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+            float d = Vector2.Distance(p, a + ab * t);
+            float edge = width * 0.5f * (0.8f + 0.4f * Mathf.PerlinNoise(p.x * 0.4f + 3f, p.y * 0.4f + 7f));
+            return 1f - Mathf.SmoothStep(0f, 1f, (d - edge + 0.4f) / 0.8f);
+        }
+
+        // How wide the low shelf at the river's edge is here: none along much of the river, up to 2.5 m in reaches
+        // (where it would build up on an inside bend).
+        static float BankShelf(float x, float z) =>
+            2.5f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.04f + 13f, z * 0.04f + 77f) - 0.45f) * 4f);
 
         // Bilinear sample of a heights grid at world (x, z).
         static float Sample(float[,] grid, Vector2 p)
@@ -245,24 +937,40 @@ namespace DroneSandbox
 
         // ---- Texturing ----
 
-        // Layer order: 0 grass, 1 a second grass in patches (breaks up the tiling), 2 dirt, 3 rock.
-        // The grass textures are tinted to a lush summer green.
+        // Layer order: 0 pasture, 1 damp grass, 2 dirt, 3 rock, 4 rough meadow.
+        // The tints take each photo's average colour to the ground cover of aerial photos of farmland in summer
+        // (ChatGPT's environment review): pasture (96, 118, 72), damp grass (74, 100, 70), rough uncut meadow
+        // (122, 124, 84) and bare soil (115, 99, 76). The terrain shader multiplies in linear space, so each tint is
+        // (wanted / photo average) to the power 2.2. More blue than before: the old tints made every meadow olive.
         static TerrainLayer[] BuildLayers()
         {
             return new[]
             {
-                Layer("meadow", 7f, new Color(0.56f, 0.86f, 0.36f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
-                Layer("lush", 6f, new Color(0.72f, 0.98f, 0.50f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
-                Layer("dirt", 5f, Color.white, new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
-                Layer("rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
+                Layer("meadow", "meadow", 7f, new Color(0.40f, 0.74f, 0.57f), new Color(0.26f, 0.36f, 0.15f), new Color(0.19f, 0.28f, 0.10f)),
+                Layer("lush", "lush", 6f, new Color(0.21f, 0.55f, 0.59f), new Color(0.30f, 0.38f, 0.16f), new Color(0.22f, 0.30f, 0.12f)),
+                Layer("dirt", "dirt", 5f, new Color(1.2f, 1.23f, 1.28f), new Color(0.36f, 0.30f, 0.22f), new Color(0.27f, 0.22f, 0.16f)),
+                Layer("rock", "rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
+                Layer("dry", "meadow", 8f, new Color(0.68f, 0.83f, 0.80f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
+                // Fallen leaves, needles and twigs (Tools/make_forest_floor.py), toned from its orange-brown to the
+                // shadowed olive understorey seen between crowns (49, 70, 45), shared with ForestPalette.Ground.
+                Layer("litter", "litter", 6f, new Color(0.337f, 1.280f, 1.775f), new Color(0.21f, 0.30f, 0.19f), new Color(0.17f, 0.25f, 0.16f)),
+                // Reuse the dirt photo: wet mud and pale gravel occupy the two unused slots of HDRP's existing
+                // eight-layer pass. Linear tints match WaterAppearance's filtered distant colours.
+                Layer("wet mud", "dirt", 5f, new Color(.53001f, .66905f, .72861f), new Color(.34f, .32f, .26f), new Color(.27f, .25f, .20f)),
+                Layer("shore gravel", "dirt", 4f, new Color(1.99341f, 2.47628f, 2.89197f), new Color(.62f, .59f, .50f), new Color(.54f, .51f, .43f)),
             };
         }
 
-        // Uses Resources/Textures/Terrain/<name>_diff (and _nor) when present, else a generated noise texture.
-        static TerrainLayer Layer(string name, float tile, Color tint, Color light, Color dark)
+        // The litter layer's average colour in linear light (its photo's mean times the tint above), for the world
+        // picture's collar round the sector (FarDetailEdge).
+        public static readonly Vector3 LitterMean = new Vector3(0.03071f, 0.06125f, 0.02624f);
+        public const int LitterLayer = 5;
+
+        // Uses Resources/Textures/Terrain/<file>_diff (and _nor) when present, else a generated noise texture.
+        static TerrainLayer Layer(string name, string file, float tile, Color tint, Color light, Color dark)
         {
-            var diffuse = Resources.Load<Texture2D>("Textures/Terrain/" + name + "_diff");
-            var normal = Resources.Load<Texture2D>("Textures/Terrain/" + name + "_nor");
+            var diffuse = Resources.Load<Texture2D>("Textures/Terrain/" + file + "_diff");
+            var normal = Resources.Load<Texture2D>("Textures/Terrain/" + file + "_nor");
             return new TerrainLayer
             {
                 name = name,
@@ -270,53 +978,227 @@ namespace DroneSandbox
                 normalMapTexture = normal,
                 tileSize = new Vector2(tile, tile),
                 diffuseRemapMin = Vector4.zero,
-                diffuseRemapMax = diffuse != null ? (Vector4)tint : Vector4.one, // URP Terrain Lit multiplies the layer by this
+                diffuseRemapMax = diffuse != null ? (Vector4)tint : Vector4.one, // the terrain shader multiplies the layer by this
             };
+        }
+
+        // Signed distance to the nearest field or orchard edge, in metres and positive inside, from an 8 m index of the
+        // sector's crop meshes made once per splat: margins and the soil under crops are feathered by distance, so a
+        // diagonal field edge never steps along the 1 m splat texels the way a containment test did.
+        const float FieldCell = 8f;
+        static List<int>[] fieldCells;
+        static int fieldCellCount;
+
+        // A field's trapezoid with its two side-slope normalisers worked out once, for FieldAppearance.Edge per texel.
+        struct FieldShape { public Vector2 center, along; public float halfLength, halfWidth, taper, shear, left, right; }
+        static FieldShape[] fieldShapes;
+
+        // Index every field and orchard by its corners, padded for the feathering and the legacy warp.
+        static void IndexFields()
+        {
+            fieldCellCount = Mathf.CeilToInt(Size / FieldCell);
+            fieldCells = new List<int>[fieldCellCount * fieldCellCount];
+            int count = MapLayout.Fields.Count + MapLayout.Plan.orchards.Count;
+            fieldShapes = new FieldShape[count];
+            for (int k = 0; k < count; k++)
+            {
+                var f = FieldOrOrchard(k);
+                float slope = f.halfWidth * f.taper / f.halfLength;
+                fieldShapes[k] = new FieldShape { center = f.center, along = f.along, halfLength = f.halfLength, halfWidth = f.halfWidth, taper = f.taper, shear = f.shear,
+                    left = 1f / Mathf.Sqrt(1f + (f.shear - slope) * (f.shear - slope)), right = 1f / Mathf.Sqrt(1f + (f.shear + slope) * (f.shear + slope)) };
+                Vector2 lo = Vector2.one * float.MaxValue, hi = Vector2.one * float.MinValue;
+                for (int c = 0; c < 4; c++)
+                {
+                    Vector2 corner = f.Point((c & 1) == 0 ? -f.halfLength : f.halfLength, c < 2 ? -f.halfWidth : f.halfWidth);
+                    lo = Vector2.Min(lo, corner); hi = Vector2.Max(hi, corner);
+                }
+                float pad = 3.5f + FieldPlot.WarpMax;
+                int x0 = Mathf.Clamp(Mathf.FloorToInt((lo.x - pad + Size / 2f) / FieldCell), 0, fieldCellCount - 1), x1 = Mathf.Clamp(Mathf.FloorToInt((hi.x + pad + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
+                int z0 = Mathf.Clamp(Mathf.FloorToInt((lo.y - pad + Size / 2f) / FieldCell), 0, fieldCellCount - 1), z1 = Mathf.Clamp(Mathf.FloorToInt((hi.y + pad + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
+                for (int z = z0; z <= z1; z++)
+                    for (int x = x0; x <= x1; x++)
+                        (fieldCells[z * fieldCellCount + x] ??= new List<int>()).Add(k);
+            }
+        }
+
+        // Fields first, then the plan's orchards, as MapLayout.InField numbers them.
+        static FieldPlot FieldOrOrchard(int k) => k < MapLayout.Fields.Count ? MapLayout.Fields[k] : MapLayout.Plan.orchards[k - MapLayout.Fields.Count];
+
+        // The largest signed edge distance of the fields and orchards near p (-10 m when none is close): FieldAppearance.Edge's
+        // distances to the two ends and the two sloping sides, with the point unwarped once.
+        static float FieldDistance(Vector2 p)
+        {
+            int x = Mathf.Clamp(Mathf.FloorToInt((p.x + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
+            int z = Mathf.Clamp(Mathf.FloorToInt((p.y + Size / 2f) / FieldCell), 0, fieldCellCount - 1);
+            var near = fieldCells[z * fieldCellCount + x];
+            float best = -10f;
+            if (near == null) return best;
+            Vector2 q = FieldPlot.Unwarp(p);
+            foreach (int k in near)
+            {
+                var s = fieldShapes[k];
+                float dx = q.x - s.center.x, dz = q.y - s.center.y;
+                float u = dx * s.along.x + dz * s.along.y, v = -dx * s.along.y + dz * s.along.x - s.shear * u;
+                float half = s.halfWidth * (1f + s.taper * u / s.halfLength);
+                best = Mathf.Max(best, Mathf.Min(s.halfLength - Mathf.Abs(u), Mathf.Min((half + v) * s.left, (half - v) * s.right)));
+            }
+            return best;
         }
 
         static float[,,] BuildSplat(TerrainData data)
         {
             var river = MapLayout.RiverField;
             var roads = MapLayout.RoadField;
-            float hw = MapLayout.RiverHalfWidth, roadHw = MapLayout.RoadHalfWidth;
-            var splat = new float[SplatRes, SplatRes, 4];
-            for (int zi = 0; zi < SplatRes; zi++)
+            float hw = MapLayout.RiverHalfWidth;
+            var splat = new float[SplatRes, SplatRes, 8]; // the litter layer waits for the woods (PaintForestFloor)
+            var junctions = MapLayout.Junctions;
+            var tracks = MapLayout.TrackField;
+            IndexFields();
+            // World sectors share the distant painters' paddocks and grass drifts through world coordinates.
+            var detail = MapLayout.Plan.world != null ? MapLayout.DetailPlan : null;
+            Vector2 origin = detail != null ? MapLayout.Plan.world.center : Vector2.zero;
+            const float texel = Size / SplatRes;
+            System.Threading.Tasks.Parallel.For(0, SplatRes, zi =>
             {
                 for (int xi = 0; xi < SplatRes; xi++)
                 {
                     float u = (xi + 0.5f) / SplatRes, v = (zi + 0.5f) / SplatRes;
                     float x = -Size / 2f + u * Size, z = -Size / 2f + v * Size;
-                    float steep = data.GetSteepness(u, v);
+                    float steep = Sample(steepness, new Vector2(x, z));
                     FlatMask(x, z, out bool bare);
 
                     float rock = Mathf.SmoothStep(0f, 1f, (steep - 22f) / 12f);
                     float dirt = bare ? 1f : 0f;
-                    // Dirt roads: two wheel tracks with a strip of grass down the middle.
-                    float dRoad = roads.Distance(x, z);
-                    if (dRoad < roadHw + 1f)
+                    // Shared class widths reserve the same surface as the road ribbon and distant painter.
+                    float dRoad = roads.Query(x, z, out _, out int roadSegment);
+                    float roadHw = MapLayout.RoadWidth(roadSegment);
+                    // Gravel railway beds, and the quarry's dusty floor.
+                    if (MapLayout.RailField.points.Count > 0)
                     {
-                        float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - roadHw + 0.4f) / 1.2f);
-                        if (dRoad < 0.5f) track *= 0.35f;
-                        dirt = Mathf.Max(dirt, track);
+                        float dRail = MapLayout.RailField.Distance(x, z);
+                        if (dRail < MapLayout.RailHalfWidth + 1.5f)
+                            dirt = Mathf.Max(dirt, 1f - Mathf.SmoothStep(0f, 1f, (dRail - MapLayout.RailHalfWidth) / 1.5f));
                     }
-                    // Muddy river banks.
+                    var plan = MapLayout.Plan;
+                    if (plan.Has(SectorFeature.Quarry))
+                    {
+                        float dq = Vector2.Distance(new Vector2(x, z), plan.quarry);
+                        if (dq < plan.quarryRadius)
+                            dirt = Mathf.Max(dirt, 1f - Mathf.SmoothStep(0f, 1f, (dq - plan.quarryRadius * 0.4f) / (plan.quarryRadius * 0.6f)));
+                    }
+                    // River banks: bare earth where the bank is cut back (about a third of it, in reaches), gravel and
+                    // mud on the shelves, and elsewhere grass growing down to the water.
                     float dRiver = river.Distance(x, z);
-                    if (dRiver < hw + 4f) dirt = Mathf.Max(dirt, 0.9f * (1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw - 0.5f) / 3f)));
-                    // A few worn patches.
-                    dirt = Mathf.Max(dirt, 0.7f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.06f + 300f, z * 0.06f) - 0.76f) * 6f));
-                    float variation = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.013f + 70f, z * 0.013f + 20f) * 0.7f
-                        + Mathf.PerlinNoise(x * 0.05f + 9f, z * 0.05f + 4f) * 0.3f - 0.45f) * 4f);
+                    if (dRiver < hw + 4f)
+                    {
+                        float wetEdge = MapLayout.RiverWidthAt(x, z);
+                        float onShelf = dRiver < wetEdge + BankShelf(x, z) + 0.3f ? 1f : 0f;
+                        float cut = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 3f, z * 0.05f + 44f) - 0.52f) * 5f);
+                        float nearWater = 1f - Mathf.SmoothStep(0f, 1f, (dRiver - wetEdge - 0.5f) / 2f);
+                        dirt = Mathf.Max(dirt, 0.9f * nearWater * Mathf.Max(cut, onShelf));
+                        if (onShelf > 0f) rock = Mathf.Max(rock, 0.35f * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.3f + 9f, z * 0.3f) - 0.4f) * 3f));
+                        // A steep bank of soil is soil, not cliff.
+                        rock *= 0.4f + 0.6f * Mathf.SmoothStep(0f, 1f, (dRiver - hw - 2f) / 3f);
+                    }
+                    // Pale stones at the water's edge, in a few patches.
+                    float edgeStones = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRiver - hw - 0.8f) / 1.6f);
+                    if (edgeStones > 0f)
+                        rock = Mathf.Max(rock, edgeStones * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.12f + 11f, z * 0.12f + 5f) * 1.8f - 0.8f));
+                    float wetMud = 0f, gravel = 0f;
+                    if (!(MapLayout.HasDam && MapLayout.NearDam(new Vector2(x, z), 60f)) && watercourse != null && watercourse.Sample(x, z, out float riverDistance,
+                        out _, out float waterWidth, out float margin, out _, out _) && riverDistance < waterWidth + margin + 1f)
+                    {
+                        float edge = riverDistance - waterWidth;
+                        float bank = 1f - WaterAppearance.Smooth((edge - margin + .5f) / 1f);
+                        float wetFringe = WaterAppearance.WetEdge(edge);
+                        // The submerged shelf is pale enough to read through shallow water; mud stays on land.
+                        wetMud = bank * wetFringe * WaterAppearance.Smooth((edge + .3f) / .6f);
+                        gravel = bank * (1f - wetMud) * (.75f + .25f * Mathf.PerlinNoise(x * .14f, z * .14f + 9f));
+                    }
+                    // The lake: a stony shore just above the water, and a rocky bed you see through the shallows.
+                    float lake = MapLayout.LakeDistance(x, z);
+                    if (lake < 3f)
+                    {
+                        float shore = 1f - Mathf.SmoothStep(0f, 1f, (lake - 0.5f) / 2.5f);
+                        if (MapLayout.ReservoirDistance(x, z) <= lake + 0.01f)
+                        {
+                            rock = Mathf.Max(rock, shore * Mathf.SmoothStep(0f, 1f, Mathf.PerlinNoise(x * 0.15f + 50f, z * 0.15f) * 1.6f - 0.3f));
+                            dirt = Mathf.Max(dirt, shore);
+                        }
+                        // A pond's edge is lush grass and reeds, trodden to mud only in patches (where things come to
+                        // drink), not a ring of bare earth; under the water a pale bed of silt and gravel shows
+                        // through the shallows.
+                        else if (lake < 0f)
+                        {
+                            rock = Mathf.Max(rock, 0.45f);
+                            dirt = Mathf.Max(dirt, 0.8f);
+                        }
+                        else dirt = Mathf.Max(dirt, shore * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.18f + 7f, z * 0.18f + 3f) - 0.5f) * 4f));
+                    }
+                    // Draw-down and wet margins follow the signed shore, including islands and world lakes.
+                    if (lake > -7f && lake < 7f)
+                    {
+                        bool reservoir = plan.world != null ? false : MapLayout.ReservoirDistance(x, z) <= lake + .01f;
+                        if (plan.world != null)
+                            foreach (var basin in plan.world.lakes)
+                                if (basin.reservoir && WorldSectorData.ShoreDistance(new Vector2(x, z), basin.shore) <= lake + .01f)
+                                { reservoir = true; break; }
+                        float band = reservoir ? 5f : 2.5f;
+                        float shore = 1f - WaterAppearance.Smooth((lake - band + .5f) / 1f);
+                        // Keep the spillway abutments and their weathering exactly as authored.
+                        float keep = MapLayout.NearDam(new Vector2(x, z), 12f) ? 0f : 1f;
+                        float wetFringe = WaterAppearance.WetEdge(lake) * WaterAppearance.Smooth((lake + .3f) / .6f);
+                        wetMud = Mathf.Max(wetMud, shore * wetFringe * keep);
+                        gravel = Mathf.Max(gravel, shore * (1f - wetFringe) * keep);
+                    }
+                    // Roads, yards and field margins keep ownership of their dry ground.
+                    var here = new Vector2(x, z);
+                    float field = FieldDistance(here);
+                    float shoreKeep = bare || dRoad < roadHw + 1f || field > 0f ? 0f : 1f;
+                    wetMud *= shoreKeep; gravel *= shoreKeep;
+                    // Bare soil under the fields, in case the terrain shows through a crop from far off (Farmland.Lift).
+                    dirt = Mathf.Max(dirt, 0.9f * Mathf.Clamp01((field - 0.2f) / 0.6f));
+                    // Ground cover with a reason, as aerial photos show it. How wet the ground lies decides it: damp
+                    // grass along the river and the lake and down the hollows, drier grass on higher ground, pasture
+                    // between; broad drifts (80 m and 25 m across) only nudge it, so damp ground follows the low lines.
+                    // Under a crop only its soil can show, so the meadow is worked out off the fields alone.
+                    float wet = 0f, rough = 0f;
+                    if (field < 1f)
+                    {
+                        float damp = Mathf.Max(1f - Mathf.SmoothStep(0f, 1f, (dRiver - hw) / 16f), 1f - Mathf.SmoothStep(0f, 1f, lake / 14f));
+                        float hollow = Mathf.SmoothStep(0f, 1f, (Sample(lieHeights, here) - Sample(worldHeights, here) - 0.3f) / 1.6f);
+                        float high = Mathf.SmoothStep(0f, 1f, (Sample(worldHeights, here) - 1.5f * Scale.Distance) / (8f * Scale.Distance));
+                        float drift = Mathf.PerlinNoise(x * 0.0125f + 70f, z * 0.0125f + 20f) * 0.65f + Mathf.PerlinNoise(x * 0.04f + 9f, z * 0.04f + 4f) * 0.35f;
+                        float wetness = 0.5f + 0.75f * hollow - 0.45f * high - 0.3f * (drift - 0.5f);
+                        wetness = Mathf.Max(Mathf.Clamp01(wetness), damp);
+                        // Each paddock's use (grazed, hay or rough grazing with thistles) and the 12-35 m grazing drifts,
+                        // shared with the distant painters (FarDetailData.Paddock, FieldAppearance.Grass).
+                        float paddockAmount = 0f, paddock = detail != null ? detail.Paddock(x + origin.x, z + origin.y, texel, out paddockAmount) : -1f;
+                        FieldAppearance.Grass(x + origin.x, z + origin.y, wetness, paddock, paddockAmount, texel, out wet, out rough, out float soil);
+                        dirt = Mathf.Max(dirt, soil);
+                    }
+                    // The meadow runs right to the crop, with no uncut frame round each field: the strip between two
+                    // fields is the same varied grass, and each edge's own margin lies inside the field (FieldMargins).
+                    // Bake mown shoulders and the two narrow ruts after the natural grass mix.
+                    RoadLayout.Splat(x, z, Size / SplatRes, ref dirt, ref wet, ref rough);
 
                     // Each layer covers the ones before it.
-                    float[] w = new float[4];
-                    w[3] = rock;
-                    w[2] = dirt * (1f - rock);
-                    w[1] = variation * (1f - rock) * (1f - dirt);
-                    w[0] = (1f - rock) * (1f - dirt) * (1f - variation);
-                    float sum = w[0] + w[1] + w[2] + w[3];
-                    for (int k = 0; k < 4; k++) splat[zi, xi, k] = w[k] / sum;
+                    float w3 = rock, w2 = dirt * (1f - rock), w1 = wet * (1f - rock) * (1f - dirt);
+                    float w4 = rough * (1f - rock) * (1f - dirt) * (1f - wet);
+                    float w0 = (1f - rock) * (1f - dirt) * (1f - wet) * (1f - rough);
+                    float sum = w0 + w1 + w2 + w3 + w4;
+                    splat[zi, xi, 0] = w0 / sum;
+                    splat[zi, xi, 1] = w1 / sum;
+                    splat[zi, xi, 2] = w2 / sum;
+                    splat[zi, xi, 3] = w3 / sum;
+                    splat[zi, xi, 4] = w4 / sum;
+                    float shoreCover = Mathf.Clamp01(wetMud + gravel);
+                    for (int layer = 0; layer < 6; layer++) splat[zi, xi, layer] *= 1f - shoreCover;
+                    float shoreSum = Mathf.Max(.0001f, wetMud + gravel);
+                    splat[zi, xi, 6] = shoreCover * wetMud / shoreSum;
+                    splat[zi, xi, 7] = shoreCover * gravel / shoreSum;
                 }
-            }
+            });
             return splat;
         }
 

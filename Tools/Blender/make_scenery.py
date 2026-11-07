@@ -390,14 +390,8 @@ R = [None]  # the model being built, for crown()
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
+    # The trees (Scenery_Tree, _Tree_B, _Birch, _Poplar, _Spruce, _Pine, _Pine_B) come from make_trees.py.
     builds = [
-        ("Scenery_Pine", lambda: build_pine("Scenery_Pine", 1), 16.0, 5.0),
-        ("Scenery_Pine_B", lambda: build_pine("Scenery_Pine_B", 7), 16.0, 5.0),
-        ("Scenery_Spruce", lambda: build_spruce("Scenery_Spruce", 3), 16.0, 4.5),
-        ("Scenery_Tree", lambda: build_oak("Scenery_Tree", 4), 16.0, 4.0),
-        ("Scenery_Tree_B", lambda: build_oak("Scenery_Tree_B", 9), 16.0, 4.0),
-        ("Scenery_Birch", lambda: build_birch("Scenery_Birch", 5), 14.0, 4.0),
-        ("Scenery_Poplar", lambda: build_poplar("Scenery_Poplar", 6), 17.0, 5.5),
         ("Scenery_Bush", lambda: build_bush("Scenery_Bush", 8), 6.0, 0.8),
         ("Scenery_HayBale", build_hay_bale, 4.5, 0.6),
         ("Scenery_House_A", build_cottage, 16.0, 2.5),

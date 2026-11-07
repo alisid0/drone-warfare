@@ -1,0 +1,97 @@
+--- a/Assets/DroneSandbox/Scripts/Ground.cs
++++ b/Assets/DroneSandbox/Scripts/Ground.cs
+@@ -939,42 +939,9 @@
+ 
+                     float rock = Mathf.SmoothStep(0f, 1f, (steep - 22f) / 12f);
+                     float dirt = bare ? 1f : 0f;
+-                    // Dirt roads: two wheel tracks with a strip of grass down the middle, wider and narrower along the
+-                    // way (3 to 4 m), with ragged edges where wheels have strayed onto the verge, and a wider patch of
+-                    // bare ground where roads meet.
++                    // Shared class widths reserve the same surface as the road ribbon and distant painter.
+                     float dRoad = roads.Query(x, z, out _, out int roadSegment);
+                     float roadHw = MapLayout.RoadWidth(roadSegment);
+-                    float laneHw = roadHw * (0.75f + 0.3f * Mathf.PerlinNoise(x * 0.025f + 5f, z * 0.025f + 90f))
+-                                 + 0.5f * (Mathf.PerlinNoise(x * 0.35f + 17f, z * 0.35f + 4f) - 0.5f);
+-                    if (dRoad < laneHw + 2.5f)
+-                    {
+-                        // The ruts come and go (deep and bare in some stretches, grassed over in others), and the
+-                        // shoulder is churned to mud in patches every couple of dozen metres.
+-                        float track = 1f - Mathf.SmoothStep(0f, 1f, (dRoad - laneHw + 0.4f) / 1.2f);
+-                        track *= 0.72f + 0.28f * Mathf.PerlinNoise(x * 0.1f + 70f, z * 0.1f + 12f);
+-                        if (dRoad < 0.5f) track *= 0.35f;
+-                        float shoulder = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRoad - laneHw - 0.6f) / 0.9f);
+-                        float mud = Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.07f + 33f, z * 0.07f + 81f) - 0.6f) * 6f);
+-                        dirt = Mathf.Max(dirt, Mathf.Max(track, 0.8f * shoulder * mud));
+-                    }
+-                    foreach (var j in junctions)
+-                    {
+-                        if (dRoad > 11f) break; // junctions are on the roads
+-                        float dj = Vector2.Distance(new Vector2(x, z), j);
+-                        if (dj > 11f) continue;
+-                        float apron = 6.5f + 3f * (Mathf.PerlinNoise(x * 0.2f + 8f, z * 0.2f + 61f) - 0.5f);
+-                        dirt = Mathf.Max(dirt, 0.85f * (1f - Mathf.SmoothStep(0f, 1f, (dj - apron + 1.5f) / 2.5f)));
+-                    }
+-                    // Wheel tracks out to the emplacements: two ruts 1.6 m apart, worn bare in stretches.
+-                    if (tracks.points.Count > 0)
+-                    {
+-                        float dTrack = tracks.Distance(x, z);
+-                        if (dTrack < 1.6f)
+-                        {
+-                            float rut = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dTrack - 0.8f) / 0.45f);
+-                            dirt = Mathf.Max(dirt, 0.75f * rut * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.15f + 21f, z * 0.15f + 9f) - 0.25f) * 3f));
+-                        }
+-                    }
+                     // Gravel railway beds, and the quarry's dusty floor.
+                     if (MapLayout.RailField.points.Count > 0)
+                     {
+@@ -1078,9 +1045,8 @@
+                     // An uncut margin round each field, where the plough doesn't reach: a paler line that separates
+                     // neighbouring fields from the air.
+                     if (MapLayout.InField(here, 2.2f) && !MapLayout.InField(here, 0f)) rough = Mathf.Max(rough, 0.85f);
+-                    // And along the roads, in stretches: long uncut grass a couple of metres wide each side.
+-                    float verge = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(dRoad - laneHw - 1.6f) / 1.4f);
+-                    if (verge > 0f) rough = Mathf.Max(rough, 0.75f * verge * Mathf.SmoothStep(0f, 1f, (Mathf.PerlinNoise(x * 0.05f + 40f, z * 0.05f + 2f) - 0.35f) * 4f));
++                    // Bake mown shoulders and the two narrow ruts after the natural grass mix.
++                    RoadLayout.Splat(x, z, Size / SplatRes, ref dirt, ref wet, ref rough);
+ 
+                     // Each layer covers the ones before it.
+                     float w3 = rock, w2 = dirt * (1f - rock), w1 = wet * (1f - rock) * (1f - dirt);
+--- a/Assets/DroneSandbox/Scripts/Farmland.cs
++++ b/Assets/DroneSandbox/Scripts/Farmland.cs
+@@ -50,7 +50,7 @@
+             root.SetParent(parent, false);
+             foreach (var plot in MapLayout.Fields) BuildField(plot, root, rng);
+             int useRenderers = FieldMargins.Build(root);
+-            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count - useRenderers);
++            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count - useRenderers - RoadSurface.Renderers);
+             int rows = Mathf.Min(480, remaining / 8);
+             remaining -= rows;
+             // Pay for every boundary's inexpensive silhouette first; fences and mature trees share what remains.
+@@ -69,7 +69,7 @@
+                 int allowance = perField;
+                 if (plot.crop == Crop.MownHay) PlaceBales(plot, root, rng, ref allowance);
+             }
+-            PoplarRows(root, rng, ref rows);
++            Roadside.Build(root, ref rows); // same avenue allowance, shared FBX instances
+         }
+ 
+         // ---- Fields ----
+@@ -288,6 +288,8 @@
+             Vector2 opening = edge.hasGate ? edge.gate : FieldAppearance.Gate(edge.a, edge.b);
+             float gate = Vector2.Dot(opening-edge.a, edge.b-edge.a) / Mathf.Max(.01f, length*length);
+             if (Mathf.Abs(t - gate) * length < 2f + extra) return true;
++            foreach (var entry in RoadSurface.Entrances)
++                if ((edge.Point(t) - entry.gate).sqrMagnitude < (2f + extra) * (2f + extra)) return true;
+             Vector2 p = edge.Point(t);
+             return MapLayout.TrackField.Distance(p.x, p.y) < 2.2f + extra;
+         }
+--- a/Assets/DroneSandbox/Scripts/Atmosphere.cs
++++ b/Assets/DroneSandbox/Scripts/Atmosphere.cs
+@@ -293,6 +293,7 @@
+             Recon.WeatherFactor = weather == Weather.Fog ? 0.6f : weather == Weather.Rain ? 0.8f : weather == Weather.Overcast ? 0.95f : 1f;
+             SunScale = weather == Weather.Overcast ? 0.35f : weather == Weather.Rain ? 0.2f : weather == Weather.Fog ? 0.45f : 1f;
+             Rain(weather == Weather.Rain);
++            RoadSurface.SetRain(weather == Weather.Rain);
+             if (weather == Weather.Clear) return;
+             var p = weatherVolume.sharedProfile;
+             p.TryGet(out VolumetricClouds clouds);

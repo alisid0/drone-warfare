@@ -19,14 +19,24 @@ namespace DroneSandbox
         SandboxHud hud;
         Vector3 focus;
         float yaw = 45f;
-        float distance = 55f;
+        float distance = 55f * Scale.Camera;
+        float zoomTarget = 55f * Scale.Camera;   // the mouse wheel sets this; the camera eases to it
+        // How close and how far the wheel takes the camera: right down to a drone, and out to the old map's widest
+        // view brought over (Scale.Camera), at the narrower lens.
+        public const float MinZoom = 25f;
+        public static readonly float MaxZoom = 110f * Scale.Camera;
+        public const float WorldZoom = 12000f; // how far the view pulls back in the big world, to see a good part of it
         bool orbiting;
+        Drone following;          // double-clicked: the camera keeps it in the middle until you pan
+        Drone lastClicked;
+        float lastClickTime;
 
         public void Init(SandboxGame sandbox, SandboxHud overlay, Camera camera, Vector3 startFocus)
         {
             game = sandbox;
             hud = overlay;
             Cam = camera;
+            Cam.fieldOfView = Scale.CameraFov;
             focus = startFocus;
             ApplyCamera();
         }
@@ -35,15 +45,16 @@ namespace DroneSandbox
         public void Orbit(bool on)
         {
             orbiting = on;
-            if (on) LookAt(new Vector3(-10f, 0f, -10f), 105f, yaw);
+            if (on) LookAt(new Vector3(-10f, 0f, -10f) * Scale.Distance, 105f * Scale.Camera, yaw);
         }
 
         // Points the camera at a spot on the map (used by missions and the auto-test).
         public void LookAt(Vector3 point, float zoomDistance, float yawDegrees)
         {
             focus = Ground.OnGround(point);
-            distance = zoomDistance;
+            distance = zoomTarget = zoomDistance;
             yaw = yawDegrees;
+            following = null;
             ApplyCamera();
         }
 
@@ -51,6 +62,21 @@ namespace DroneSandbox
         {
             if (Cam == null) return;
             selected.RemoveAll(d => d == null || !d.IsAlive);
+            // The atlas owns input before camera movement, selection or orders can see the same press.
+            hud.UpdateWorldMapIntel();
+            if (hud.HandleWorldMapInput())
+            {
+                IsDragging = false;
+                HoveredEnemy = null;
+                if (DroneFeed.Instance != null) DroneFeed.Instance.Inspecting = false;
+                return;
+            }
+            if (PhotoMode.Active)
+            {
+                IsDragging = false;
+                HoveredEnemy = null;
+                return; // the photo camera has the controls
+            }
             if (game.UiBlocking)
             {
                 // Menus and mission panels have the mouse; only the menu's slow orbit moves the camera.
@@ -77,29 +103,66 @@ namespace DroneSandbox
             if (GameInput.Held(GameKey.Down)) pan.z -= 1f;
             if (GameInput.Held(GameKey.Right)) pan.x += 1f;
             if (GameInput.Held(GameKey.Left)) pan.x -= 1f;
+            if (pan != Vector3.zero) following = null;
+            if (following != null && following.IsAlive)
+                focus = Vector3.Lerp(focus, following.transform.position, 1f - Mathf.Exp(-6f * dt));
             focus += Quaternion.Euler(0f, yaw, 0f) * Vector3.ClampMagnitude(pan, 1f) * distance * 0.9f * dt;
-            float limit = SandboxGame.MapHalfSize;
-            focus.x = Mathf.Clamp(focus.x, -limit, limit);
-            focus.z = Mathf.Clamp(focus.z, -limit, limit);
+            if (FarTerrain.Active)
+            {
+                // In the big world the view can go anywhere in its 56 km.
+                Vector2 o = FarTerrain.Origin;
+                focus.x = Mathf.Clamp(focus.x, -WorldPlan.Half - o.x, WorldPlan.Half - o.x);
+                focus.z = Mathf.Clamp(focus.z, -WorldPlan.Half - o.y, WorldPlan.Half - o.y);
+            }
+            else
+            {
+                float limit = SandboxGame.MapHalfSize;
+                focus.x = Mathf.Clamp(focus.x, -limit, limit);
+                focus.z = Mathf.Clamp(focus.z, -limit, limit);
+            }
             focus.y = Mathf.Lerp(focus.y, Ground.HeightAt(focus), 1f - Mathf.Exp(-5f * dt)); // glide over hills
 
             if (GameInput.Held(GameKey.RotateLeft)) yaw += 90f * dt;
             if (GameInput.Held(GameKey.RotateRight)) yaw -= 90f * dt;
 
             float scroll = GameInput.Scroll;
-            if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
-                distance = Mathf.Clamp(distance * (scroll > 0f ? 0.88f : 1.12f), 15f, 110f);
+            var feed = DroneFeed.Instance;
+            bool inspecting = feed != null && feed.Visible && feed.Source != null && GameInput.Held(GameKey.Inspect);
+            if (feed != null) feed.Inspecting = inspecting;
+            if (inspecting && scroll != 0f) feed.Zoom = Mathf.Clamp(feed.Zoom * (scroll > 0f ? 1.2f : 1f / 1.2f), 1f, 3f); // the wheel zooms the drone's camera
+            else if (scroll != 0f && !hud.IsPointerOverHud(GameInput.MousePosition))
+                zoomTarget = Mathf.Clamp(zoomTarget * (scroll > 0f ? 0.85f : 1.15f), MinZoom, FarTerrain.Active ? WorldZoom : MaxZoom);
+            distance = Mathf.Lerp(distance, zoomTarget, 1f - Mathf.Exp(-dt / 0.15f)); // eased over about 0.15 s
 
             ApplyCamera();
         }
 
+        // Puts the camera back where the RTS view had it (after photo mode).
+        public void Restore() => ApplyCamera();
+
         void ApplyCamera()
         {
             // Look more steeply down when zoomed out, flatter when zoomed in.
-            float pitch = Mathf.Lerp(42f, 64f, Mathf.InverseLerp(15f, 110f, distance));
+            float pitch = Mathf.Lerp(42f, 64f, Mathf.InverseLerp(15f * Scale.Camera, MaxZoom, distance));
+            if (distance > MaxZoom) pitch = Mathf.Lerp(64f, 72f, Mathf.InverseLerp(MaxZoom, WorldZoom, distance)); // the wide view looks further down
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Cam.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             Cam.transform.rotation = rotation;
+            // A big kill nudges the view a few pixels for a moment.
+            float shake = Mathf.Clamp01((impulseUntil - Time.unscaledTime) / 0.13f) * impulse;
+            if (shake > 0f)
+                Cam.transform.position += (Cam.transform.right * Mathf.Sin(Time.unscaledTime * 90f) + Cam.transform.up * Mathf.Cos(Time.unscaledTime * 70f))
+                                          * shake * distance * 0.0012f;
+        }
+
+        float impulse, impulseUntil;
+
+        // A short nudge of the view (strength about 1 for a tank, more for an ammunition dump).
+        public void Impulse(float strength)
+        {
+            if (!Settings.Shake) return;
+            impulse = Mathf.Max(strength, Time.unscaledTime < impulseUntil ? impulse : 0f);
+            impulseUntil = Time.unscaledTime + 0.13f;
         }
 
         // ---- Keyboard ----
@@ -114,10 +177,36 @@ namespace DroneSandbox
             if (GameInput.Pressed(GameKey.Deselect)) selected.Clear();
             if (GameInput.Pressed(GameKey.Stop))
                 foreach (var d in selected) d.Stop();
-            if (GameInput.Pressed(GameKey.Help)) hud.showHelp = !hud.showHelp;
+            if (GameInput.Pressed(GameKey.Help)) hud.ToggleHelp();
+            if (GameInput.Pressed(GameKey.Pause)) game.TogglePause();
+            if (GameInput.Pressed(GameKey.TimeForward)) game.ChangeSpeed(1);
+            if (GameInput.Pressed(GameKey.TimeBack)) game.ChangeSpeed(-1);
+            if (GameInput.Pressed(GameKey.Telemetry)) hud.ToggleTelemetry();
+            if (GameInput.Pressed(GameKey.Sync)) game.CoordinateStrike(selected);
+            // C: look at the fight - halfway between the first selected drone and what it's attacking.
+            if (GameInput.Pressed(GameKey.Combat) && selected.Count > 0 && selected[0] != null)
+            {
+                var d = selected[0];
+                Vector3 at = d.AttackTarget != null && d.AttackTarget.IsAlive ? (d.transform.position + d.AttackTarget.transform.position) / 2f : d.transform.position;
+                LookAt(at, distance, yaw);
+            }
+            if (GameInput.Pressed(GameKey.Feed) && DroneFeed.Instance != null) DroneFeed.Instance.Visible = !DroneFeed.Instance.Visible;
+            if (GameInput.Pressed(GameKey.Recall))
+            {
+                game.Recall(selected);
+                Sound.Ui("move");
+            }
+            if (GameInput.Pressed(GameKey.Focus) && selected.Count > 0)
+            {
+                Vector3 middle = Vector3.zero;
+                foreach (var d in selected) middle += d.transform.position;
+                LookAt(middle / selected.Count, distance, yaw);
+            }
             if (GameInput.Pressed(GameKey.Launch1)) game.SpawnDrone(DroneType.Scout);
             if (GameInput.Pressed(GameKey.Launch2)) game.SpawnDrone(DroneType.Strike);
             if (GameInput.Pressed(GameKey.Launch3)) game.SpawnDrone(DroneType.Kamikaze);
+            if (GameInput.Pressed(GameKey.Launch4) && game.BomberAvailable) game.SpawnDrone(DroneType.Bomber);
+            if (GameInput.Pressed(GameKey.Launch5) && game.ReconAvailable) game.SpawnDrone(DroneType.Recon);
             if (GameInput.Pressed(GameKey.Thermal)) game.ToggleThermal();
             if (GameInput.Pressed(GameKey.SkipTime) && game.Mode == GameMode.Sandbox && DayNight.Instance != null)
                 DayNight.Instance.SetTime(DayNight.Instance.hour + 2f, DayNight.Instance.hoursPerMinute);
@@ -129,7 +218,28 @@ namespace DroneSandbox
         {
             Vector2 mouse = GameInput.MousePosition;
             bool overHud = hud.IsPointerOverHud(mouse);
-            HoveredEnemy = overHud ? null : PickEnemy(mouse);
+            // Over the drone feed, what's under the cursor in the drone's picture counts as hovered.
+            HoveredEnemy = overHud ? hud.FeedPick(mouse) : PickEnemy(mouse);
+            // A bird in the feed (Mimic): a left click tracks it, a right click shadows it or, once it's confirmed as
+            // a machine, fires on it.
+            Bird bird = overHud && HoveredEnemy == null ? hud.FeedPickBird(mouse) : null;
+            if (bird != null && GameInput.LeftDown)
+            {
+                Mimic.Track(bird);
+                return;
+            }
+            if (bird != null && GameInput.RightDown && selected.Count > 0)
+            {
+                Mimic.Act(bird, selected[0]);
+                return;
+            }
+            // A left click on something in the feed swings the map camera onto it.
+            if (GameInput.LeftDown && overHud && HoveredEnemy != null)
+            {
+                LookAt(HoveredEnemy.transform.position, distance, yaw);
+                Effects.Marker(HoveredEnemy.transform.position, Art.EnemyRed);
+                Sound.Ui("click");
+            }
 
             if (GameInput.LeftDown && !overHud)
             {
@@ -141,16 +251,26 @@ namespace DroneSandbox
             {
                 IsDragging = false;
                 bool additive = GameInput.Held(GameKey.Shift);
+                int before = selected.Count;
                 if ((mouse - DragStart).magnitude < ClickPixels) ClickSelect(mouse, additive);
                 else BoxSelect(ScreenRect(DragStart, mouse), additive);
+                if (selected.Count > 0 && selected.Count != before) Sound.Ui("select");
             }
 
-            if (GameInput.RightDown && !overHud && selected.Count > 0) IssueOrder(mouse);
+            if (GameInput.RightDown && (!overHud || HoveredEnemy != null) && selected.Count > 0) IssueOrder(mouse); // the feed too
         }
 
         void ClickSelect(Vector2 mouse, bool additive)
         {
             Drone hit = PickDrone(mouse);
+            // A double-click on a drone follows it with the camera.
+            if (hit != null && hit == lastClicked && Time.unscaledTime - lastClickTime < 0.35f)
+            {
+                following = hit;
+                game.ShowMessage("Following " + hit.unitName + " (pan to stop)");
+            }
+            lastClicked = hit;
+            lastClickTime = Time.unscaledTime;
             if (!additive) selected.Clear();
             if (hit == null) return;
             if (additive && selected.Contains(hit)) selected.Remove(hit);
@@ -167,14 +287,28 @@ namespace DroneSandbox
 
         void IssueOrder(Vector2 mouse)
         {
+            if (HoveredEnemy != null && !HoveredEnemy.Observed)
+            {
+                // Something we can't see right now: fly to where it was, ready to engage.
+                Vector3 last = Ground.OnGround(HoveredEnemy.MarkerPosition);
+                foreach (var d in selected) d.MoveTo(last, GameInput.Held(GameKey.Shift), true);
+                hud.Acknowledge(last, true);
+                Sound.Ui("attack");
+                return;
+            }
             if (HoveredEnemy != null)
             {
                 foreach (var d in selected) d.Attack(HoveredEnemy);
                 Effects.Marker(HoveredEnemy.transform.position, Art.EnemyRed);
+                hud.Acknowledge(HoveredEnemy.AimPoint, true);
+                Sound.Ui("attack");
                 return;
             }
             if (!GroundPoint(mouse, out Vector3 point)) return;
-            Effects.Marker(point, new Color(0.35f, 1f, 0.6f));
+            bool queue = GameInput.Held(GameKey.Shift), attackMove = GameInput.Held(GameKey.Ctrl);
+            Effects.Marker(point, attackMove ? new Color(1f, 0.76f, 0.35f) : new Color(0.35f, 1f, 0.6f));
+            hud.Acknowledge(point, false);
+            Sound.Ui(attackMove ? "attack" : "move");
 
             // Spread the group in a loose grid around the clicked point, lined up with the camera.
             int count = selected.Count;
@@ -186,7 +320,7 @@ namespace DroneSandbox
             {
                 int row = i / columns, column = i % columns;
                 var offset = new Vector3((column - (columns - 1) * 0.5f) * spacing, 0f, -(row - (rows - 1) * 0.5f) * spacing);
-                selected[i].MoveTo(point + facing * offset);
+                selected[i].MoveTo(point + facing * offset, queue, attackMove);
             }
         }
 
@@ -215,7 +349,7 @@ namespace DroneSandbox
             float bestPixels = 36f * hud.Scale;
             foreach (var e in game.enemies)
             {
-                if (e.Hidden || !ToScreen(e.AimPoint, out Vector2 p)) continue;
+                if (!e.Known || !ToScreen(e.MarkerPosition, out Vector2 p)) continue;
                 float pixels = Vector2.Distance(p, mouse);
                 if (pixels < bestPixels)
                 {

@@ -1,0 +1,229 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+using Random = System.Random;
+
+namespace DroneSandbox
+{
+    // Projects the immutable village plots into the playable crop, and gives legacy Operations the same plot data.
+    internal static class VillageLayout
+    {
+        // Shared roads keep their exact world centreline, including rural stretches and sector clipping seams.
+        public static void HoldFrontages(List<List<Vector2>> lines)
+        {
+            var plan = MapLayout.Plan;
+            if (plan.world == null || MapLayout.DetailPlan == null) return;
+            foreach (var road in plan.world.roads)
+            {
+                // PlaceMission inserts its access route at index zero; ownership is by the shared source array.
+                int k = plan.roads.IndexOf(road.points);
+                if (k < 0 || k >= lines.Count) continue;
+                var source = road.points;
+                var fixedLine = new List<Vector2>();
+                for (int i = 1; i < source.Length; i++)
+                {
+                    int steps = Math.Max(1, Mathf.CeilToInt(Vector2.Distance(source[i - 1], source[i]) / 2f));
+                    for (int j = 0; j < steps; j++) fixedLine.Add(Vector2.Lerp(source[i - 1], source[i], j / (float)steps));
+                }
+                if (source.Length > 0) fixedLine.Add(source[source.Length - 1]);
+                lines[k] = fixedLine;
+            }
+        }
+
+        // Match the street's actual owner after mission access is inserted, keeping verges and gates consistent.
+        public static float RoadWidth(int index)
+        {
+            var plan = MapLayout.Plan;
+            if (index < plan.roads.Count)
+                foreach (var road in plan.world.roads)
+                    if (ReferenceEquals(plan.roads[index], road.points))
+                        return RoadAppearance.HalfWidth(road.kind);
+            return RoadAppearance.HalfWidth(RoadLayout.Kind(index));
+        }
+
+        // The old town recipe creates a second unconnected town on reserved farmland. Replace only that scenery;
+        // mission pads, permanent works, railways and their sites keep their original ownership.
+        public static void PrepareRecipe(SectorPlan p)
+        {
+            if (p.world == null || !p.Type.town || p.world.features.Count != 0)
+                return;
+            for (int i = p.sites.Count - 1; i >= 0; i--)
+                foreach (var area in p.reservedFeatures)
+                    if (area.Contains(p.sites[i].position, 30f))
+                    {
+                        p.sites.RemoveAt(i);
+                        break;
+                    }
+
+            p.reservedFeatures.Clear();
+            p.featureSurfaces.Clear();
+            p.featureFences.Clear();
+            p.featureFlats.Clear();
+            p.featureStreets.Clear();
+        }
+
+        // Street and plot positions are translated once, preserving their world seed and frontages.
+        public static void Project(VillagePlan source)
+        {
+            var plan = MapLayout.Plan;
+            Vector2 origin = plan.world.center;
+            foreach (var original in source.plots)
+            {
+                var p = original;
+                p.front -= origin;
+                Vector2 c = p.front + p.outward * (p.depth * .5f);
+                if (Math.Abs(c.x) > 950f || Math.Abs(c.y) > 950f)
+                    continue;
+                int owner = -1;
+                float best = float.MaxValue;
+                for (int i = 0; i < plan.villages.Count; i++)
+                {
+                    float d = (plan.villages[i] - p.front).sqrMagnitude;
+                    if (d < best)
+                    {
+                        best = d;
+                        owner = i;
+                    }
+                }
+
+                // Ribbon frontage can lie beyond the cover-map town blob, but still owns a real sector root.
+                if (original.town && (owner < 0 || best > 300f * 300f))
+                {
+                    owner = plan.villages.Count;
+                    plan.villages.Add(p.front); plan.villageNames.Add(WorldPlan.Settlements[original.owner].name + " edge");
+                    plan.farmsteads.Add(false); best = 0f;
+                }
+                if (owner < 0 || best > 450f * 450f)
+                    continue;
+                p.owner = owner;
+                MapLayout.VillagePlots.Add(p);
+                if (p.landUse >= 6 || p.backland || p.estate) continue; // fringe land, backland and estates front no street of their own
+                var line = new List<Vector2>
+                {
+                    p.front - p.outward * p.StreetOffset - p.along * (p.frontage * .5f),
+                    p.front - p.outward * p.StreetOffset + p.along * (p.frontage * .5f)
+                };
+                MapLayout.VillageStreets.Add(line);
+                MapLayout.VillageOfStreet.Add(owner);
+            }
+
+            // A street's consecutive segments make one road line, so a town's streets stay whole lines with their bends.
+            var street = new List<Vector2>();
+            int route = int.MinValue;
+            foreach (var lane in source.lanes)
+            {
+                Vector2 a = new Vector2(lane.ax, lane.az) - origin, b = new Vector2(lane.bx, lane.bz) - origin;
+                Vector2 start = a, end = b;
+                bool kept = ClipLine(ref a, ref b);
+                bool joins = kept && lane.route == route && street.Count > 0 && (street[street.Count - 1] - a).sqrMagnitude < .01f && (start - a).sqrMagnitude < .01f;
+                if (!joins && street.Count > 1) MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f));
+                if (!joins) street.Clear();
+                route = lane.route;
+                if (!kept) { street.Clear(); continue; }
+                if (street.Count == 0) street.Add(a);
+                street.Add(b);
+                if ((end - b).sqrMagnitude > .01f) { MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f)); street.Clear(); }
+            }
+            if (street.Count > 1) MapLayout.RoadLines.Add(MapLayout.Smooth(street.ToArray(), 2f));
+            foreach (var tree in source.trees)
+            {
+                Vector2 at = tree.at - origin;
+                if (Math.Abs(at.x) < 950f && Math.Abs(at.y) < 950f) MapLayout.VillageTrees.Add(at);
+            }
+        }
+
+        // Long town streets are cropped to the same terrain window as their frontage, never discarded by endpoints.
+        static bool ClipLine(ref Vector2 a, ref Vector2 b)
+        {
+            float low = 0f, high = 1f;
+            Vector2 d = b - a;
+            for (int axis = 0; axis < 2; axis++)
+            {
+                float p = axis == 0 ? a.x : a.y, delta = axis == 0 ? d.x : d.y;
+                if (Math.Abs(delta) < .001f)
+                {
+                    if (Math.Abs(p) > 1050f)
+                        return false;
+                    continue;
+                }
+
+                float x = (-1050f - p) / delta, y = (1050f - p) / delta;
+                low = Math.Max(low, Math.Min(x, y));
+                high = Math.Min(high, Math.Max(x, y));
+            }
+
+            if (low >= high)
+                return false;
+            b = a + d * high;
+            a += d * low;
+            return true;
+        }
+
+        // Existing Operation streets keep their connectivity; only their irregular property divisions are new.
+        public static void Legacy()
+        {
+            for (int s = 0; s < MapLayout.VillageStreets.Count; s++)
+            {
+                int owner = MapLayout.VillageOfStreet[s];
+                if (MapLayout.Plan.farmsteads[owner])
+                    continue;
+                var line = MapLayout.VillageStreets[s];
+                float streetLength = 0f;
+                var route = new List<FarDetailData.Segment>();
+                for (int i = 1; i < line.Count; i++)
+                {
+                    route.Add(new FarDetailData.Segment { ax=line[i-1].x,az=line[i-1].y,bx=line[i].x,bz=line[i].y,
+                        walked=streetLength,widthA=MapLayout.RoadHalfWidth,widthB=MapLayout.RoadHalfWidth });
+                    streetLength += Vector2.Distance(line[i - 1], line[i]);
+                }
+                var rng = new Random(MapLayout.Plan.fieldSeed * 31 + s * 977 + owner);
+                foreach (float side in new[]
+                {
+                    -1f,
+                    1f
+                }
+
+                )
+                {
+                    float walked = 0f, next = 8f;
+                    for (int i = 1; i < line.Count; i++)
+                    {
+                        Vector2 d = line[i] - line[i - 1];
+                        float length = d.magnitude;
+                        if (length < .01f)
+                            continue;
+                        while (next < walked + length)
+                        {
+                            bool core = next > streetLength * .15f && next < streetLength * .85f;
+                            float width = core ? 12f + (float)rng.NextDouble() * 2.2f : 22f + (float)rng.NextDouble() * 8f;
+                            float depth = core ? 27f + (float)rng.NextDouble() * 10f : 38f + (float)rng.NextDouble() * 18f;
+                            if (!VillagePlan.OnRoute(route,next+width*.5f,out var at,out var along,out _)) { next+=width; continue; }
+                            Vector2 outward = new Vector2(-along.y, along.x) * side;
+                            var p = new VillagePlot
+                            {
+                                front = at + outward * (MapLayout.RoadHalfWidth + 1.8f),
+                                along = along,
+                                outward = outward,
+                                frontage = width,
+                                depth = depth,
+                                setback = core ? 5f : 12f,
+                                core = core,
+                                old = core,
+                                roadWidth = MapLayout.RoadHalfWidth,
+                                owner = owner,
+                                style = rng.Next(4),
+                                model = core ? "Scenery_House_D" : rng.NextDouble() < .65 ? "Scenery_House_A" : "Scenery_House_B"
+                            };
+                            MapLayout.VillagePlots.Add(p);
+                            next += width;
+                        }
+
+                        walked += length;
+                    }
+                }
+            }
+            for (int owner = 0; owner < MapLayout.Plan.villages.Count; owner++)
+                VillageUse.Assign(MapLayout.VillagePlots, owner, MapLayout.Plan.fieldSeed, MapLayout.Plan.villages[owner]);
+        }
+    }
+}

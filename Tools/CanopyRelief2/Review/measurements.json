@@ -1,0 +1,151 @@
+{
+  "view400": {
+    "canopy_pixels": 1768634,
+    "crown_branch_share": 0.853,
+    "footprint_p5_p50_p95": [
+      0.24,
+      0.36,
+      0.7
+    ],
+    "before": {
+      "mean_srgb": [
+        88.2,
+        106.1,
+        71.5
+      ],
+      "crown_contrast_levels": 8.34,
+      "stand_highlight_p90_minus_median": 16.12,
+      "stand_highlight_half_range": 4.3,
+      "stands": 95,
+      "half_pixel_jitter_rms_by_footprint": {
+        "0-1 m": 1.92,
+        "1-2 m": 3.05
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "0-1 m": 0.38,
+        "1-2 m": 0.6
+      }
+    },
+    "after": {
+      "mean_srgb": [
+        87.9,
+        105.8,
+        71.4
+      ],
+      "crown_contrast_levels": 11.89,
+      "stand_highlight_p90_minus_median": 26.51,
+      "stand_highlight_half_range": 5.96,
+      "stands": 95,
+      "half_pixel_jitter_rms_by_footprint": {
+        "0-1 m": 3.23,
+        "1-2 m": 4.07
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "0-1 m": 0.96,
+        "1-2 m": 1.21
+      }
+    }
+  },
+  "view1000": {
+    "canopy_pixels": 1733512,
+    "crown_branch_share": 0.836,
+    "footprint_p5_p50_p95": [
+      0.64,
+      0.86,
+      1.29
+    ],
+    "before": {
+      "mean_srgb": [
+        90.0,
+        111.2,
+        81.5
+      ],
+      "crown_contrast_levels": 9.18,
+      "stand_highlight_p90_minus_median": 13.85,
+      "stand_highlight_half_range": 5.04,
+      "stands": 418,
+      "half_pixel_jitter_rms_by_footprint": {
+        "0-1 m": 2.45,
+        "1-2 m": 2.78
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "0-1 m": 0.41,
+        "1-2 m": 0.51
+      }
+    },
+    "after": {
+      "mean_srgb": [
+        90.0,
+        111.3,
+        81.6
+      ],
+      "crown_contrast_levels": 12.88,
+      "stand_highlight_p90_minus_median": 21.53,
+      "stand_highlight_half_range": 5.56,
+      "stands": 418,
+      "half_pixel_jitter_rms_by_footprint": {
+        "0-1 m": 4.15,
+        "1-2 m": 4.08
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "0-1 m": 1.24,
+        "1-2 m": 1.18
+      }
+    }
+  },
+  "view2500": {
+    "canopy_pixels": 1781696,
+    "crown_branch_share": 0.856,
+    "footprint_p5_p50_p95": [
+      1.64,
+      2.16,
+      3.1
+    ],
+    "before": {
+      "mean_srgb": [
+        86.3,
+        114.9,
+        95.5
+      ],
+      "crown_contrast_levels": 5.68,
+      "stand_highlight_p90_minus_median": 8.55,
+      "stand_highlight_half_range": 3.87,
+      "stands": 2215,
+      "half_pixel_jitter_rms_by_footprint": {
+        "1-2 m": 2.65,
+        "2-3 m": 2.73,
+        "3-4 m": 2.64,
+        "4-99 m": 2.74
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "1-2 m": 0.54,
+        "2-3 m": 0.65,
+        "3-4 m": 0.68,
+        "4-99 m": 0.81
+      }
+    },
+    "after": {
+      "mean_srgb": [
+        87.0,
+        115.7,
+        95.8
+      ],
+      "crown_contrast_levels": 6.65,
+      "stand_highlight_p90_minus_median": 9.33,
+      "stand_highlight_half_range": 6.05,
+      "stands": 2215,
+      "half_pixel_jitter_rms_by_footprint": {
+        "1-2 m": 3.44,
+        "2-3 m": 2.43,
+        "3-4 m": 0.56,
+        "4-99 m": 0.0
+      },
+      "single_vs_4_sample_rms_by_footprint": {
+        "1-2 m": 0.98,
+        "2-3 m": 0.68,
+        "3-4 m": 0.15,
+        "4-99 m": 0.0
+      }
+    }
+  }
+}
