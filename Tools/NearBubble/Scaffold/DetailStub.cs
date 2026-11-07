@@ -1,0 +1,1 @@
+using UnityEngine; namespace DroneSandbox { public static class FarDetail { public static float HeightAt(Vector2 p)=>WorldPlan.Height(p.x,p.y); public static bool TryHeight(Vector2 p,out float h){h=0;return false;} public static bool Raycast(Ray r,out Vector3 p){p=default;return false;} } }
