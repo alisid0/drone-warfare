@@ -359,6 +359,7 @@ namespace DroneSandbox
         public static readonly List<int> VillageOfStreet = new List<int>(); // which village each street belongs to
         public static PathField VillageField { get; private set; }
         public static readonly List<VillagePlot> VillagePlots = new List<VillagePlot>();
+        public static readonly List<Vector2> VillageTrees = new List<Vector2>(); // a town's avenues in the sector
 
         static void PlanVillages()
         {
@@ -366,6 +367,7 @@ namespace DroneSandbox
             VillageOfStreet.Clear();
             VillageField = null;
             VillagePlots.Clear();
+            VillageTrees.Clear();
             if (Plan.world != null)
             {
                 VillageLayout.Project(DetailPlan.villages);

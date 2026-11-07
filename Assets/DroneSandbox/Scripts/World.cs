@@ -222,7 +222,7 @@ namespace DroneSandbox
             var houses = new Dictionary<Transform, int>();
             foreach (var b in buildings)
             {
-                bool house = b.model.StartsWith("Scenery_House_") || b.model == "Scenery_Townhouse_Row";
+                bool house = b.model.StartsWith("Scenery_House_") || b.model.StartsWith("Scenery_Townhouse_");
                 if (b.frontage <= 0f) VillagePath(b.at, b.pathEnd, b.model == "Scenery_Church" ? 3f : house && rng.NextDouble() < 0.45 ? 3f : 1.6f, b.at);
                 if (house) houses[b.root] = houses.TryGetValue(b.root, out int n) ? n + 1 : 1;
             }
@@ -246,6 +246,7 @@ namespace DroneSandbox
                 Utility(roots[v], v, occupiedPlots, houses.TryGetValue(roots[v], out int count) ? count : 0, budgets);
                 Orchards(roots[v], v, occupiedPlots, budgets);
             }
+            StreetTrees(roots, budgets);
             foreach (var b in buildings)
             {
                 if (b.model == "Scenery_Church")
@@ -256,7 +257,7 @@ namespace DroneSandbox
                         if(gardenTrees<128 && VillageProp("Scenery_Tree",b.at+outward*19f+along*(side*9f),side*45f,.45f,3f,b.root,ref allowance)) gardenTrees++;
                     budgets[b.root]=allowance; continue;
                 }
-                if (!b.model.StartsWith("Scenery_House_") && b.model != "Scenery_Townhouse_Row") continue;
+                if (!b.model.StartsWith("Scenery_House_") && !b.model.StartsWith("Scenery_Townhouse_")) continue;
                 int budget = budgets[b.root];
                 if (b.frontage > 0f) Garden(b.root, b.plot, ref budget);
                 budgets[b.root] = budget;
@@ -306,6 +307,40 @@ namespace DroneSandbox
             budgets[root] = budget;
         }
 
+        // A town's avenues (VillagePlan.trees, as MapLayout.VillageTrees): each on its verge where the road and the buildings
+        // leave room, posed as the far scatter poses it, from its settlement's allowance.
+        static void StreetTrees(Transform[] roots, Dictionary<Transform, int> budgets)
+        {
+            var plan = MapLayout.Plan;
+            int planted = 0;
+            foreach (var at in MapLayout.VillageTrees)
+            {
+                if (planted >= 160) break;
+                int owner = -1; float best = float.MaxValue;
+                for (int v = 0; v < plan.villages.Count; v++)
+                {
+                    float d = (plan.villages[v] - at).sqrMagnitude;
+                    if (d < best) { best = d; owner = v; }
+                }
+                if (owner < 0 || !budgets.TryGetValue(roots[owner], out int budget)) continue;
+                if (!VillageGround(at) || MapLayout.RoadField.Distance(at.x, at.y) < MapLayout.RoadWidthAt(at.x, at.y) + .4f) continue;
+                bool clear = true;
+                foreach (var plot in villagePlots) if (Vector2.Distance(at, plot.at) < plot.radius + 1f) { clear = false; break; }
+                if (!clear) continue;
+                var pos = new Vector3(at.x, 0f, at.y);
+                int cost = Art.ModelRendererCount("Scenery_Tree", pos);
+                if (cost > budget) continue;
+                SettlementPattern.TreePose(at + plan.world.center, out float yaw, out float scale);
+                var tree = Place("Scenery_Tree", pos, yaw, scale, 0.1f, roots[owner]);
+                if (tree == null) continue;
+                Features.VillagePropLods(tree);
+                budgets[roots[owner]] = budget - cost;
+                VillagePropRenderers += cost;
+                villagePlots.Add((at, 2.5f));
+                planted++;
+            }
+        }
+
         // Small fringe orchards: up to six fruit trees on their painted 7 m rows, from the garden tree allowance.
         static void Orchards(Transform root, int village, List<VillagePlot> plots, Dictionary<Transform, int> budgets)
         {
@@ -346,6 +381,12 @@ namespace DroneSandbox
                 case "Scenery_Hut": return 3.5f;
                 case "Scenery_Silo": return 7.3f;
                 case "Scenery_Townhouse_Row": return 13.3f;
+                case "Scenery_Townhouse_Old": return 10.8f;
+                case "Scenery_House_Semi": return 7.8f;
+                case "Scenery_House_C": return 9.5f;
+                case "Scenery_Shop": return 7.5f;
+                case "Scenery_Apartment": return 16.5f;
+                case "Scenery_FillingStation": return 11.5f;
                 case "Scenery_OfficeBlock": return 17f;
                 case "Scenery_Warehouse": return 18f;
                 case "Scenery_MachineryShed": return 5.5f;
@@ -358,10 +399,8 @@ namespace DroneSandbox
             Vector2 center, Transform root, int village, List<VillageBuilding> buildings, VillagePlot? property = null)
         {
             float radius = VillageRadius(model) * scale;
-            bool fits = property.HasValue && model.StartsWith("Scenery_House_") ? VillageFootprint(p, facing, 4.6f * scale, 3.9f * scale)
-                : model == "Scenery_Townhouse_Row" ? VillageFootprint(p, facing, 12.4f * scale, 5.4f * scale)
-                : model == "Scenery_OfficeBlock" ? VillageFootprint(p, facing, 12.2f * scale, 8.6f * scale)
-                : model == "Scenery_Warehouse" ? VillageFootprint(p, facing, 9.4f * scale, 15.4f * scale) : VillageRoom(p, radius, false);
+            bool fits = BuildingFootprint(model, out float halfWidth, out float halfDepth) ? VillageFootprint(p, facing, halfWidth * scale, halfDepth * scale)
+                : property.HasValue && model.StartsWith("Scenery_House_") ? VillageFootprint(p, facing, 4.6f * scale, 3.9f * scale) : VillageRoom(p, radius, false);
             if (!fits) return false;
             float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg;
             var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, scale, 0.35f, root);
@@ -370,6 +409,24 @@ namespace DroneSandbox
             buildings.Add(new VillageBuilding { root = root, at = p, center = center, facing = facing,
                 pathEnd = pathEnd, model = model });
             return true;
+        }
+
+        // Half the width and depth of the long and large buildings, which take a rectangular test (walls, eaves, balconies).
+        static bool BuildingFootprint(string model, out float width, out float depth)
+        {
+            switch (model)
+            {
+                case "Scenery_House_C": width = 7.5f; depth = 9.5f; return true;
+                case "Scenery_House_Semi": width = 6.4f; depth = 4.8f; return true;
+                case "Scenery_Townhouse_Row": width = 12.4f; depth = 5.4f; return true;
+                case "Scenery_Townhouse_Old": width = 9.3f; depth = 5.7f; return true;
+                case "Scenery_Shop": width = 7f; depth = 6.3f; return true;
+                case "Scenery_Apartment": width = 15.4f; depth = 7.4f; return true;
+                case "Scenery_OfficeBlock": width = 12.2f; depth = 8.6f; return true;
+                case "Scenery_Warehouse": width = 9.4f; depth = 15.4f; return true;
+                case "Scenery_FillingStation": width = 8.2f; depth = 8.7f; return true;
+                default: width = depth = 0f; return false;
+            }
         }
 
         // Long terraced rows need a rectangular roof test: a bounding circle wrongly pushes them off their street.
@@ -492,7 +549,7 @@ namespace DroneSandbox
             {
                 var plot = property.Value;
                 wall = (plot.settlement + plot.palette) % Walls.Length;
-                roof = (plot.settlement + (plot.roofChanged ? 1 + plot.palette % 3 : 0)) % Roofs.Length;
+                roof = plot.RoofTone % Roofs.Length;
             }
             Art.Swap(house, "RoofTile", Roofs[roof]);
             if (property.HasValue && property.Value.roofChanged) Art.Swap(house, "RoofSlate", Roofs[roof]);
