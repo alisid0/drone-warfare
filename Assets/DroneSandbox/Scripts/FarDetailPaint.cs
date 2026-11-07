@@ -76,7 +76,7 @@ namespace DroneSandbox
             if (cover == Cover.Water) cover = Cover.Pasture; // vector water below owns the visible edge
             int layer = -1; float angle = 0f;
             byte strength = 255;
-            if (land.Weight(Cover.Farmland) > 0f)
+            if (land.Weight(Cover.Farmland) > 0f || land.Weight(Cover.Village) > 0f && VillageOpen(x, z) > .5f)
             {
                 // Crop rows inside the cultivated part; a rough margin keeps the dry-grass texture, strips and the
                 // grass between fields the meadow's. Damp hollows stay the same crop, only darker.
@@ -129,11 +129,11 @@ namespace DroneSandbox
                 c = VillageColour(x, z, plot, pixel, GroundColour(Cover.Village, x, z, pixel));
                 // Beyond the 2 m tiles a garden or orchard reads as it does from far off: lawn broken by shrubs, fruit
                 // trees, sheds and paving the scatter no longer draws one by one, so a village holds together round its roofs.
-                if (pixel > 2f && (plot.landUse < 6 && !plot.square || plot.landUse == 7)) c = Blend(c, GardenMass, Smooth((pixel - 2f) / 3f) * .55f);
+                // An estate's open lawn and a paved yard stay as they are.
+                if (pixel > 2f && (plot.landUse < 6 && !plot.square && !plot.estate && !plot.yard || plot.landUse == 7)) c = Blend(c, GardenMass, Smooth((pixel - 2f) / 3f) * .55f);
             }
-            // A town's ground between its plots is yards, paving and gardens too.
-            float town = land.Weight(Cover.Town);
-            if (pixel > 2f && town > 0f) c = Blend(c, GardenMass, town * Smooth((pixel - 2f) / 3f) * .45f);
+            // A town's ground outside its properties is ordinary grazed and mown land like the country round it, not a
+            // pale disc: its streets and gardens make the town (Paddock).
             // A compound's own grass, and a worn margin outside its fence-side footprint edge: the fields run to it.
             float compound = features.Outside(x, z);
             if (compound < MarginLimit + pixel)
@@ -183,18 +183,25 @@ namespace DroneSandbox
             {
                 if (s.a == Cover.Farmland) return Blend(FarmColour(x, z, pixel), WoodFloor, wood);
                 if (s.a == Cover.Forest && wood == 1f) return WoodFloor;
-                // A village's open ground is grazed and mown like the pasture round it, not one lawn (its gardens keep theirs).
-                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water && s.a != Cover.Village) return GroundColour(s.a, x, z, pixel);
+                // A village's or town's open ground is grazed and mown like the pasture round it, not one lawn (its gardens keep theirs).
+                if (s.a != Cover.Pasture && s.a != Cover.Forest && s.a != Cover.Water && s.a != Cover.Village && s.a != Cover.Town) return GroundColour(s.a, x, z, pixel);
             }
             Vector3 grass = GroundColour(Cover.Pasture, x, z, pixel);
-            Vector3 farm = s.Weight(Cover.Farmland) > 0f ? FarmColour(x, z, pixel) : grass;
-            Vector3 Colour(Cover kind) => kind == Cover.Farmland ? farm
-                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Village || kind == Cover.Water ? grass : GroundColour(kind, x, z, pixel);
+            float open = s.Weight(Cover.Village) > 0f ? VillageOpen(x, z) : 0f;
+            Vector3 farm = s.Weight(Cover.Farmland) > 0f || open > 0f ? FarmColour(x, z, pixel) : grass;
+            Vector3 fields = Blend(grass, farm, open);
+            Vector3 Colour(Cover kind) => kind == Cover.Farmland ? farm : kind == Cover.Village ? fields
+                : kind == Cover.Pasture || kind == Cover.Forest || kind == Cover.Town || kind == Cover.Water ? grass : GroundColour(kind, x, z, pixel);
             Vector3 c;
             if (s.a == s.b && s.a == s.c && s.a == s.d) c = Colour(s.a);
             else c = Blend(Blend(Colour(s.a), Colour(s.b), s.u), Blend(Colour(s.c), Colour(s.d), s.u), s.v);
             return Blend(c, WoodFloor, wood);
         }
+
+        // A village's land beyond its properties is farmed like the fields round it, so crops and pasture run to the back
+        // fences instead of a pale disc of meadow ringing the village: 1 more than 20 m from any of its plots (gardens,
+        // paddocks, orchards), 0 within 8 m. A town's land is its streets and gardens (Paddock keeps the rest grazed).
+        float VillageOpen(float x, float z) => Smooth((villages.Clearance(new Vector2(x, z), 20f) - 8f) / 12f);
 
         // Only coarse crop pixels need four ownership samples; cover, grass noise and vector masks are evaluated once.
         // The broad hollow under a pixel is shared by its quarter samples, and so is the meadow between parcels.
@@ -249,12 +256,12 @@ namespace DroneSandbox
         }
 
         // The pasture paddock at a point (0-1, below 0 for none) and how strongly its use shows: faded to a neutral
-        // fence line at its edge and away from open pasture, farmland and a village's open ground. Shared with the sector splat.
+        // fence line at its edge and away from open pasture, farmland and a settlement's open ground. Shared with the sector splat.
         public float Paddock(float x, float z, float pixel, out float amount)
         {
             amount = 0f;
             var land = cover.At(x, z);
-            float village = land.Weight(Cover.Village), pastoral = land.Weight(Cover.Pasture) + land.Weight(Cover.Farmland) + village;
+            float village = land.Weight(Cover.Village) + land.Weight(Cover.Town), pastoral = land.Weight(Cover.Pasture) + land.Weight(Cover.Farmland) + village;
             if (pastoral <= 0f) return -1f;
             if (village > 0f && villages.At(new Vector2(x, z), out var garden) && garden.landUse < 6) return -1f; // gardens keep their lawn
             float kind = fields.At(x, z).Paddock(x, z, out float boundary);
