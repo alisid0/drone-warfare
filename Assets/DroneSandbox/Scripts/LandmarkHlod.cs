@@ -24,6 +24,8 @@ namespace DroneSandbox
         LandmarkMesh.Builder building;
         int buildingId;
         public static int DrawCalls { get; private set; }
+        // For the autotest's hitch experiment: leave out the real instanced models near a compound (the distant mesh stays).
+        public static bool HideModels;
         public static int TrianglesDrawn { get; private set; }
 
         // Match ForestHlod's lifecycle, explicitly releasing every mesh and owned material.
@@ -42,6 +44,7 @@ namespace DroneSandbox
         {
             DrawCalls = TrianglesDrawn = 0;
             instances.Warm(); // the compounds' models and photo materials, loading in the background
+            instances.Prime(camera); // then each drawn once, out of sight, so its shaders are ready before it's seen
             // One compound is meshed at a time, a slice per frame, so neither a sector change nor a large soft-edged yard
             // turns into one long stage.
             bool meshed = building != null;
@@ -63,7 +66,7 @@ namespace DroneSandbox
                 if (batch.mesh == null) continue;
                 Vector2 projection = LandmarkLod.Projection(camera);
                 float distance = projection.y >= 0f ? projection.y : Mathf.Sqrt(bounds.SqrDistance(camera.transform.position)) * projection.x;
-                if (distance < LandmarkLod.Far)
+                if (distance < LandmarkLod.Far && !HideModels)
                 {
                     instances.Draw(f, camera, bounds);
                     DrawCalls += instances.DrawCalls; TrianglesDrawn += instances.Triangles;

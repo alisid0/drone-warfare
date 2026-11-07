@@ -73,6 +73,51 @@ namespace DroneSandbox
             if (warmPaths.Add(path)) warming.Add(Resources.LoadAsync<T>(path));
         }
 
+        // A material's shaders and DX12 pipeline states are built on its first draw, which froze the game for up to 0.75 s
+        // on first sight of a rail yard or works (hd169). Once the background loads are in, every model of the world's
+        // compounds is set up and drawn once, two a frame, a fraction of a millimetre across just in front of the camera.
+        // Per camera: the drone feed's camera renders without shadows or motion vectors, so its shader variants and
+        // pipeline states differ from the main view's, and only flying with it showed the hitches (hd174).
+        readonly Dictionary<Camera, List<(string name, bool detail, bool prop, int roof)>> primingByCamera =
+            new Dictionary<Camera, List<(string, bool, bool, int)>>();
+
+        public void Prime(Camera camera)
+        {
+            if (!warmStarted || warming.Count > 0 || camera == null) return;
+            if (!primingByCamera.TryGetValue(camera, out var priming))
+            {
+                primingByCamera.Add(camera, priming = new List<(string, bool, bool, int)>());
+                var seen = new HashSet<(string, bool, bool, int)>();
+                foreach (var f in WorldPlan.Features)
+                {
+                    if (!f.valid) continue;
+                    foreach (var b in f.buildings) if (seen.Add((b.model, b.detail, false, b.roof))) priming.Add((b.model, b.detail, false, b.roof));
+                    foreach (var p in f.props) if (seen.Add((p.model, true, true, 0))) priming.Add((p.model, true, true, 0));
+                }
+            }
+            if (priming.Count == 0) return;
+            var eye = camera.transform;
+            var at = Matrix4x4.TRS(eye.position + eye.forward * (camera.nearClipPlane + 0.5f), Quaternion.identity, Vector3.one * 0.0001f);
+            var bounds = new Bounds(eye.position + eye.forward * (camera.nearClipPlane + 0.5f), Vector3.one);
+            for (int n = 0; n < 2 && priming.Count > 0; n++)
+            {
+                var key = priming[priming.Count - 1];
+                priming.RemoveAt(priming.Count - 1);
+                if (!models.TryGetValue(key, out var model)) { model = Load(key.name, key.detail, key.prop, key.roof); models.Add(key, model); }
+                foreach (var tier in model.tiers)
+                    foreach (var part in tier)
+                        for (int sub = 0; sub < part.mesh.subMeshCount; sub++)
+                        {
+                            var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
+                            if (material == null) continue;
+                            matrices[0] = at * part.local;
+                            var rp = new RenderParams(material) { camera = camera, worldBounds = bounds, matProps = properties,
+                                shadowCastingMode = ShadowCastingMode.On, receiveShadows = true };
+                            Graphics.RenderMeshInstanced(rp, part.mesh, sub, matrices, 1);
+                        }
+            }
+        }
+
         // Borrowed FBX meshes remain resource-owned; only material adapters belong to this cache.
         public void Clear()
         {

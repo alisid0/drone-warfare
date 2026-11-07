@@ -16,12 +16,15 @@ namespace DroneSandbox
         StreamWriter log;
         int errors;
         bool demo;
+        static string only; // -autotest-only seek: just the hunts and Hide and Seek, to chase the D3D12 memory burst
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Launch()
         {
             string[] args = Environment.GetCommandLineArgs();
             int i = Array.IndexOf(args, "-autotest"), d = Array.IndexOf(args, "-demo");
+            int o = Array.IndexOf(args, "-autotest-only");
+            if (o >= 0 && o + 1 < args.Length) only = args[o + 1];
             if (d >= 0 && d + 1 < args.Length) new GameObject("Auto Test").AddComponent<AutoTest>().Begin(args[d + 1], true);
             else if (i >= 0 && i + 1 < args.Length) new GameObject("Auto Test").AddComponent<AutoTest>().Begin(args[i + 1], false);
         }
@@ -88,6 +91,16 @@ namespace DroneSandbox
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
+            if (only == "seek")
+            {
+                yield return HuntMission(game, rts, false);
+                yield return HuntMission(game, rts, true);
+                yield return SeekIgnored(game, rts);
+                log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
             log.WriteLine($"Varrow build ms: {World.Timings}");
             log.WriteLine($"forest build ms: total {SectorForest.BuildMilliseconds:F1}, stems {SectorForest.StemsMilliseconds:F1}, indices {SectorForest.IndicesMilliseconds:F1}, canopy preparation {SectorForest.CanopyMilliseconds:F1}; stems {SectorForest.Stems.Count}, cells {SectorForest.LocalCells.Count}");
             log.WriteLine($"World build stages: {FarTerrain.BuildTimings}");
@@ -785,7 +798,15 @@ namespace DroneSandbox
                           $"town triangles {SettlementHlod.TrianglesDrawn}, draws {FarScatter.InstanceDrawCalls + ForestHlod.BlocksDrawn + SettlementHlod.DrawCalls}, " +
                           $"forest build {ForestHlod.BuildMs:F2} ms");
             yield return LandmarkViews(rts);
-            yield return ContinuousFlight(game, rts);
+            // Twice, as ChatGPT's gate asks: the second run is warmed and must be just as clean.
+            yield return ContinuousFlight(game, rts, 1);
+            yield return ContinuousFlight(game, rts, 2);
+            // Two experiment passes on the same route for the render stall near the rail junction (ChatGPT's isolation
+            // order): without the compounds' real instanced models, then without the drone feed's camera. Reported only.
+            LandmarkHlod.HideModels = true;
+            yield return ContinuousFlight(game, rts, 3);
+            LandmarkHlod.HideModels = false;
+            yield return ContinuousFlight(game, rts, 4);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
@@ -1180,6 +1201,31 @@ namespace DroneSandbox
             int views = 0, tries = 0, agree = 0, falseBlocked = 0, falseClear = 0, partly = 0;
             bool shotBlocked = false, shotClear = false;
             Vector3 centre = game.basePosition;
+            // The sandbox after the hunts can be a sector with no wood by its base (hd168-169 found none within 260 m):
+            // look round the sector in rings for the nearest wood instead, and skip the check if there's none at all.
+            if (Canopy.TopNear(centre, 260f) < Ground.HeightAt(centre) + 6f)
+            {
+                bool found = false;
+                for (float reach = 300f; reach <= 1000f && !found; reach += 100f)
+                    for (float angle = 0f; angle < 360f && !found; angle += 15f)
+                    {
+                        var p = game.basePosition + new Vector3(Mathf.Cos(angle * Mathf.Deg2Rad), 0f, Mathf.Sin(angle * Mathf.Deg2Rad)) * reach;
+                        if (Canopy.TopNear(p, 60f) > Ground.HeightAt(p) + 8f) { centre = p; found = true; }
+                    }
+                if (!found)
+                {
+                    // A sector with trees but no canopy grid at all would mean line of sight ignores every tree: an error.
+                    float tallest = Canopy.TopNear(game.basePosition, 1200f);
+                    log.WriteLine($"Occlusion check: skipped, no wood within 1 km of the base (origin {FarTerrain.Origin.x:F0}, {FarTerrain.Origin.y:F0}); " +
+                                  $"canopy grid {(tallest == float.MinValue ? "MISSING" : "present")}, Undergrowth trees {Undergrowth.Trees.Count}");
+                    if (tallest == float.MinValue && Undergrowth.Trees.Count > 0) errors++;
+                    photo.Exit();
+                    Destroy(marker);
+                    if (cameraData != null) cameraData.allowDynamicResolution = upscaled;
+                    Time.timeScale = 1f;
+                    yield break;
+                }
+            }
             while (views < 50 && tries < 3000)
             {
                 tries++;
@@ -2136,7 +2182,15 @@ namespace DroneSandbox
         // and p99 at each speed, frames over 25 ms with where the Swift was, the worst streaming commit, texture memory,
         // live tiles, missing forest blocks, the nearest streamed tile still missing, and whether the Swift took every leg,
         // kept its battery reckoning and met no enemy this far from the battle.
-        IEnumerator ContinuousFlight(SandboxGame game, RtsController rts)
+        // Frame phases for the flight's hitch report: when the first Update starts, when the last LateUpdate ends and when
+        // the render pipeline finishes the frame. hd170's 0.9-1.4 s frames near a rail junction showed nothing in the
+        // streaming counters, so each spike says which part of the frame it was spent in.
+        [DefaultExecutionOrder(-32000)] sealed class FrameStart : MonoBehaviour { public static float At; void Update() => At = Time.realtimeSinceStartup; }
+        [DefaultExecutionOrder(32000)] sealed class FrameScripts : MonoBehaviour { public static float At; void LateUpdate() => At = Time.realtimeSinceStartup; }
+        static float rendered;
+        static void Rendered(UnityEngine.Rendering.ScriptableRenderContext context, List<Camera> cameras) => rendered = Time.realtimeSinceStartup;
+
+        IEnumerator ContinuousFlight(SandboxGame game, RtsController rts, int pass)
         {
             // Candidate stops in local coordinates, one kind per stop.
             var stops = new List<(string kind, string name, Vector3 at)>();
@@ -2210,18 +2264,18 @@ namespace DroneSandbox
                 names.Append($" {stops[i].kind} ({stops[i].name}, {w.x:F0}, {w.y:F0})");
             }
             Vector2 homeWorld = new Vector2(home.x, home.z) + FarTerrain.Origin;
-            log.WriteLine($"Continuous flight route from the base at ({homeWorld.x:F0}, {homeWorld.y:F0}): {best.Count} stops, {bestLength / 1000f:F1} km:{names}");
+            log.WriteLine($"Continuous flight {pass} route from the base at ({homeWorld.x:F0}, {homeWorld.y:F0}): {best.Count} stops, {bestLength / 1000f:F1} km:{names}");
             var swift = game.SpawnDrone(DroneType.Recon);
             if (swift == null || best.Count < 3)
             {
-                log.WriteLine($"Continuous flight: Swift {swift != null}, {best.Count} stops chosen of {stops.Count} candidates, HQ clearance {clearOfHq:F0} m");
+                log.WriteLine($"Continuous flight {pass}: Swift {swift != null}, {best.Count} stops chosen of {stops.Count} candidates, HQ clearance {clearOfHq:F0} m");
                 errors++;
                 yield break;
             }
             float cruise = swift.altitude;
             foreach (int i in best) swift.MoveTo(stops[i].at, true);
             rts.selected.Clear();
-            rts.selected.Add(swift);
+            if (pass != 4) rts.selected.Add(swift); // pass 4 flies unselected: no feed camera
             int knownBefore = 0;
             var known = new HashSet<EnemyUnit>();
             foreach (var e in game.enemies) if (e != null && e.Known) { knownBefore++; known.Add(e); }
@@ -2233,31 +2287,68 @@ namespace DroneSandbox
             var slow = new List<float>(20000);
             var fast = new List<float>(20000);
             var spikes = new System.Text.StringBuilder();
-            int spikeCount = 0, reached = 0, ownTileMissing = 0, tileSamples = 0, worstMissingBlocks = 0, gcCount = System.GC.CollectionCount(0);
+            int spikeCount = 0, reached = 0, ownTileMissing = 0, tileSamples = 0, worstMissingBlocks = 0, gcCount = System.GC.CollectionCount(0), farContacts = 0;
+            int ownMissingFast = 0, samplesFast = 0, hitches = 0, hitchesFast = 0, unreadyFrames = 0, unreadyFast = 0, framesFast = 0, flightFrames = 0, throttledFrames = 0;
             // The first second is left out: its first frame carried the route search and the Swift's launch (hd165's
             // 196 ms "spike" at the base).
             float nearestMissing = float.MaxValue, settleUntil = Time.realtimeSinceStartup + 1f, nextSample = 0f, flownBefore = swift.Flown, gameTime = 0f;
             long peakTexture = 0;
+            long committedBefore = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
+            var startProbe = gameObject.AddComponent<FrameStart>();
+            var scriptsProbe = gameObject.AddComponent<FrameScripts>();
+            UnityEngine.Rendering.RenderPipelineManager.endContextRendering += Rendered;
+            float frameBegan = 0f, lateRender = 0f, lateGpu = 0f;
+            int lateFrames = 0;
+            var timing = new FrameTiming[1];
             float started = Time.realtimeSinceStartup;
             while (reached < best.Count && swift != null && swift.IsAlive && Time.realtimeSinceStartup - started < 900f)
             {
                 bool fastHalf = reached >= (best.Count + 1) / 2;
-                Time.timeScale = fastHalf ? 4f : 1f;
+                // 4x as the player asks for it: the game holds the clock back while the ground ahead streams in.
+                Time.timeScale = fastHalf ? game.AllowedSpeed(4f) : 1f;
+                if (fastHalf && Time.timeScale < 4f) throttledFrames++;
                 swift.altitude = fastHalf ? cruise : 220f;
                 rts.LookAt(swift.transform.position, 120f, 30f);
                 yield return null;
                 if (swift == null) break;
                 float ms = Time.unscaledDeltaTime * 1000f;
+                // The frame just finished: its scripts, its rendering, and the gap before this one began (present, GPU
+                // wait, physics); this frame's LateUpdate and rendering haven't run yet.
+                float scriptMs = (FrameScripts.At - frameBegan) * 1000f, renderMs = (rendered - FrameScripts.At) * 1000f, gapMs = (FrameStart.At - rendered) * 1000f;
+                frameBegan = FrameStart.At;
+                // The render thread's and the GPU's own times arrive a few frames late: a spike's entry is finished with
+                // the largest of them over the four frames after it.
+                FrameTimingManager.CaptureFrameTimings();
+                if (FrameTimingManager.GetLatestTimings(1, timing) > 0)
+                {
+                    lateRender = Mathf.Max(lateRender * (lateFrames > 0 ? 1f : 0f), (float)timing[0].cpuRenderThreadFrameTime);
+                    lateGpu = Mathf.Max(lateGpu * (lateFrames > 0 ? 1f : 0f), (float)timing[0].gpuFrameTime);
+                }
+                if (lateFrames > 0 && --lateFrames == 0) { spikes.Append($" (render thread {lateRender:F0}, GPU {lateGpu:F0} ms);"); lateRender = lateGpu = 0f; }
                 gameTime += Time.deltaTime;
                 Vector2 world = new Vector2(swift.transform.position.x, swift.transform.position.z) + FarTerrain.Origin;
                 if (Time.realtimeSinceStartup > settleUntil)
                 {
                     (fastHalf ? fast : slow).Add(ms);
                     leg.Add(ms);
+                    if (ms > 33.3f) { hitches++; if (fastHalf) hitchesFast++; }
+                    // Every frame: is every streamed tile within 500 m of the followed Swift live? (ChatGPT asks for
+                    // 99.9% ready-time, measured per frame.)
+                    int tx = Mathf.FloorToInt(world.x / 512f), tz = Mathf.FloorToInt(world.y / 512f);
+                    bool ready = true;
+                    for (int z = tz - 1; z <= tz + 1 && ready; z++)
+                        for (int x = tx - 1; x <= tx + 1 && ready; x++)
+                            if (FarDetail.Eligible(x, z) && FarDetail.DistanceTo(x, z, world) < 500f &&
+                                !FarDetail.TryHeight(new Vector2((x + 0.5f) * 512f, (z + 0.5f) * 512f) - FarTerrain.Origin, out _)) ready = false;
+                    if (!ready) { unreadyFrames++; if (fastHalf) unreadyFast++; }
+                    if (fastHalf) framesFast++;
+                    flightFrames++;
                     // With what the far world spent on the main thread that frame and whether the garbage collector ran.
                     int gc = System.GC.CollectionCount(0);
+                    if (ms > 25f && spikeCount < 16 && lateFrames == 0) { lateFrames = 4; lateRender = lateGpu = 0f; }
                     if (ms > 25f && spikeCount++ < 16)
-                        spikes.Append($" {ms:F0} ms at ({world.x:F0}, {world.y:F0}) {(fastHalf ? "4x" : "1x")} scatter {FarScatter.MainThreadMs:F1} ms{(gc != gcCount ? " GC" : "")};");
+                        spikes.Append($" {ms:F0} ms at ({world.x:F0}, {world.y:F0}) {(fastHalf ? "4x" : "1x")} [update {scriptMs:F0}, render {renderMs:F0}, gap {gapMs:F0}] scatter {FarScatter.MainThreadMs:F1}/places {FarScatter.PlacesMs:F1}, " +
+                                      $"tiles {FarDetail.LastFrameMs:F1}, canopy {ForestHlod.LastFrameMs:F1} ms, uploads {(FarDetail.UploadBytes + ForestHlod.UploadBytes) / 1024} KB{(gc != gcCount ? " GC" : "")};");
                     gcCount = gc;
                 }
                 peakTexture = System.Math.Max(peakTexture, (long)Texture.currentTextureMemory);
@@ -2268,22 +2359,31 @@ namespace DroneSandbox
                     nextSample = Time.realtimeSinceStartup + 1f;
                     tileSamples++;
                     // Any enemy newly known, with where it stands and how far it was from the Swift.
+                    // Only one outside the battle area counts against the flight: the Swift passes the sector's own units on
+                    // its way out (hd167 spotted a tank 300 m off, inside the sector).
                     foreach (var e in game.enemies)
                         if (e != null && e.Known && known.Add(e))
                         {
                             Vector2 at = new Vector2(e.transform.position.x, e.transform.position.z) + FarTerrain.Origin;
-                            contacts.Append($" {e.type} at ({at.x:F0}, {at.y:F0}), {Vector3.Distance(e.transform.position, swift.transform.position):F0} m from the Swift;");
+                            bool far = Mathf.Max(Mathf.Abs(e.transform.position.x), Mathf.Abs(e.transform.position.z)) > Ground.Size * 0.5f;
+                            if (far) farContacts++;
+                            contacts.Append($" {e.type} at ({at.x:F0}, {at.y:F0}){(far ? " OUTSIDE the sector" : "")}, {Vector3.Distance(e.transform.position, swift.transform.position):F0} m from the Swift;");
                         }
+                    // Tiles are judged in flight only: a stop's 2.5 km look moves the streaming away from the Swift.
                     int cx = Mathf.FloorToInt(world.x / 512f), cz = Mathf.FloorToInt(world.y / 512f);
-                    for (int z = cz - 2; z <= cz + 2; z++)
-                        for (int x = cx - 2; x <= cx + 2; x++)
-                        {
-                            if (!FarDetail.Eligible(x, z)) continue;
-                            Vector2 middle = new Vector2((x + 0.5f) * 512f, (z + 0.5f) * 512f) - FarTerrain.Origin;
-                            if (FarDetail.TryHeight(middle, out _)) continue;
-                            nearestMissing = Mathf.Min(nearestMissing, FarDetail.DistanceTo(x, z, world));
-                            if (x == cx && z == cz) ownTileMissing++;
-                        }
+                    if (Time.realtimeSinceStartup > settleUntil)
+                    {
+                        if (fastHalf) samplesFast++;
+                        for (int z = cz - 2; z <= cz + 2; z++)
+                            for (int x = cx - 2; x <= cx + 2; x++)
+                            {
+                                if (!FarDetail.Eligible(x, z)) continue;
+                                Vector2 middle = new Vector2((x + 0.5f) * 512f, (z + 0.5f) * 512f) - FarTerrain.Origin;
+                                if (FarDetail.TryHeight(middle, out _)) continue;
+                                nearestMissing = Mathf.Min(nearestMissing, FarDetail.DistanceTo(x, z, world));
+                                if (x == cx && z == cz) { ownTileMissing++; if (fastHalf) ownMissingFast++; }
+                            }
+                    }
                 }
                 // A stop: everything paused while the camera looks from 50 m, 300 m and 2.5 km.
                 Vector3 stop = stops[best[reached]].at;
@@ -2292,6 +2392,7 @@ namespace DroneSandbox
                     string label = $"91_flight_{reached}_{stops[best[reached]].kind.Replace('/', '_')}";
                     legs.Append($" to {stops[best[reached]].kind} {(fastHalf ? "4x" : "1x")} p95 {P(leg, 0.95f):F2} ms ({leg.Count});");
                     leg.Clear();
+                    if (pass > 1) { reached++; continue; } // the warmed second run flies straight on
                     Time.timeScale = 0f;
                     foreach (var (name, distance) in new[] { ("50m", 50f), ("300m", 300f), ("2500m", 2500f) })
                     {
@@ -2304,6 +2405,9 @@ namespace DroneSandbox
                 }
             }
             Time.timeScale = 1f;
+            UnityEngine.Rendering.RenderPipelineManager.endContextRendering -= Rendered;
+            Destroy(startProbe);
+            Destroy(scriptsProbe);
             float realSeconds = Time.realtimeSinceStartup - started;
             if (swift != null) swift.altitude = cruise;
             int knownAfter = 0;
@@ -2316,16 +2420,25 @@ namespace DroneSandbox
             }
             float slow95 = P(slow, 0.95f), slow99 = P(slow, 0.99f), fast95 = P(fast, 0.95f), fast99 = P(fast, 0.99f);
             float battery = swift != null ? swift.Flown - flownBefore - gameTime : 0f; // flying time charged against flying time
-            log.WriteLine($"Continuous flight: reached {reached}/{best.Count} stops in {realSeconds:F0} s, Swift alive {swift != null && swift.IsAlive}, " +
+            log.WriteLine($"Continuous flight {pass}: reached {reached}/{best.Count} stops in {realSeconds:F0} s, Swift alive {swift != null && swift.IsAlive}, " +
                           $"battery {(swift != null ? swift.Battery * 100f : 0f):F0}% (charge drift {battery:F1} s), queued left {(swift != null ? swift.Waypoints.Count : 0)}, " +
-                          $"new contacts {knownAfter - knownBefore}:{contacts}");
-            log.WriteLine($"Continuous flight frames: 1x p95 {slow95:F2} p99 {slow99:F2} ms ({slow.Count}), 4x p95 {fast95:F2} p99 {fast99:F2} ms ({fast.Count}); " +
+                          $"new contacts {knownAfter - knownBefore} ({farContacts} outside the sector):{contacts}");
+            float slow999 = P(slow, 0.999f), fast999 = P(fast, 0.999f);
+            float readyShare = 1f - unreadyFrames / (float)Mathf.Max(1, flightFrames), readyFast = 1f - unreadyFast / (float)Mathf.Max(1, framesFast);
+            log.WriteLine($"Continuous flight {pass} frames: 1x p95 {slow95:F2} p99 {slow99:F2} p99.9 {slow999:F2} ms ({slow.Count}), 4x p95 {fast95:F2} p99 {fast99:F2} p99.9 {fast999:F2} ms ({fast.Count}); " +
                           $"legs:{legs} over 25 ms {spikeCount}:{spikes}");
-            log.WriteLine($"Continuous flight streaming: worst commit {FarDetail.WorstCommitMs:F3} ms, over 2 ms {FarDetail.BudgetOverruns}, live {FarDetail.Live}/{FarDetail.MaxTiles}, " +
-                          $"nearest missing tile {(nearestMissing == float.MaxValue ? "none" : nearestMissing.ToString("F0") + " m")}, own tile missing {ownTileMissing}/{tileSamples}, " +
-                          $"worst missing canopy blocks {worstMissingBlocks}, peak texture memory {peakTexture / 1048576} MB, {Screen.width}x{Screen.height}");
+            // ChatGPT's release gate (critique 20): no frame over 33.3 ms after warm-up and at least 99.9% of frames with
+            // every tile within 500 m of the Swift live.
+            bool gate = hitches == 0 && readyShare >= 0.999f;
+            log.WriteLine($"Continuous flight {pass} gate: frames over 33.3 ms {hitches} (4x {hitchesFast}), near tiles ready {readyShare * 100f:F2}% of frames " +
+                          $"(4x {readyFast * 100f:F2}%), 4x held back {throttledFrames}/{framesFast} frames -> {(gate ? "PASS" : "FAIL")}");
+            if (!gate && pass <= 2) errors++;
+            log.WriteLine($"Continuous flight {pass} streaming: worst commit {FarDetail.WorstCommitMs:F3} ms, over 2 ms {FarDetail.BudgetOverruns}, live {FarDetail.Live}/{FarDetail.MaxTiles}, " +
+                          $"nearest missing tile {(nearestMissing == float.MaxValue ? "none" : nearestMissing.ToString("F0") + " m")}, own tile missing {ownTileMissing}/{tileSamples} (4x {ownMissingFast}/{samplesFast}), " +
+                          $"worst missing canopy blocks {worstMissingBlocks}, peak texture memory {peakTexture / 1048576} MB, " +
+                          $"committed {committedBefore / 1048576} -> {System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / 1048576} MB, {Screen.width}x{Screen.height}");
             if (reached < best.Count || swift == null || !swift.IsAlive || Mathf.Max(slow95, fast95) > 16.7f || FarDetail.WorstCommitMs > 2.0 ||
-                knownAfter > knownBefore || Mathf.Abs(battery) > 2f) errors++;
+                farContacts > 0 || Mathf.Abs(battery) > 2f) { if (pass <= 2) errors++; }
         }
 
         // One permanent landmark of each kind as the world draws it outside a sector (streamed ground, far masses), from
@@ -2380,10 +2493,13 @@ namespace DroneSandbox
             var texture = ScreenCapture.CaptureScreenshotAsTexture();
             File.WriteAllBytes(Path.Combine(outDir, name + ".png"), texture.EncodeToPNG());
             Destroy(texture);
-            // Memory as we go, to catch a leak: texture memory, and how many textures, render textures and materials exist.
+            // Memory as we go, to catch a leak: texture memory, how many textures, render textures, materials and meshes
+            // exist, and the process's committed memory, which holds D3D12's system-memory (non-local) heaps: hd173 died when
+            // 6,400 one-megabyte scratch buffers (6.4 GB) filled that budget.
+            long committed = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
             log.WriteLine($"[{Time.time:F1}] screenshot {name}   tex {Texture.currentTextureMemory / 1048576} MB, " +
                           $"{Resources.FindObjectsOfTypeAll<Texture2D>().Length} tex2d, {Resources.FindObjectsOfTypeAll<RenderTexture>().Length} rt, " +
-                          $"{Resources.FindObjectsOfTypeAll<Material>().Length} mat");
+                          $"{Resources.FindObjectsOfTypeAll<Material>().Length} mat, {Resources.FindObjectsOfTypeAll<Mesh>().Length} mesh, committed {committed / 1048576} MB");
         }
     }
 }

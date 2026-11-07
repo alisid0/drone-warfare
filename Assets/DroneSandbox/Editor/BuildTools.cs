@@ -18,6 +18,8 @@ namespace DroneSandbox.EditorTools
         public static void BuildWindows()
         {
             EnsureMainScene();
+            // CPU render-thread and GPU frame times for the autotest's hitch report (FrameTimingManager); near-free.
+            PlayerSettings.enableFrameTimingStats = true;
             var options = new BuildPlayerOptions
             {
                 scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray(),

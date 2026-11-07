@@ -581,6 +581,7 @@ namespace DroneSandbox
         {
             var bounds = new Bounds(cam.transform.position, Vector3.one * 3600f);
             ForestMaterials.SetCamera(properties, cam.transform.position, TierDistances);
+            Prime(cam);
             foreach (var model in models)
             {
                 if (model == null || model.instances.Count == 0) continue;
@@ -598,6 +599,38 @@ namespace DroneSandbox
                             Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, count);
                             InstanceDrawCalls++;
                         }
+                    }
+            }
+        }
+
+        readonly Dictionary<Camera, bool[]> primedByCamera = new Dictionary<Camera, bool[]>();
+
+        // A model's first draw builds its shaders and DX12 pipeline states (hd169's 56-172 ms frames nearing a town): any
+        // model not yet drawn is drawn once, two a frame, a fraction of a millimetre across just in front of the camera.
+        // Per camera, since the drone feed's camera renders with other frame settings and so other variants (hd174).
+        void Prime(Camera cam)
+        {
+            if (!primedByCamera.TryGetValue(cam, out var primed) || primed.Length != models.Length) primedByCamera[cam] = primed = new bool[models.Length];
+            var eye = cam.transform;
+            Vector3 front = eye.position + eye.forward * (cam.nearClipPlane + 0.5f);
+            var tiny = Matrix4x4.TRS(front, Quaternion.identity, Vector3.one * 0.0001f);
+            var near = new Bounds(front, Vector3.one);
+            int drawn = 0;
+            for (int m = 0; m < models.Length && drawn < 2; m++)
+            {
+                if (primed[m] || models[m] == null) continue;
+                primed[m] = true;
+                if (models[m].instances.Count > 0) continue; // drawn for real this frame
+                drawn++;
+                foreach (var part in models[m].parts)
+                    for (int sub = 0; sub < part.mesh.subMeshCount; sub++)
+                    {
+                        var material = part.materials[Mathf.Min(sub, part.materials.Length - 1)];
+                        if (material == null) continue;
+                        batch[0] = tiny * part.local;
+                        var rp = new RenderParams(material) { camera = cam, worldBounds = near, matProps = properties,
+                            shadowCastingMode = models[m].tier < 2 ? ShadowCastingMode.On : ShadowCastingMode.Off, receiveShadows = true };
+                        Graphics.RenderMeshInstanced(rp, part.mesh, sub, batch, 1);
                     }
             }
         }
