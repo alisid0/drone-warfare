@@ -390,6 +390,7 @@ namespace DroneSandbox
             Outcome = News = "";
             mapAdvance = -1f;
             Progress.Set("theatre.seed", Random.Range(1, 1000000));
+            WorldActivity.Reset(); // the Dravin positions out in the theatre, seeded afresh
             Start(); // a support charge, from the first briefing on
         }
 

@@ -45,6 +45,14 @@ namespace DroneSandbox
         public static Vector3 NormalAt(Vector3 p)
         {
             if (terrain == null) return Vector3.up;
+            if (FarTerrain.Active && (Mathf.Abs(p.x) > Size / 2f || Mathf.Abs(p.z) > Size / 2f))
+            {
+                // Out in the world, from the heights either side (the sector's terrain would answer with its own edge).
+                const float step = 2f;
+                float dx = HeightAt(p + Vector3.right * step) - HeightAt(p - Vector3.right * step);
+                float dz = HeightAt(p + Vector3.forward * step) - HeightAt(p - Vector3.forward * step);
+                return new Vector3(-dx, 2f * step, -dz).normalized;
+            }
             var data = terrain.terrainData;
             Vector3 local = p - terrain.transform.position;
             return data.GetInterpolatedNormal(local.x / data.size.x, local.z / data.size.z);

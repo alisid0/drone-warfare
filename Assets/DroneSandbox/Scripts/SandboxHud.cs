@@ -276,6 +276,7 @@ namespace DroneSandbox
                 }
             }
 
+            UnityEngine.Profiling.Profiler.BeginSample("HUD world contacts"); DrawWorldContacts(); UnityEngine.Profiling.Profiler.EndSample();
             UnityEngine.Profiling.Profiler.BeginSample("HUD tactical"); DrawTactical(); UnityEngine.Profiling.Profiler.EndSample();
         }
 

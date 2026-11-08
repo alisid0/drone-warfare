@@ -371,6 +371,94 @@ namespace DroneSandbox
             }
         }
 
+        // Dravin units out in the theatre that no drone is near (WorldActivity): what we know of them stays on the map.
+        // Each unit keeps its symbol - a gun or radar a dashed diamond where it was mapped (an AA gun with its reach for a
+        // drone at cruise height), a vehicle a fading diamond where it was last seen, then a circle of doubt until the
+        // trail goes cold - and each position one label, with how much of it we know and how long ago it was seen.
+        void DrawWorldContacts()
+        {
+            float s = Scale;
+            Vector2 origin = FarTerrain.Origin;
+            var grey = new Color(0.82f, 0.86f, 0.88f, 0.75f);
+            labelledGroups.Clear();
+            foreach (var c in WorldActivity.Contacts)
+            {
+                if (c.live != null || c.destroyed || c.intel == Intel.Unknown) continue;
+                Vector2 m = c.MarkerPosition - origin;
+                Vector3 at = Ground.OnGround(new Vector3(m.x, 0f, m.y));
+                Vector2 g;
+                if (c.intel >= Intel.Identified)
+                {
+                    if (c.type == EnemyType.AAGun) WorldThreatRing(at, DroneSandbox.Scale.D(18f));
+                    if (!ToGui(at + Vector3.up, out g)) continue;
+                    float fade = c.Mobile ? Mathf.Lerp(0.95f, 0.35f, (Time.time - c.lastSeenAt) / Recon.GhostSeconds) : 0.8f;
+                    Stamp(DashedDiamondTexture(), g, 9f * s, new Color(Amber.r, Amber.g, Amber.b, fade));
+                }
+                else
+                {
+                    const int dashes = 28;
+                    float size = 3f * s;
+                    for (int i = 0; i < dashes; i += 2)
+                    {
+                        float a = i * Mathf.PI * 2f / dashes;
+                        Vector3 p = at + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * c.contactRadius;
+                        p.y = Ground.HeightAt(p) + 0.1f;
+                        if (ToGui(p, out Vector2 dot)) Fill(new Rect(dot.x - size / 2f, dot.y - size / 2f, size, size), grey);
+                    }
+                    if (!ToGui(at + Vector3.up * 0.5f, out g)) continue;
+                    Dot(g, 10f * s, new Color(Ink.r, Ink.g, Ink.b, 0.7f));
+                    GUI.Label(new Rect(g.x - 10f * s, g.y - 10f * s, 20f * s, 20f * s), "<b>?</b>", Tinted(centered, grey));
+                }
+                if (!labelledGroups.Add(c.group)) continue;
+                // The position's label, under its first known unit: amber once anything in it is identified.
+                int known = 0;
+                bool identified = false;
+                float newest = -1000f;
+                foreach (var other in c.group.members)
+                {
+                    if (other.live != null || other.destroyed || other.intel == Intel.Unknown) continue;
+                    known++;
+                    identified |= other.intel >= Intel.Identified;
+                    newest = Mathf.Max(newest, other.lastSeenAt);
+                }
+                var style = Tinted(small, identified ? new Color(Amber.r, Amber.g, Amber.b, 0.9f) : grey);
+                style.alignment = TextAnchor.UpperCenter;
+                GUI.Label(new Rect(g.x - 110f * s, g.y + 12f * s, 220f * s, 16f * s),
+                    $"{PositionName(c.group.kind)}, {known} known, seen {Ago(Time.time - newest)}", style);
+            }
+        }
+
+        readonly HashSet<WorldGroup> labelledGroups = new HashSet<WorldGroup>();
+
+        static string PositionName(WorldGroupKind kind) => kind switch
+        {
+            WorldGroupKind.AirDefence => "AA site", WorldGroupKind.Battery => "Gun battery", WorldGroupKind.Rockets => "Rocket battery",
+            WorldGroupKind.Headquarters => "Front command", WorldGroupKind.Laager => "Vehicle park", _ => kind.ToString(),
+        };
+
+        // A mapped AA gun's reach on flat ground for a drone at DroneFlightAltitude (ThreatRing does it properly for a live one).
+        void WorldThreatRing(Vector3 gun, float range)
+        {
+            const int dots = 32;
+            float h = DroneFlightAltitude - 0.9f, reach = Mathf.Sqrt(Mathf.Max(0f, range * range - h * h)), size = 3f * Scale;
+            var colour = new Color(Hostile.r, Hostile.g, Hostile.b, 0.35f);
+            for (int i = 0; i < dots; i++)
+            {
+                float a = i * Mathf.PI * 2f / dots;
+                Vector3 p = gun + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * reach;
+                p.y = Ground.HeightAt(p) + 0.1f;
+                if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), colour);
+            }
+        }
+
+        // "40 s ago", "6 min ago", "1 h 12 min ago".
+        static string Ago(float seconds)
+        {
+            if (seconds < 90f) return $"{Mathf.FloorToInt(seconds)} s ago";
+            int minutes = Mathf.FloorToInt(seconds / 60f);
+            return minutes < 60 ? $"{minutes} min ago" : $"{minutes / 60} h {minutes % 60} min ago";
+        }
+
         // Zoomed out, a marker on each enemy on the map (targets and the hovered one have brackets): a solid orange
         // diamond edged white for one we can see right now, a hollow diamond with its class for a gun we've mapped
         // but aren't watching.

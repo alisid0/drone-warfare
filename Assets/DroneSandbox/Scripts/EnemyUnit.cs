@@ -26,6 +26,7 @@ namespace DroneSandbox
         public EnemyType type;
         public bool isTarget;          // a mission objective
         public bool isDecoy;           // an inflatable fake (see Situations: Decoy Field)
+        public WorldContact World { get; private set; } // a theatre unit out beyond the sector (WorldActivity), or null
         public bool Hidden { get; private set; }
         public Vector3 searchCenter;   // where the HUD draws the search circle while hidden
         float moveSpeed;
@@ -526,6 +527,25 @@ namespace DroneSandbox
             ApplyVisibility();
         }
 
+        // A theatre unit coming into a drone's reach (WorldActivity): what we knew of it, under its theatre number, and
+        // whether it was still on alert.
+        public void FromWorld(WorldContact contact, Vector2 origin)
+        {
+            World = contact;
+            ContactId = contact.Label;
+            Intel = contact.intel;
+            LastSeenPosition = Ground.OnGround(new Vector3(contact.lastSeen.x - origin.x, 0f, contact.lastSeen.y - origin.y));
+            LastSeenTime = contact.lastSeenAt;
+            ContactPosition = Ground.OnGround(new Vector3(contact.contactPosition.x - origin.x, 0f, contact.contactPosition.y - origin.y));
+            ContactRadius = contact.contactRadius;
+            if (Time.time - contact.alertedAt < alertSeconds)
+            {
+                AlertedAt = alertBegan = alertReadyAt = contact.alertedAt;
+                trouble = transform.position;
+            }
+            ApplyVisibility();
+        }
+
         // Recon's verdict for this moment: whether anything of ours can see it, and whether up close.
         public void Observe(bool seen, bool close, float dt)
         {
@@ -688,8 +708,11 @@ namespace DroneSandbox
             away = Quaternion.Euler(0f, Random.Range(-40f, 40f), 0f) * away.normalized;
             Vector3 point = transform.position + away * Random.Range(30f, 45f) * Scale.Distance;
             float limit = SandboxGame.MapHalfSize - Scale.D(10f);
-            point.x = Mathf.Clamp(point.x, -limit, limit);
-            point.z = Mathf.Clamp(point.z, -limit, limit);
+            if (World == null) // a theatre unit has the whole world; the sector's stay in it
+            {
+                point.x = Mathf.Clamp(point.x, -limit, limit);
+                point.z = Mathf.Clamp(point.z, -limit, limit);
+            }
             return Ground.OnGround(point);
         }
 
@@ -721,6 +744,14 @@ namespace DroneSandbox
             if (Time.time < departAt) return;
             if (routeIndex >= route.Count)
             {
+                if (World != null)
+                {
+                    // A theatre patrol or convoy turns round at the end of its stretch of road.
+                    route.Reverse();
+                    routeIndex = Mathf.Min(1, route.Count - 1);
+                    World.direction = -World.direction;
+                    return;
+                }
                 route = null;
                 SandboxGame.Instance.OnEnemyEscaped(this);
                 return;
@@ -833,6 +864,9 @@ namespace DroneSandbox
                 transform.position += Quaternion.Euler(0f, heading, 0f) * Vector3.forward * moveSpeed * dt;
             SettleOnGround(8f * dt);
         }
+
+        // Back on the ground, now: a theatre unit placed before the detail ground under it streamed in (WorldActivity).
+        public void Resettle() => SettleOnGround(1f);
 
         // Sits the unit on the terrain, tilted to match the slope. blend 1 snaps straight there.
         void SettleOnGround(float blend)

@@ -107,6 +107,7 @@ namespace DroneSandbox
             gameObject.AddComponent<PhotoMode>().Init(this, rts, cam);
             Sound.Create(gameObject, cam, rts);
             gameObject.AddComponent<Recon>();
+            gameObject.AddComponent<WorldActivity>();
             DroneFeed.Create(gameObject, rts);
             OpenMenu();
         }
@@ -552,6 +553,7 @@ namespace DroneSandbox
         void ClearUnits()
         {
             StopAllCoroutines();
+            WorldActivity.ReleaseAll(); // the theatre's units go back to data, keeping what we know of them
             Wildlife.Clear();
             foreach (var d in drones) if (d != null) Destroy(d.gameObject);
             foreach (var e in enemies) if (e != null) Destroy(e.gameObject);
@@ -860,7 +862,7 @@ namespace DroneSandbox
             SlowDown($"{enemy.unitName} identified");
             if (Time.time - identifiedNewsAt > 2f)
             {
-                ShowMessage(enemy.unitName + " identified");
+                ShowMessage(enemy.unitName + " identified" + (enemy.World != null ? " near " + enemy.World.group.near : ""));
                 identifiedNewsAt = Time.time;
             }
             Sound.Alert("contact", 1.5f);
@@ -1135,7 +1137,13 @@ namespace DroneSandbox
                 if (enemy.type != EnemyType.Command) Effects.Wreck(enemy);
                 Aftermath(enemy);
                 if (enemy.type == EnemyType.Radar) ShowMessage("Radar down - the guns it fed aim slower now", 3.5f);
-                if (Mode == GameMode.Sandbox)
+                if (enemy.World != null)
+                {
+                    // A theatre unit stays destroyed (WorldActivity), and earns no points: they're for objectives.
+                    WorldActivity.Destroyed(enemy.World);
+                    if (enemy.type != EnemyType.Radar) ShowMessage($"{enemy.unitName} destroyed near {enemy.World.group.near}");
+                }
+                else if (Mode == GameMode.Sandbox)
                 {
                     // Fixed defences come back at the same spot; vehicles anywhere in enemy territory.
                     Vector3 respawnAt = enemy.IsMobile ? RandomEnemyPoint() : enemy.transform.position;

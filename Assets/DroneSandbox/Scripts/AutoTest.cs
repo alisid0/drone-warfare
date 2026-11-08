@@ -16,7 +16,7 @@ namespace DroneSandbox
         StreamWriter log;
         int errors;
         bool demo;
-        static string only; // -autotest-only seek (the hunts and Hide and Seek), tour (the sector tour, for its memory growth) or flight
+        static string only; // -autotest-only seek (the hunts and Hide and Seek), tour (the sector tour, for its memory growth), flight or world (WorldRecon)
         static bool profileFlight; // record profiler captures round the flight's stops (development builds)
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -100,6 +100,14 @@ namespace DroneSandbox
                 yield return ContinuousFlight(game, rts, 2);
                 yield return ContinuousFlight(game, rts, 6);
                 profileFlight = false;
+                log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
+            if (only == "world")
+            {
+                yield return WorldRecon(game, rts);
                 log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
                 yield return new WaitForSecondsRealtime(0.5f);
                 Application.Quit();
@@ -823,16 +831,7 @@ namespace DroneSandbox
             // Twice, as ChatGPT's gate asks: the second run is warmed and must be just as clean.
             yield return ContinuousFlight(game, rts, 1);
             yield return ContinuousFlight(game, rts, 2);
-            // Two experiment passes on the same route for the stall crossing a river at a tile row (0.7-6.8 s, hd180):
-            // without screen-space reflections, then with the regional ring's page work held. Reported only.
-            Atmosphere.Profile.TryGet(out UnityEngine.Rendering.HighDefinition.ScreenSpaceReflection reflections);
-            bool reflecting = reflections != null && reflections.enabled.value;
-            if (reflections != null) reflections.enabled.value = false;
-            yield return ContinuousFlight(game, rts, 3);
-            if (reflections != null) reflections.enabled.value = reflecting;
-            FarDetail.PauseRegional = true;
-            yield return ContinuousFlight(game, rts, 4);
-            FarDetail.PauseRegional = false;
+            yield return WorldRecon(game, rts);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
@@ -1629,7 +1628,7 @@ namespace DroneSandbox
                 {
                     float nearest = float.MaxValue;
                     foreach (var e in game.enemies)
-                        if (e != null && e.IsAlive && e.type == EnemyType.AAGun)
+                        if (e != null && e.IsAlive && e.type == EnemyType.AAGun && e.World == null)
                             nearest = Mathf.Min(nearest, Vector3.Distance(e.transform.position, at));
                     return nearest;
                 }
@@ -1748,7 +1747,7 @@ namespace DroneSandbox
                 yield return new WaitForSecondsRealtime(1f);
                 yield return Shot("13a_last_delivery_start");
                 var eye = game.SpawnDrone(DroneType.Scout);
-                var tankers = game.enemies.FindAll(e => e.type == EnemyType.Tanker);
+                var tankers = game.enemies.FindAll(e => e.type == EnemyType.Tanker && e.World == null);
                 var loaded = game.enemies.Find(e => e.isTarget);
                 int loadedSlot = loaded != null ? tankers.IndexOf(loaded) : -1;
                 int looked = 0;
@@ -1810,7 +1809,7 @@ namespace DroneSandbox
             {
                 game.StartMission(corridor);
                 game.CloseBriefing();
-                var guns = game.enemies.FindAll(e => e.type == EnemyType.AAGun);
+                var guns = game.enemies.FindAll(e => e.type == EnemyType.AAGun && e.World == null);
                 var depot = game.enemies.Find(e => e.isTarget);
                 foreach (var gun in guns)
                 {
@@ -1911,7 +1910,7 @@ namespace DroneSandbox
             hud.showHelp = false;
 
             var targets = game.enemies.FindAll(e => e.isTarget);
-            var aa = game.enemies.Find(e => e.type == EnemyType.AAGun);
+            var aa = game.enemies.Find(e => e.type == EnemyType.AAGun && e.World == null);
             camFocus = Ground.OnGround(game.Mission.cameraFocus);
             camDistance = game.Mission.cameraDistance;
             camYaw = game.Mission.cameraYaw;
@@ -2414,7 +2413,8 @@ namespace DroneSandbox
                         if (e != null && e.Known && known.Add(e))
                         {
                             Vector2 at = new Vector2(e.transform.position.x, e.transform.position.z) + FarTerrain.Origin;
-                            bool far = Mathf.Max(Mathf.Abs(e.transform.position.x), Mathf.Abs(e.transform.position.z)) > Ground.Size * 0.5f;
+                            // The theatre's own Dravin units (WorldActivity) belong out there; only the sector's own count.
+                            bool far = e.World == null && Mathf.Max(Mathf.Abs(e.transform.position.x), Mathf.Abs(e.transform.position.z)) > Ground.Size * 0.5f;
                             if (far) farContacts++;
                             contacts.Append($" {e.type} at ({at.x:F0}, {at.y:F0}){(far ? " OUTSIDE the sector" : "")}, {Vector3.Distance(e.transform.position, swift.transform.position):F0} m from the Swift;");
                         }
@@ -2504,6 +2504,234 @@ namespace DroneSandbox
                           $"committed {committedBefore / 1048576} -> {System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / 1048576} MB, {Screen.width}x{Screen.height}");
             if (reached < best.Count || swift == null || !swift.IsAlive || Mathf.Max(slow95, fast95) > 16.7f || FarDetail.WorstCommitMs > 2.0 ||
                 farContacts > 0 || Mathf.Abs(battery) > 2f) { if (pass <= 2) errors++; }
+        }
+
+        // ChatGPT's gameplay gate (critique 20): a Swift flies 15-20 km through Dravin country outside the battle sector, where
+        // WorldActivity's units live as data, and the theatre has to work there without its ground drawn: units come alive
+        // round the drone and go back to data behind it, sightings stay on the map and go stale, a vehicle park that noticed
+        // the drone moves off, a unit destroyed stays destroyed when the drone comes back, the battery drains as it should,
+        // and nothing hitches. The camera follows the first half of the route; for the second it stays at the base with the
+        // Swift deselected, so the ground under it never streams in.
+        IEnumerator WorldRecon(SandboxGame game, RtsController rts)
+        {
+            bool showAll = Recon.ForceShowAll;
+            Recon.ForceShowAll = false;
+            log.WriteLine($"World activity: {WorldActivity.Summary()}");
+            if (WorldActivity.Groups.Count < 60) { log.WriteLine("World recon: too few Dravin positions seeded"); errors++; }
+            Vector3 home = Flat(game.basePosition);
+            Vector2 homeWorld = new Vector2(home.x, home.z) + FarTerrain.Origin;
+            Vector3 ToLocal(Vector2 world) => new Vector3(world.x - FarTerrain.Origin.x, 0f, world.y - FarTerrain.Origin.y);
+            Vector2 ToWorld(Vector3 local) => new Vector2(local.x, local.z) + FarTerrain.Origin;
+            // From the base, the nearest standing position each time (a kind not visited yet counts as a little nearer), at
+            // least 2 km from those already on the route, for as long as the route stays within 20 km. Patrols and convoys
+            // move, so they're met by chance.
+            var route = new List<WorldGroup>();
+            Vector2 at = homeWorld;
+            float length = 0f;
+            while (true)
+            {
+                WorldGroup next = null;
+                float best = float.MaxValue, step = 0f;
+                foreach (var g in WorldActivity.Groups)
+                {
+                    if (g.OnRoad || route.Contains(g) || WorldActivity.NearSector(g.centre)) continue;
+                    bool spaced = true;
+                    foreach (var r in route) spaced &= Vector2.Distance(r.centre, g.centre) > 2000f;
+                    if (!spaced) continue;
+                    float d = Vector2.Distance(at, g.centre);
+                    float score = d * (route.Exists(r => r.kind == g.kind) ? 1f : 0.8f);
+                    if (score < best) { best = score; next = g; step = d; }
+                }
+                if (next == null || length + step > 20000f) break;
+                route.Add(next);
+                length += step;
+                at = next.centre;
+            }
+            var names = new System.Text.StringBuilder();
+            foreach (var g in route) names.Append($" {g.kind} near {g.near} ({g.centre.x:F0}, {g.centre.y:F0});");
+            log.WriteLine($"World recon route from the base at ({homeWorld.x:F0}, {homeWorld.y:F0}): {route.Count} positions, {length / 1000f:F1} km:{names}");
+            var swift = game.SpawnDrone(DroneType.Recon);
+            if (swift == null || route.Count < 5 || length < 15000f)
+            {
+                log.WriteLine($"World recon: Swift {swift != null}, {route.Count} positions, {length / 1000f:F1} km - not enough route");
+                errors++;
+                Recon.ForceShowAll = showAll;
+                yield break;
+            }
+            foreach (var g in route) swift.MoveTo(ToLocal(g.centre), true);
+            rts.selected.Clear();
+            rts.selected.Add(swift);
+            int spawnedBefore = WorldActivity.Spawned, releasedBefore = WorldActivity.Released, relocatedBefore = WorldActivity.Relocated;
+            WorldActivity.PeakLive = 0;
+            WorldActivity.WorstSpawnMs = 0f;
+            var seen = new Dictionary<WorldContact, float>(); // first identified, at Time.time
+            var alerted = new HashSet<WorldGroup>();
+            var sightings = new System.Text.StringBuilder();
+            var spikes = new System.Text.StringBuilder();
+            int spawnsSeen = WorldActivity.Spawned, killsSeen = game.enemiesDestroyed, gcSeen = System.GC.CollectionCount(0), otherHitches = 0;
+            var startProbe = gameObject.AddComponent<FrameStart>();
+            var scriptsProbe = gameObject.AddComponent<FrameScripts>();
+            UnityEngine.Rendering.RenderPipelineManager.endContextRendering += Rendered;
+            float frameBegan = 0f;
+            int unrendered = 0, strays = 0, hitches = 0, frames = 0, reached = 0, half = (route.Count + 1) / 2;
+            float worst = 0f, gameTime = 0f, flownBefore = swift.Flown, settleUntil = Time.realtimeSinceStartup + 1f, nextSample = 0f;
+            float started = Time.realtimeSinceStartup;
+            WorldContact marked = null; // shot on the first visit: it must still be gone when the Swift comes back
+            bool liveShot = false, watchingFromBase = false;
+            var moved = new HashSet<WorldGroup>();
+            int staleMarkers = 0;
+            // Twice a second: what's alive and how far from any drone, what has just been identified and how far from the
+            // camera, and which groups know the drone is about.
+            void Sample(Vector2 eye)
+            {
+                foreach (var c in WorldActivity.Contacts)
+                {
+                    Vector2 p = c.live != null ? ToWorld(c.live.transform.position) : c.position;
+                    if (c.live != null)
+                    {
+                        if (c.live.Alerted) alerted.Add(c.group);
+                        float nearest = float.MaxValue;
+                        foreach (var d in game.drones) if (d != null) nearest = Mathf.Min(nearest, Vector2.Distance(ToWorld(d.transform.position), p));
+                        if (nearest > WorldActivity.ReleaseRadius + 300f && !c.live.Observed) strays++;
+                    }
+                    if (c.CurrentIntel < Intel.Identified || seen.ContainsKey(c)) continue;
+                    seen[c] = Time.time;
+                    float fromCamera = Vector2.Distance(eye, p);
+                    if (fromCamera > 3000f) unrendered++;
+                    sightings.Append($" {c.Label} {c.type} ({c.group.kind}) {fromCamera:F0} m from the camera;");
+                    if (marked == null && !c.Mobile && !c.group.CanRelocate && c.live != null)
+                    {
+                        marked = c;
+                        c.live.TakeDamage(1000000f);
+                    }
+                }
+                // A vehicle park that noticed the Swift and has since moved: our markers for it are left where it was.
+                foreach (var g in alerted)
+                {
+                    if (!g.CanRelocate || g.relocations == 0 || !moved.Add(g)) continue;
+                    foreach (var c in g.members)
+                        if (!c.destroyed && c.live == null && c.intel >= Intel.Contact && Vector2.Distance(c.MarkerPosition, c.position) > 500f) staleMarkers++;
+                }
+            }
+            while (reached < route.Count && swift != null && swift.IsAlive && Time.realtimeSinceStartup - started < 600f)
+            {
+                bool following = reached < half;
+                if (!following && !watchingFromBase)
+                {
+                    watchingFromBase = true;
+                    rts.selected.Clear();
+                    rts.LookAt(home, 600f, 45f);
+                    settleUntil = Time.realtimeSinceStartup + 2f;
+                }
+                Time.timeScale = following ? game.AllowedSpeed(4f) : 4f;
+                if (following) rts.LookAt(swift.transform.position, 400f, 30f);
+                yield return null;
+                if (swift == null) break;
+                float ms = Time.unscaledDeltaTime * 1000f;
+                gameTime += Time.deltaTime;
+                float scriptMs = (FrameScripts.At - frameBegan) * 1000f, renderMs = (rendered - FrameScripts.At) * 1000f;
+                frameBegan = FrameStart.At;
+                int gc = System.GC.CollectionCount(0);
+                if (Time.realtimeSinceStartup > settleUntil)
+                {
+                    frames++;
+                    worst = Mathf.Max(worst, ms);
+                    // With what the theatre did that frame (units brought alive or destroyed, how many live) and what the
+                    // rest of the frame went on. Only a slow frame the theatre had a hand in counts against it; the others
+                    // are the streamed world's, reported here and judged by the continuous-flight gate.
+                    int spawnedNow = WorldActivity.Spawned - spawnsSeen, destroyedNow = game.enemiesDestroyed - killsSeen;
+                    if (ms > 33.3f)
+                    {
+                        if (spawnedNow > 0 || destroyedNow > 0) hitches++; else otherHitches++;
+                        if (hitches + otherHitches <= 10)
+                        {
+                            Vector2 w = ToWorld(swift.transform.position);
+                            spikes.Append($" {ms:F0} ms at ({w.x:F0}, {w.y:F0}) {(following ? "follow" : "base")} leg {reached} [update {scriptMs:F0}, render {renderMs:F0}], spawned {spawnedNow}, " +
+                                          $"destroyed {destroyedNow}, live {WorldActivity.LiveCount}, tiles {FarDetail.LastFrameMs:F1}, scatter {FarScatter.MainThreadMs:F1}/places {FarScatter.PlacesMs:F1}, " +
+                                          $"canopy {ForestHlod.LastFrameMs:F1} ms{(gc != gcSeen ? " GC" : "")};");
+                        }
+                    }
+                }
+                spawnsSeen = WorldActivity.Spawned;
+                killsSeen = game.enemiesDestroyed;
+                gcSeen = gc;
+                if (Vector2.Distance(ToWorld(swift.transform.position), route[reached].centre) < 150f) reached++;
+                if (Time.realtimeSinceStartup < nextSample) continue;
+                nextSample = Time.realtimeSinceStartup + 0.5f;
+                Sample(following ? ToWorld(swift.transform.position) : homeWorld);
+                if (!liveShot && following && WorldActivity.LiveCount > 0 && seen.Count > 0)
+                {
+                    liveShot = true;
+                    Time.timeScale = 0f;
+                    yield return Shot("93_world_live");
+                    settleUntil = Time.realtimeSinceStartup + 1f;
+                }
+            }
+            UnityEngine.Rendering.RenderPipelineManager.endContextRendering -= Rendered;
+            Destroy(startProbe);
+            Destroy(scriptsProbe);
+            float battery = swift != null ? swift.Flown - flownBefore - gameTime : 0f; // flying time charged against flying time
+            // What the map holds now for everything seen: guns and radars where they were mapped, vehicles gone stale.
+            int fixedSeen = 0, mobileSeen = 0, lostFixed = 0, stale = 0, notStale = 0;
+            foreach (var pair in seen)
+            {
+                var c = pair.Key;
+                if (c.Mobile) mobileSeen++; else fixedSeen++;
+                if (c.live != null || c.destroyed) continue;
+                if (!c.Mobile && c.intel < Intel.Identified) lostFixed++;
+                if (c.Mobile && Time.time - c.lastSeenAt > Recon.GhostSeconds + 1f) { if (c.intel <= Intel.Contact) stale++; else notStale++; }
+            }
+            // Back to the unit shot on the first visit, the long way at 4x: the vehicle parks that noticed the Swift have
+            // time to move, and the shot unit's position must come alive without it.
+            var parks = new List<WorldGroup>();
+            foreach (var g in alerted) if (g.CanRelocate) parks.Add(g);
+            bool markedGone = false, restored = false;
+            if (marked != null && swift != null)
+            {
+                swift.MoveTo(ToLocal(marked.group.centre));
+                float back = Time.realtimeSinceStartup;
+                while (swift != null && swift.IsAlive && Time.realtimeSinceStartup - back < 240f)
+                {
+                    Time.timeScale = 4f;
+                    yield return null;
+                    if (swift != null && Time.realtimeSinceStartup >= nextSample)
+                    {
+                        nextSample = Time.realtimeSinceStartup + 0.5f;
+                        Sample(ToWorld(swift.transform.position));
+                    }
+                    if (swift == null || Vector2.Distance(ToWorld(swift.transform.position), marked.group.centre) > 300f) continue;
+                    // A second's look once it's overhead: the group's other units are live again with what we knew.
+                    Time.timeScale = 1f;
+                    yield return new WaitForSeconds(1f);
+                    markedGone = marked.destroyed && marked.live == null;
+                    foreach (var c in marked.group.members)
+                        if (c != marked && c.live != null && c.live.ContactId == c.Label && (!seen.ContainsKey(c) || c.live.Intel >= Intel.Identified)) restored = true;
+                    break;
+                }
+            }
+            Time.timeScale = 1f;
+            int movedParks = moved.Count;
+            // The map from high over the route, with what we know of it.
+            Vector2 middle = homeWorld;
+            foreach (var g in route) middle += g.centre;
+            middle /= route.Count + 1;
+            rts.LookAt(ToLocal(middle), 7000f, 30f);
+            yield return new WaitForSecondsRealtime(2f);
+            yield return Shot("93_world_markers");
+            int spawned = WorldActivity.Spawned - spawnedBefore, released = WorldActivity.Released - releasedBefore;
+            log.WriteLine($"World recon: reached {reached}/{route.Count} in {Time.realtimeSinceStartup - started:F0} s, Swift alive {swift != null && swift.IsAlive}, " +
+                          $"battery drift {battery:F1} s; came alive {spawned}, back to data {released}, peak live {WorldActivity.PeakLive}/{WorldActivity.MaxLive}, " +
+                          $"worst spawn {WorldActivity.WorstSpawnMs:F1} ms ({WorldActivity.WorstSpawnType}), strays {strays}; identified {seen.Count} ({fixedSeen} fixed, {mobileSeen} vehicles, " +
+                          $"{unrendered} over 3 km from the camera):{sightings}");
+            log.WriteLine($"World recon intel: fixed lost {lostFixed}, vehicles gone stale {stale} (still sharp {notStale}); alerted groups {alerted.Count}, " +
+                          $"vehicle parks alerted {parks.Count}, moved {movedParks} (relocations {WorldActivity.Relocated - relocatedBefore}), markers left stale {staleMarkers}; " +
+                          $"shot {(marked != null ? marked.Label + " " + marked.type : "none")}: stayed destroyed {markedGone}, group restored {restored}");
+            bool gate = route.Count >= 5 && reached == route.Count && swift != null && swift.IsAlive && spawned >= 10 && released >= 5 && fixedSeen >= 2 && mobileSeen >= 1
+                        && unrendered >= 1 && lostFixed == 0 && notStale == 0 && stale >= 1 && alerted.Count >= 1 && parks.Count >= 1 && movedParks >= 1 && staleMarkers >= 1
+                        && markedGone && restored && WorldActivity.PeakLive <= WorldActivity.MaxLive && strays == 0 && hitches == 0 && Mathf.Abs(battery) <= 2f;
+            log.WriteLine($"World recon gate: frames over 33.3 ms with the theatre at work {hitches}, others {otherHitches}, of {frames} (worst {worst:F1} ms):{spikes} -> {(gate ? "PASS" : "FAIL")}");
+            if (!gate) errors++;
+            Recon.ForceShowAll = showAll;
         }
 
         // One permanent landmark of each kind as the world draws it outside a sector (streamed ground, far masses), from
