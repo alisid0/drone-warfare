@@ -47,17 +47,23 @@ namespace DroneSandbox
             return a * 0.66f + b * 0.34f;
         }
 
-        // Warped ellipses retain elongated openings; distance is in metres so every rim has a physical width.
-        // A 600 m presence field clusters them, so dense woodland is not punched by a near-regular 192 m lattice.
-        public static float Glade(float x, float z)
+        // Tree cover of the glade field: 0 in an opening, 1 in the wood. Glade(x, z, out rise) also gives canopy height.
+        public static float Glade(float x, float z) => Glade(x, z, out _);
+
+        // Lobed openings on a clustered 192 m lattice: a warped ellipse with one to three rim lobes makes bays and arms,
+        // never a plain oval. A 600 m presence field clusters them, so dense woodland is not punched by a near-regular
+        // lattice. Cover and rise share one edge distance in metres: crown-sized bites leave single crowns standing out
+        // or notches, mature edges reach full height within 5 m, and younger stretches keep a lower 5-11 m fringe first.
+        // Larger glades hold a lone tree or a scrub clump.
+        public static float Glade(float x, float z, out float rise)
         {
+            rise = 1f;
             float presence = Mathf.SmoothStep(0f, 1f, (Noise(x, z, 610f, 120) - 0.36f) / 0.12f);
             if (presence <= 0f) return 1f;
             const float step = 192f;
             int i = Mathf.FloorToInt(x / step), j = Mathf.FloorToInt(z / step);
-            float margin = 1f;
-            float warpX = (Noise(x, z, 43f, 67) - 0.5f) * 10f;
-            float warpZ = (Noise(x, z, 47f, 68) - 0.5f) * 10f;
+            float cover = 1f, warpX = 0f, warpZ = 0f, bite = 0f, young = 0f, band = 0f;
+            bool sampled = false;
             for (int dz = -1; dz <= 1; dz++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
@@ -66,7 +72,20 @@ namespace DroneSandbox
                     float cx = (a + Unit(a, b, 61)) * step;
                     float cz = (b + Unit(a, b, 62)) * step;
                     float size = Unit(a, b, 63);
-                    float radius = 18f + 26f * size * size;
+                    float radius = 22f + 28f * size * size;
+                    // Lobes end within 2.6 radii of the centre; warp, bites and the young fringe add under 36 m.
+                    float reach = radius * 2.6f + 36f;
+                    if ((x - cx) * (x - cx) + (z - cz) * (z - cz) > reach * reach) continue;
+                    if (!sampled)
+                    {
+                        // Two warp octaves bend the outline at 20-60 m; the shared edge noise is sampled once per point.
+                        sampled = true;
+                        warpX = (Noise(x, z, 43f, 67) - 0.5f) * 16f + (Noise(x, z, 17f, 126) - 0.5f) * 7f;
+                        warpZ = (Noise(x, z, 47f, 68) - 0.5f) * 16f + (Noise(x, z, 19f, 127) - 0.5f) * 7f;
+                        bite = (Noise(x, z, 6.5f, 128) - 0.5f) * 6f;
+                        young = Mathf.SmoothStep(0f, 1f, (0.44f - Noise(x, z, 41f, 129)) / 0.14f);
+                        band = 5f + 6f * Noise(x, z, 23f, 130);
+                    }
                     float stretch = Mathf.Sqrt(1.7f + Unit(a, b, 64));
                     float rx = radius * stretch, rz = radius / stretch;
                     float angle = Unit(a, b, 66) * Mathf.PI, ca = Mathf.Cos(angle), sa = Mathf.Sin(angle);
@@ -74,9 +93,33 @@ namespace DroneSandbox
                     float wz = z - cz + warpZ;
                     float u = wx * ca - wz * sa, v = wx * sa + wz * ca;
                     float distance = EllipseDistance(u, v, rx, rz);
-                    margin = Mathf.Min(margin, Mathf.Clamp01(distance / (10f + 15f * Unit(a, b, 69))));
+                    for (int k = 0, lobes = 1 + Hash(a, b, 70) % 3; k < lobes; k++)
+                    {
+                        float t = Unit(a, b, 71 + k) * 2f * Mathf.PI, along = 0.8f + 0.3f * Unit(a, b, 74 + k);
+                        float lu = u - Mathf.Cos(t) * rx * along, lv = v - Mathf.Sin(t) * rz * along;
+                        distance = Mathf.Min(distance, Mathf.Sqrt(lu * lu + lv * lv) - radius * (0.4f + 0.3f * Unit(a, b, 77 + k)));
+                    }
+                    distance += bite;
+                    float c = Mathf.SmoothStep(0f, 1f, distance / 3f);
+                    float mature = Mathf.SmoothStep(0f, 1f, (distance - 0.5f) / 4.5f);
+                    float fringe = 0.42f * Mathf.SmoothStep(0f, 1f, (distance - 0.5f) / 3f) + 0.58f * Mathf.SmoothStep(0f, 1f, (distance - band) / 4f);
+                    float r = Mathf.Lerp(mature, fringe, young);
+                    if (radius >= 26f)
+                        for (int k = 0, count = 1 + Hash(a, b, 88) % 2; k < count; k++)
+                        {
+                            // Lone trees keep full height; scrub clumps are wider, sparser and only a few metres tall.
+                            float t = Unit(a, b, 80 + k) * 2f * Mathf.PI, s = 0.25f + 0.4f * Unit(a, b, 82 + k);
+                            bool tree = Unit(a, b, 84 + k) < 0.6f;
+                            float iu = u - Mathf.Cos(t) * rx * s, iv = v - Mathf.Sin(t) * rz * s;
+                            float inside = (tree ? 3.5f : 5f) + (tree ? 2f : 3f) * Unit(a, b, 86 + k) - bite * 0.5f - Mathf.Sqrt(iu * iu + iv * iv);
+                            c = Mathf.Max(c, Mathf.SmoothStep(0f, tree ? 1f : 0.6f, inside / 2.5f));
+                            r = Mathf.Max(r, Mathf.SmoothStep(0f, tree ? 1f : 0.25f, inside / 3f));
+                        }
+                    cover = Mathf.Min(cover, c);
+                    rise = Mathf.Min(rise, r);
                 }
-            return Mathf.Lerp(1f, margin, presence);
+            rise = Mathf.Lerp(1f, rise, presence);
+            return Mathf.Lerp(1f, cover, presence);
         }
 
         // First-order ellipse distance is exact at the rim and along either axis, unlike a fixed radial multiplier.
@@ -87,7 +130,7 @@ namespace DroneSandbox
             return gradient > 0.0001f ? length * (length - 1f) / gradient : -Mathf.Min(rx, rz);
         }
 
-        // A convex descent reaches ground tangentially instead of retaining an upright five-metre canopy lip.
+        // A convex descent reaches ground tangentially where woods meet fields, tracks and water; glades use Glade's rise.
         public static float Rim(float margin) => Mathf.Clamp01(margin) * Mathf.Clamp01(margin);
 
         // Interpolate cover before adding metre-scale shoreline noise; keep scrub out of water and built land.
@@ -144,12 +187,12 @@ namespace DroneSandbox
             float ax = x + (Noise(x, z, 67f, 19) - 0.5f) * 26f;
             float az = z + (Noise(x, z, 71f, 20) - 0.5f) * 26f;
             float age = Mathf.Clamp01((Broad(ax, az, 122) - 0.29f) / 0.42f);
-            float glade = Glade(x, z), margin = Mathf.Min(edge, glade);
-            float height = (12f + 12f * age) * Rim(margin);
+            float glade = Glade(x, z, out float rise), margin = Mathf.Min(edge, glade);
+            float height = (12f + 12f * age) * Mathf.Min(Rim(edge), rise);
             float tint = Noise(x, z, 80f, 83) * 0.7f + Noise(x, z, 12f, 84) * 0.3f;
             return new Stand { species = species, neighbour = neighbour, blend = blend,
                 shade = Mathf.Clamp(Mathf.FloorToInt(tint * 3f), 0, 2), height = height, age = age, wood = edge,
-                width = 1f, radius = Mathf.Lerp(2f, 2.8f + 1.8f * age, margin), cover = edge * glade };
+                width = 1f, radius = Mathf.Lerp(2f, 2.8f + 1.8f * age, Mathf.Min(margin, rise)), cover = edge * glade };
         }
 
         // Inside the wood mask a glade floor keeps this low apron, so coarse terrain cannot show through the canopy.
@@ -157,6 +200,7 @@ namespace DroneSandbox
 
         // Broad relief suits every level; only 4 m recipe surfaces sample crown bumps finely enough not to alias.
         // Relief eases onto the apron with zero slope; fields, tracks and water (wood zero) still meet the real floor.
+        // Scrub and bracken hummocks lift a glade floor by up to half the apron, so it never reads as a smooth disc.
         public static float Canopy(Stand stand, float x, float z, bool crowns = false)
         {
             float relief = stand.height * 0.70f;
@@ -168,6 +212,8 @@ namespace DroneSandbox
             }
             relief = Mathf.Max(0f, relief);
             float apron = Understorey * stand.wood * stand.wood;
+            if (relief >= apron * 3f) return relief;
+            apron *= 1f + 0.5f * Noise(x, z, 13f, 131);
             if (relief >= apron * 2f) return relief;
             float t = 1f - relief / (apron * 2f);
             return relief + apron * t * t;
