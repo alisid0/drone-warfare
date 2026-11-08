@@ -809,14 +809,16 @@ namespace DroneSandbox
             // Twice, as ChatGPT's gate asks: the second run is warmed and must be just as clean.
             yield return ContinuousFlight(game, rts, 1);
             yield return ContinuousFlight(game, rts, 2);
-            // Two experiment passes on the same route for the GPU spikes nearing compounds (up to 1.1 s of GPU time on a
-            // warmed pass, hd177): half-resolution textures, to see whether video-memory paging is the cause, then the
-            // baseline again. Reported only.
-            int mipLimit = QualitySettings.globalTextureMipmapLimit;
-            QualitySettings.globalTextureMipmapLimit = mipLimit + 1;
+            // Two experiment passes on the same route for the stall crossing a river at a tile row (0.7-6.8 s, hd180):
+            // without screen-space reflections, then with the regional ring's page work held. Reported only.
+            Atmosphere.Profile.TryGet(out UnityEngine.Rendering.HighDefinition.ScreenSpaceReflection reflections);
+            bool reflecting = reflections != null && reflections.enabled.value;
+            if (reflections != null) reflections.enabled.value = false;
             yield return ContinuousFlight(game, rts, 3);
-            QualitySettings.globalTextureMipmapLimit = mipLimit;
+            if (reflections != null) reflections.enabled.value = reflecting;
+            FarDetail.PauseRegional = true;
             yield return ContinuousFlight(game, rts, 4);
+            FarDetail.PauseRegional = false;
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)

@@ -39,6 +39,9 @@ namespace DroneSandbox
         public static int StagesThisFrame { get; private set; }
         // Real seconds before the followed eye's ready zone reaches a needed tile that isn't live (infinity when all are).
         public static float ReadyAhead { get; private set; } = float.PositiveInfinity;
+        // For the autotest's hitch experiment: hold the regional ring's page work (the hd180 stall came as the drone crossed a
+        // tile row at a river, 512 and 1024 m boundaries).
+        public static bool PauseRegional;
         // Whether the tile under the followed eye is live this frame, and the camera zone's missing tiles this frame.
         public static bool FollowedReady { get; private set; } = true;
         public static int CameraMissing { get; private set; }
@@ -228,7 +231,7 @@ namespace DroneSandbox
                 if (timer.Elapsed.TotalMilliseconds < BudgetMs) tileWork |= Prepare(timer);
             }
             bool regionalCommit = !tileWork && !collisionChanged && !nearTurn && timer.Elapsed.TotalMilliseconds < .20;
-            regional?.Tick(eye, regionalCommit);
+            if (!PauseRegional) regional?.Tick(eye, regionalCommit);
             regionalWait = regionalWaiting && !regionalCommit ? regionalWait + 1 : 0;
             bool nearCommit = nearTurn || !tileWork && !collisionChanged && !regionalWaiting && timer.Elapsed.TotalMilliseconds < .20;
             near?.Tick(eye, focus, eyeHeight, nearCommit, CameraMissing == 0);
