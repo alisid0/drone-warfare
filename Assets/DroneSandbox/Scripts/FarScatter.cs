@@ -62,10 +62,12 @@ namespace DroneSandbox
         readonly Plane[] planes = new Plane[6];
         readonly Dictionary<Camera, View> views = new Dictionary<Camera, View>();
         readonly List<Camera> staleCameras = new List<Camera>();
-        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
-        readonly ForestHlod forest = new ForestHlod();
-        readonly SettlementHlod settlements = new SettlementHlod();
-        readonly LandmarkHlod landmarks = new LandmarkHlod();
+        // Made in Awake: Unity forbids creating property blocks while a MonoBehaviour is being constructed (development
+        // builds throw, and the far world never started in one).
+        MaterialPropertyBlock properties;
+        ForestHlod forest;
+        SettlementHlod settlements;
+        LandmarkHlod landmarks;
         readonly Stopwatch workTimer = new Stopwatch(), renderTimer = new Stopwatch();
         readonly List<Tree> cellTrees = new List<Tree>(); // the one cell builder's working list
         Vector2 builtOrigin;
@@ -188,6 +190,13 @@ namespace DroneSandbox
                 view != null ? view.forward : camera.transform.forward, view != null ? view.focal : FocalPixels(camera) * (camera.orthographic ? -1f : 1f),
                 view != null ? view.ready : 0f);
             ForestMaterials.SetViewport(block, view != null ? view.viewport : Vector2.zero);
+        }
+
+        // The property block and the canopy, settlement and landmark passes, which hold property blocks of their own.
+        void Awake()
+        {
+            properties = new MaterialPropertyBlock();
+            forest = new ForestHlod(); settlements = new SettlementHlod(); landmarks = new LandmarkHlod();
         }
 
         // Explicit camera submission supports photo, scene and gameplay cameras without sharing their allowances.

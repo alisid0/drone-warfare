@@ -16,7 +16,8 @@ namespace DroneSandbox
         StreamWriter log;
         int errors;
         bool demo;
-        static string only; // -autotest-only seek (the hunts and Hide and Seek) or tour (the sector tour, for its memory growth)
+        static string only; // -autotest-only seek (the hunts and Hide and Seek), tour (the sector tour, for its memory growth) or flight
+        static bool profileFlight; // record profiler captures round the flight's stops (development builds)
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Launch()
@@ -91,6 +92,19 @@ namespace DroneSandbox
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
+            if (only == "flight")
+            {
+                // Two warmed flights of the route with no stops, recording the profiler within 450 m of each stop (where
+                // the hitches are) in a development build; ProfilerDump reads the captures.
+                profileFlight = UnityEngine.Profiling.Profiler.supported;
+                yield return ContinuousFlight(game, rts, 2);
+                yield return ContinuousFlight(game, rts, 6);
+                profileFlight = false;
+                log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
             if (only == "tour")
             {
                 yield return SectorTour(game, rts);
@@ -2260,7 +2274,7 @@ namespace DroneSandbox
                     if (used.Contains(stops[i].kind)) continue;
                     Vector3 to = stops[i].at;
                     float step = Vector3.Distance(from, to);
-                    if (length + step > 20000f) continue;
+                    if (length + step > (profileFlight ? 40000f : 20000f)) continue; // the profiling run starts elsewhere: reach the compounds
                     Vector3 ab = to - from;
                     float t = Mathf.Clamp01(Vector3.Dot(hq - from, ab) / Mathf.Max(1f, ab.sqrMagnitude));
                     if (Vector3.Distance(hq, from + ab * t) < clearOfHq) continue;
@@ -2422,6 +2436,21 @@ namespace DroneSandbox
                 }
                 // A stop: everything paused while the camera looks from 50 m, 300 m and 2.5 km.
                 Vector3 stop = stops[best[reached]].at;
+                if (profileFlight)
+                {
+                    bool near = Vector3.Distance(Flat(swift.transform.position), stop) < 450f;
+                    if (near && !UnityEngine.Profiling.Profiler.enabled)
+                    {
+                        UnityEngine.Profiling.Profiler.logFile = Path.Combine(outDir, $"profile_{pass}_{reached}");
+                        UnityEngine.Profiling.Profiler.enableBinaryLog = true;
+                        UnityEngine.Profiling.Profiler.enabled = true;
+                    }
+                    else if (!near && UnityEngine.Profiling.Profiler.enabled)
+                    {
+                        UnityEngine.Profiling.Profiler.enabled = false;
+                        UnityEngine.Profiling.Profiler.enableBinaryLog = false;
+                    }
+                }
                 if (Vector3.Distance(Flat(swift.transform.position), stop) < 90f)
                 {
                     string label = $"91_flight_{reached}_{stops[best[reached]].kind.Replace('/', '_')}";
@@ -2441,6 +2470,7 @@ namespace DroneSandbox
             }
             Time.timeScale = 1f;
             UnityEngine.Rendering.RenderPipelineManager.endContextRendering -= Rendered;
+            if (profileFlight) { UnityEngine.Profiling.Profiler.enabled = false; UnityEngine.Profiling.Profiler.enableBinaryLog = false; }
             Destroy(startProbe);
             Destroy(scriptsProbe);
             float realSeconds = Time.realtimeSinceStartup - started;

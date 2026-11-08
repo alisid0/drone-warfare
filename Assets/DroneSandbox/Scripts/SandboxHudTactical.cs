@@ -188,9 +188,11 @@ namespace DroneSandbox
             Dashes(a, b, new Color(colour.r, colour.g, colour.b, 0.9f), 2f * s, 8f * s, 4f * s, march);
             Vector2 v = b - a;
             float length = v.magnitude;
-            if (length < 40f * s) return;
+            if (length < 40f * s || !OnScreen(a, b, out float t0, out float t1)) return;
             float angle = Mathf.Atan2(v.x, -v.y) * Mathf.Rad2Deg;
-            for (float x = 35f * s; x < length - 20f * s; x += 70f * s)
+            // Arrows every 70 px on the part of the leg that's on screen only (an off-screen end can be millions away).
+            float step = 70f * s, first = Mathf.Max(35f * s, 35f * s + Mathf.Ceil((t0 * length - 35f * s) / step) * step);
+            for (float x = first; x < Mathf.Min(length - 20f * s, t1 * length); x += step)
                 Symbol(a + v / length * x, angle, 11f * s, ArrowTexture(), colour);
         }
 
@@ -436,9 +438,37 @@ namespace DroneSandbox
 
         // ---- Shapes ----
 
-        // A dashed line from a to b: dash and gap in pixels, the pattern shifted along by offset (gap 0 is solid).
+        // The part of the segment a-b inside the screen grown by a margin, as fractions along it; false when none is. A
+        // waypoint just in front of the camera projects millions of pixels off screen, and dashing that whole length cost
+        // 0.5-0.8 s of GUI calls in one frame (the flight test's hitches at its stops, hd171-hd182, found by profiling).
+        static bool OnScreen(Vector2 a, Vector2 b, out float t0, out float t1)
+        {
+            const float margin = 64f;
+            float lo = 0f, hi = 1f;
+            Vector2 d = b - a;
+            bool Edge(float p, float q)
+            {
+                if (Mathf.Abs(p) < 1e-6f) return q >= 0f;
+                float r = q / p;
+                if (p < 0f) { if (r > hi) return false; if (r > lo) lo = r; }
+                else { if (r < lo) return false; if (r < hi) hi = r; }
+                return true;
+            }
+            bool inside = Edge(-d.x, a.x + margin) && Edge(d.x, Screen.width + margin - a.x)
+                          && Edge(-d.y, a.y + margin) && Edge(d.y, Screen.height + margin - a.y);
+            t0 = lo; t1 = hi;
+            return inside;
+        }
+
+        // A dashed line from a to b: dash and gap in pixels, the pattern shifted along by offset (gap 0 is solid). Only the
+        // part on screen is drawn, with the pattern kept where it was.
         static void Dashes(Vector2 a, Vector2 b, Color colour, float thickness, float dash, float gap, float offset)
         {
+            if (!OnScreen(a, b, out float t0, out float t1)) return;
+            Vector2 whole = b - a;
+            offset -= whole.magnitude * t0;
+            b = a + whole * t1;
+            a += whole * t0;
             Vector2 d = b - a;
             float length = d.magnitude;
             if (length < 1f) return;

@@ -155,7 +155,7 @@ namespace DroneSandbox
                 else if (AchievementsOpen) DrawAchievements();
                 else if (SettingsOpen) DrawSettings();
                 else DrawMenu();
-                DrawAchievementToast();
+                UnityEngine.Profiling.Profiler.BeginSample("HUD toast"); DrawAchievementToast(); UnityEngine.Profiling.Profiler.EndSample();
                 return;
             }
 
@@ -167,22 +167,22 @@ namespace DroneSandbox
 
             if (Event.current.type == EventType.Repaint)
             {
-                DrawWorldOverlays();
+                UnityEngine.Profiling.Profiler.BeginSample("HUD world overlays"); DrawWorldOverlays(); UnityEngine.Profiling.Profiler.EndSample();
                 DrawDragBox();
             }
             if (!game.UiBlocking) AutoHideHelp();
             GUI.enabled = !game.UiBlocking;
-            DrawStats();
-            DrawLaunchBar();
-            DrawSelection();
-            DrawHelp();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD stats"); DrawStats(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD launch bar"); DrawLaunchBar(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD selection"); DrawSelection(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD help"); DrawHelp(); UnityEngine.Profiling.Profiler.EndSample();
             GUI.enabled = true;
-            DrawMessage();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD message"); DrawMessage(); UnityEngine.Profiling.Profiler.EndSample();
             DrawAchievementToast();
-            DrawCoach();
-            DrawPauseBanner();
-            DrawTelemetry();
-            if (Event.current.type == EventType.Repaint) DrawFeed();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD coach"); DrawCoach(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD pause banner"); DrawPauseBanner(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD telemetry"); DrawTelemetry(); UnityEngine.Profiling.Profiler.EndSample();
+            if (Event.current.type == EventType.Repaint) { UnityEngine.Profiling.Profiler.BeginSample("HUD feed"); DrawFeed(); UnityEngine.Profiling.Profiler.EndSample(); }
 
             if (game.BriefingOpen) DrawBriefing();
             else if (game.Result != MissionResult.None && Time.unscaledTime >= game.ResultsAt) DrawResults();
@@ -229,9 +229,10 @@ namespace DroneSandbox
         void DrawWorldOverlays()
         {
             float s = Scale;
+            UnityEngine.Profiling.Profiler.BeginSample("HUD place names");
             if (rts.Distance >= 55f * DroneSandbox.Scale.Camera) DrawPlaceNames();
-            DrawGroundZones();
-
+            UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD ground zones"); DrawGroundZones(); UnityEngine.Profiling.Profiler.EndSample();
             foreach (var e in game.enemies)
             {
                 if (e.Hidden) SearchCircle(e.searchCenter);
@@ -275,7 +276,7 @@ namespace DroneSandbox
                 }
             }
 
-            DrawTactical();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD tactical"); DrawTactical(); UnityEngine.Profiling.Profiler.EndSample();
         }
 
         // Dotted line on the ground showing how far this AA gun reaches a drone cruising at DroneFlightAltitude

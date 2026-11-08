@@ -15,7 +15,15 @@ namespace DroneSandbox.EditorTools
         const string WindowsBuild = "Builds/Windows/DroneWarfare.exe";
 
         [MenuItem("Drone Sandbox/Build for Windows")]
-        public static void BuildWindows()
+        public static void BuildWindows() => Build(WindowsBuild, BuildOptions.None);
+
+        // A development build beside the release one, for profiler captures of hitches (the autotest records them to files
+        // with Profiler.enableBinaryLog and ProfilerDump reads them back). Command line: -executeMethod
+        // DroneSandbox.EditorTools.BuildTools.BuildWindowsDevelopment
+        public static void BuildWindowsDevelopment() => Build("Builds/WindowsDev/DroneWarfare.exe", BuildOptions.Development);
+
+        // Builds the enabled scenes for 64-bit Windows to the path, with the given options.
+        static void Build(string path, BuildOptions buildOptions)
         {
             EnsureMainScene();
             // CPU render-thread and GPU frame times for the autotest's hitch report (FrameTimingManager); near-free.
@@ -30,12 +38,12 @@ namespace DroneSandbox.EditorTools
             var options = new BuildPlayerOptions
             {
                 scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray(),
-                locationPathName = WindowsBuild,
+                locationPathName = path,
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.None,
+                options = buildOptions,
             };
             BuildReport report = BuildPipeline.BuildPlayer(options);
-            Debug.Log($"Build {report.summary.result}: {report.summary.totalErrors} errors, {report.summary.totalSize / (1024 * 1024)} MB, {WindowsBuild}");
+            Debug.Log($"Build {report.summary.result}: {report.summary.totalErrors} errors, {report.summary.totalSize / (1024 * 1024)} MB, {path}");
             if (Application.isBatchMode && report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(1);
         }
 
