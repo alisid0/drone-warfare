@@ -131,6 +131,126 @@ namespace DroneSandbox
             return best;
         }
 
+        // A settlement's gardens closed on a 16 m lattice: a gap between its properties narrower than about 80 m (the
+        // strip along a railway, a block's open middle, the ground between two garden rows) is the settlement's own
+        // grass, and only land open to the country round it is farmed with that country (FarDetailData.SettlementOpen).
+        sealed class Enclosure
+        {
+            public float x0, z0;
+            public int w, h;
+            public bool[] open;
+        }
+
+        const float EnclosureCell = 16f;
+        const int Closing = 2; // cells
+        readonly List<Enclosure> enclosures = new List<Enclosure>();
+
+        // Mark the cells each settlement's gardens and town uses touch (not its paddocks, orchards or rough grass), grow
+        // them by the closing radius, flood the country in from the border round the grown cells, and grow that back:
+        // what the flood never reaches is a gap the settlement closes round. Two passes over all the plots.
+        void Enclose(int settlements)
+        {
+            float[] minX = new float[settlements], minZ = new float[settlements], maxX = new float[settlements], maxZ = new float[settlements];
+            for (int s = 0; s < settlements; s++) { minX[s] = minZ[s] = float.MaxValue; maxX[s] = maxZ[s] = float.MinValue; }
+            foreach (var p in plots)
+            {
+                if (p.landUse >= 6 || (uint)p.owner >= (uint)settlements) continue;
+                for (int c = 0; c < 4; c++)
+                {
+                    Vector2 q = p.Point((c & 1) == 0 ? -p.frontage * .5f : p.frontage * .5f, (c & 2) == 0 ? 0f : p.depth);
+                    minX[p.owner] = Math.Min(minX[p.owner], q.x); minZ[p.owner] = Math.Min(minZ[p.owner], q.y);
+                    maxX[p.owner] = Math.Max(maxX[p.owner], q.x); maxZ[p.owner] = Math.Max(maxZ[p.owner], q.y);
+                }
+            }
+            var grids = new Enclosure[settlements];
+            var marks = new bool[settlements][];
+            float pad = (Closing + 2) * EnclosureCell;
+            for (int s = 0; s < settlements; s++)
+            {
+                if (minX[s] > maxX[s]) continue;
+                var e = grids[s] = new Enclosure { x0 = minX[s] - pad, z0 = minZ[s] - pad };
+                e.w = (int)Math.Ceiling((maxX[s] + pad - e.x0) / EnclosureCell); e.h = (int)Math.Ceiling((maxZ[s] + pad - e.z0) / EnclosureCell);
+                marks[s] = new bool[e.w * e.h];
+            }
+            foreach (var p in plots)
+            {
+                if (p.landUse >= 6 || (uint)p.owner >= (uint)settlements || grids[p.owner] == null) continue;
+                var e = grids[p.owner]; var built = marks[p.owner];
+                float ax = Math.Abs(p.along.x) * p.frontage * .5f + Math.Abs(p.outward.x) * p.depth * .5f + EnclosureCell * .5f;
+                float az = Math.Abs(p.along.y) * p.frontage * .5f + Math.Abs(p.outward.y) * p.depth * .5f + EnclosureCell * .5f;
+                Vector2 c = p.Point(0f, p.depth * .5f);
+                int i0 = Math.Max(0, (int)Math.Floor((c.x - ax - e.x0) / EnclosureCell - .5f)), i1 = Math.Min(e.w - 1, (int)Math.Ceiling((c.x + ax - e.x0) / EnclosureCell - .5f));
+                int j0 = Math.Max(0, (int)Math.Floor((c.y - az - e.z0) / EnclosureCell - .5f)), j1 = Math.Min(e.h - 1, (int)Math.Ceiling((c.y + az - e.z0) / EnclosureCell - .5f));
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                        if (p.Contains(new Vector2(e.x0 + (i + .5f) * EnclosureCell, e.z0 + (j + .5f) * EnclosureCell), EnclosureCell * .5f)) built[j * e.w + i] = true;
+            }
+            for (int s = 0; s < settlements; s++)
+                if (grids[s] != null) Enclose(grids[s], marks[s]);
+        }
+
+        // One settlement's closing: grow, flood the country in from the border, then grow that back a cell further, so
+        // the open country reaches the outer gardens' own cells and only SettlementOpen's 2-6 m margin stays grass.
+        void Enclose(Enclosure e, bool[] built)
+        {
+            var grown = Grow(built, e.w, e.h, Closing);
+            var country = new bool[built.Length];
+            var queue = new Queue<int>();
+            for (int k = 0; k < built.Length; k++)
+            {
+                int i = k % e.w, j = k / e.w;
+                if ((i == 0 || j == 0 || i == e.w - 1 || j == e.h - 1) && !grown[k]) { country[k] = true; queue.Enqueue(k); }
+            }
+            while (queue.Count > 0)
+            {
+                int k = queue.Dequeue(), i = k % e.w, j = k / e.w;
+                for (int n = 0; n < 4; n++)
+                {
+                    int x = i + (n == 0 ? 1 : n == 1 ? -1 : 0), z = j + (n == 2 ? 1 : n == 3 ? -1 : 0);
+                    if ((uint)x >= (uint)e.w || (uint)z >= (uint)e.h) continue;
+                    int m = z * e.w + x;
+                    if (country[m] || grown[m]) continue;
+                    country[m] = true; queue.Enqueue(m);
+                }
+            }
+            e.open = Grow(country, e.w, e.h, Closing + 1);
+            enclosures.Add(e);
+        }
+
+        // Every cell within a radius (in cells) of a marked one; only marked cells on the edge of their region need stamping.
+        static bool[] Grow(bool[] source, int w, int h, int radius)
+        {
+            var result = (bool[])source.Clone();
+            for (int j = 0; j < h; j++)
+                for (int i = 0; i < w; i++)
+                {
+                    int k = j * w + i;
+                    if (!source[k] || i > 0 && i < w - 1 && j > 0 && j < h - 1 && source[k - 1] && source[k + 1] && source[k - w] && source[k + w]) continue;
+                    for (int z = Math.Max(0, j - radius); z <= Math.Min(h - 1, j + radius); z++)
+                        for (int x = Math.Max(0, i - radius); x <= Math.Min(w - 1, i + radius); x++)
+                            if ((x - i) * (x - i) + (z - j) * (z - j) <= radius * radius) result[z * w + x] = true;
+                }
+            return result;
+        }
+
+        // How open a point's ground is to the country round its settlement: 1 beyond every settlement and on its outer
+        // land, 0 in a gap it closes round, blended between the cells' middles so the change is never a 16 m step.
+        public float Openness(Vector2 p)
+        {
+            float result = 1f;
+            foreach (var e in enclosures)
+            {
+                float fx = (p.x - e.x0) / EnclosureCell - .5f, fz = (p.y - e.z0) / EnclosureCell - .5f;
+                if (fx < -1f || fz < -1f || fx > e.w || fz > e.h) continue;
+                int i = (int)Math.Floor(fx), j = (int)Math.Floor(fz);
+                float u = fx - i, v = fz - j;
+                float Cell(int x, int z) => (uint)x < (uint)e.w && (uint)z < (uint)e.h && !e.open[z * e.w + x] ? 0f : 1f;
+                float top = Cell(i, j) + (Cell(i + 1, j) - Cell(i, j)) * u, bottom = Cell(i, j + 1) + (Cell(i + 1, j + 1) - Cell(i, j + 1)) * u;
+                result = Math.Min(result, top + (bottom - top) * v);
+            }
+            return result;
+        }
+
         // Inside a paddock, orchard or rough patch by at least inset metres; village props may stand there.
         public bool InFringe(Vector2 p, float inset)
         {

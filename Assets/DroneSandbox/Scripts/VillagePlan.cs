@@ -88,6 +88,7 @@ namespace DroneSandbox
             // Spare ground is taken only after every settlement's houses, so it can never displace a property.
             for (int owner = 0; owner < settlements.Count; owner++)
                 Fringe(owner, roads, anchors[owner], settlements[owner].radius, settlements[owner].town);
+            Enclose(settlements.Count);
         }
 
         // Private access lanes are captured with the same vector widths used by tile and world painting.
