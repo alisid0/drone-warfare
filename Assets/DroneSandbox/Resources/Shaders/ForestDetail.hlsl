@@ -1,7 +1,8 @@
 // World-stable crowns for the far canopy (tier 3). Two nested jittered lattices in 60 m stands give emergent
 // 15-20 m crowns or 7-10 m ones; each crown is a lit cap with its own shade, dark gaps and a sun shadow. The
-// photo crown map adds foliage clumps. Everything fades to the stand mean before a crown spans three pixels.
-// Tools/CanopyRelief2/crowns.py mirrors this file for the offline review; keep the two in step.
+// photo crown map adds foliage clumps. Towards a glade whole crowns drop out by the macro cover at their centre,
+// and the gaps open onto a grass, bracken and scrub floor. Everything fades to the stand mean before a crown
+// spans three pixels. Tools/Glades/crowns.py mirrors this file for the offline review; keep the two in step.
 
 static const float ForestCrownCell = 15.0;
 static const float ForestCrownJitter = 0.45;
@@ -82,9 +83,11 @@ float ForestCrownShadow(float4 crown, bool present, bool own, float2 p, float su
 }
 
 // Crown surface in rotated lattice metres: albedo factor, outward slope, edge cover, stand strength and the
-// emergent share, whether the winner is emergent, and a hash for its foliage clumps. p returns warped.
-float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 sun, out float2 slope, out float cover,
-    out float strength, out bool big, out uint tone)
+// emergent share, whether the winner is emergent, a hash for its foliage clumps and the emergent shadow's darkening.
+// canopy and grad are the macro cover and its gradient: each crown keeps its own cover threshold, so crowns thin out
+// one by one towards an opening, emergent ones standing out furthest. p returns warped.
+float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 sun, float canopy, float2 grad,
+    out float2 slope, out float cover, out float strength, out bool big, out uint tone, out float shadow)
 {
     // A gentle warp bends the lattice rows; its slope stays near a quarter, so crowns keep their shape.
     p += 1.5 * float2(sin(p.y * 0.13 + 1.3 * sin(p.x * 0.071)), sin(p.x * 0.12 + 1.1 * sin(p.y * 0.083)));
@@ -104,10 +107,11 @@ float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 
         uint stand = ForestCrownHash((c + int2(ForestCrownNudge(h, 24u), ForestCrownNudge(h, 26u))) >> 2, 2u);
         float wx = (k & 1u) != 0u ? f.x : 1.0 - f.x, wz = (k >> 1) != 0u ? f.y : 1.0 - f.y;
         strength += wx * wz * (0.75 + 0.5 * ForestCrownUnit(stand, 8u));
-        bool present = ForestCrownUnit(h, 16u) < ForestCrownShare(stand);
+        float2 centre = (float2(c) + 0.5 + (float2(ForestCrownUnit(h, 0u), ForestCrownUnit(h, 8u)) - 0.5) * ForestCrownJitter) * ForestCrownCell;
+        bool present = ForestCrownUnit(h, 16u) < ForestCrownShare(stand)
+            && 0.03 + 0.55 * float(h >> 28) / 15.0 < canopy + dot(grad, centre - p);
         presentMask |= present ? 1u << k : 0u;
         uint g = ForestCrownRemix(h);
-        float2 centre = (float2(c) + 0.5 + (float2(ForestCrownUnit(h, 0u), ForestCrownUnit(h, 8u)) - 0.5) * ForestCrownJitter) * ForestCrownCell;
         float radius = ForestCrownCell * (0.50 + 0.14 * ForestCrownUnit(g, 16u));
         float top = 3.5 + 2.5 * ForestCrownUnit(g, 24u);
         ForestCrownOffer(best, present, k, g, centre, radius, top, radius * (0.50 + 0.15 * (1.0 - broadleaf)), p, true);
@@ -120,12 +124,14 @@ float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 
         int2 c = fine + int2(m & 1u, m >> 1);
         // The parent big cell is always one of the four above; an emergent parent leaves no room for small crowns.
         int2 parent = (c >> 1) - cell;
-        bool present = ((presentMask >> uint(parent.x + 2 * parent.y)) & 1u) == 0u;
         uint h = ForestCrownHash(c, 3u);
+        uint g = ForestCrownRemix(h);
         float2 centre = (float2(c) + 0.5 + (float2(ForestCrownUnit(h, 0u), ForestCrownUnit(h, 8u)) - 0.5) * ForestCrownJitter) * halfCell;
+        bool present = ((presentMask >> uint(parent.x + 2 * parent.y)) & 1u) == 0u
+            && 0.08 + 0.84 * ForestCrownUnit(g, 16u) < canopy + dot(grad, centre - p);
         float radius = halfCell * (0.50 + 0.12 * ForestCrownUnit(h, 16u)) * (0.94 + 0.12 * broadleaf);
         float top = 2.0 * (ForestCrownUnit(h, 24u) - 0.5);
-        ForestCrownOffer(best, present, 4u + m, ForestCrownRemix(h), centre, radius, top, radius * (0.55 + 0.30 * (1.0 - broadleaf)), p, false);
+        ForestCrownOffer(best, present, 4u + m, g, centre, radius, top, radius * (0.55 + 0.30 * (1.0 - broadleaf)), p, false);
     }
     bool inside = best.index < 8u;
     float edge = max(0.3, 1.6 * footprint);
@@ -147,36 +153,92 @@ float ForestCrownField(inout float2 p, float footprint, float broadleaf, float2 
             longest, edge, cover));
     slope = best.slope * cover;
     big = inside && best.big;
-    return factor * (1.0 - 0.42 * shade);
+    shadow = 1.0 - 0.42 * shade;
+    return factor * shadow;
+}
+
+// Smooth value noise on a unit lattice for the glade floor; three hash bytes give three independent channels.
+float3 ForestMeadowNoise(float2 p, uint salt)
+{
+    float2 i = floor(p), f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    int2 c = (int2)i;
+    uint a = ForestCrownHash(c, salt), b = ForestCrownHash(c + int2(1, 0), salt);
+    uint d = ForestCrownHash(c + int2(0, 1), salt), e = ForestCrownHash(c + int2(1, 1), salt);
+    float3 va = float3(ForestCrownUnit(a, 0u), ForestCrownUnit(a, 8u), ForestCrownUnit(a, 16u));
+    float3 vb = float3(ForestCrownUnit(b, 0u), ForestCrownUnit(b, 8u), ForestCrownUnit(b, 16u));
+    float3 vd = float3(ForestCrownUnit(d, 0u), ForestCrownUnit(d, 8u), ForestCrownUnit(d, 16u));
+    float3 ve = float3(ForestCrownUnit(e, 0u), ForestCrownUnit(e, 8u), ForestCrownUnit(e, 16u));
+    return lerp(lerp(va, vb, f.x), lerp(vd, ve, f.x), f.y);
+}
+
+// An open glade floor in rotated lattice metres: 9 m bracken and scrub patches, darker and rougher, among lighter
+// grass with 3.7 m tussocks. The factor averages 1, so the far floor keeps the macro map's meadow tone.
+float ForestMeadow(float2 p, out float2 slope)
+{
+    float coarse = ForestMeadowNoise(p / 9.0, 5u).x;
+    float3 fine = ForestMeadowNoise(p / 3.7, 6u);
+    float scrub = smoothstep(0.45, 0.65, coarse * 0.7 + fine.x * 0.3);
+    slope = (fine.yz - 0.5) * (0.15 + 0.45 * scrub);
+    return lerp(1.087, 0.867, scrub) + (fine.x - 0.5) * 0.1;
 }
 
 // Albedo factor and world-space outward slope for the canopy macro surface at one pixel. dx/dy are the screen
-// derivatives of world x/z; weight is the macro cover weight. Far away everything settles to 0.989, the mip mean
-// of the photo crown map this replaces, so distant woods keep their calibrated tone.
-float ForestCrownDetail(float2 world, float2 dx, float2 dy, float3 macro, float weight, float2 sunShift, out float2 slope)
+// derivatives of world x/z; canopy is the macro cover and canopyD its screen derivatives (zero without them);
+// upright is the surface normal's height. Far away crowns settle to 0.989, the mip mean of the photo crown map they
+// replaced, and open floor to the macro meadow, so distant woods and glades keep their calibrated tones.
+float ForestCrownDetail(float2 world, float2 dx, float2 dy, float3 macro, float canopy, float2 canopyD, float upright,
+    float2 sunShift, out float2 slope)
 {
     float footprint = max(length(dx), length(dy));
+    // A steep canopy face is the side of the edge trees: it stays foliage, never floor, even where the coarse macro
+    // map has already blended towards the glade.
+    float side = smoothstep(0.88, 0.7, upright);
+    canopy = max(canopy, side);
+    float open = 1.0 - smoothstep(0.1, 0.7, canopy);
     slope = 0.0;
-    float factor = 0.989;
+    float factor = lerp(0.989, 1.0, open);
     // Beyond about four metres a pixel no longer resolves any crown: keep the mean and skip the lattice entirely.
-    [branch] if (footprint < 3.6 && weight > 0.0)
+    [branch] if (footprint < 3.6)
     {
         float2 axis = ForestCrownAxis;
         float2x2 rotate = float2x2(axis.x, -axis.y, axis.y, axis.x);
-        float2 p = mul(rotate, world);
+        float2 p = mul(rotate, world), q = p;
         float broadleaf = smoothstep(0.50, 0.58, macro.r / max(macro.g, 1e-4));
-        float2 crownSlope; float cover, strength; bool big; uint tone;
-        float raw = ForestCrownField(p, footprint, broadleaf, mul(rotate, sunShift), crownSlope, cover, strength, big, tone);
-        // Foliage clumps: the photo crown map at 2.5 m, offset per crown so its 40 m repeat never lines up.
-        float2 uv = p / 40.0 + float2(ForestCrownUnit(tone, 24u), ForestCrownUnit(tone, 12u));
-        float3 clump = SAMPLE_TEXTURE2D_GRAD(_ForestDetail, sampler_ForestDetail, uv, mul(rotate, dx) / 40.0, mul(rotate, dy) / 40.0).rgb;
-        raw *= (1.0 + (clump.r - 0.5) * 0.8 * (0.5 + 0.5 * cover)) * (1.331 - 0.098 * broadleaf);
-        crownSlope += (clump.gb * 2.0 - 1.0) * 0.35 * cover;
+        // The cover's world gradient from its screen derivatives, in lattice metres; capped so a texel edge cannot
+        // swing a crown's estimate by more than 0.15 per metre.
+        float det = dx.x * dy.y - dx.y * dy.x;
+        float2 grad = float2(canopyD.x * dy.y - canopyD.y * dx.y, dx.x * canopyD.y - dy.x * canopyD.x) / (abs(det) > 1e-6 ? det : 1.0);
+        grad = abs(det) > 1e-6 ? grad : 0.0;
+        grad = mul(rotate, grad) * (1.0 - side);
+        grad *= min(1.0, 0.15 / max(length(grad), 1e-6));
+        float2 crownSlope = 0.0; float cover = 0.0, strength = 1.0, shadow = 1.0, raw = 1.0; bool big = false; uint tone = 0u;
+        // Deep in an opening no crown centre within reach (under two cells) can pass its threshold: skip the lattice.
+        [branch] if (canopy + length(grad) * (2.0 * ForestCrownCell) > 0.03)
+        {
+            raw = ForestCrownField(p, footprint, broadleaf, mul(rotate, sunShift), canopy, grad, crownSlope, cover, strength, big, tone, shadow);
+            // Foliage clumps: the photo crown map at 2.5 m, offset per crown so its 40 m repeat never lines up.
+            float2 uv = p / 40.0 + float2(ForestCrownUnit(tone, 24u), ForestCrownUnit(tone, 12u));
+            float3 clump = SAMPLE_TEXTURE2D_GRAD(_ForestDetail, sampler_ForestDetail, uv, mul(rotate, dx) / 40.0, mul(rotate, dy) / 40.0).rgb;
+            raw *= (1.0 + (clump.r - 0.5) * 0.8 * (0.5 + 0.5 * cover)) * (1.331 - 0.098 * broadleaf);
+            crownSlope += (clump.gb * 2.0 - 1.0) * 0.35 * cover;
+            // World-plan caps stretch down a steep face; flatten their shading there so the side reads as foliage.
+            crownSlope *= 1.0 - 0.6 * side;
+        }
         float fade = big ? 1.0 - smoothstep(2.2, 3.6, footprint) : 1.0 - smoothstep(1.9, 3.5, footprint);
         float k = fade * strength;
-        factor += (raw - factor) * k;
+        // Gaps in an opening show the floor, shaded by emergent crowns; it fades out with the crowns. Dense woods skip it.
+        float floorShare = open * (1.0 - cover * fade), floorFactor = 1.0;
+        float2 floorSlope = 0.0;
+        [branch] if (floorShare > 0.0)
+        {
+            float fadeFloor = 1.0 - smoothstep(1.8, 3.5, footprint);
+            floorFactor = 1.0 + (ForestMeadow(q, floorSlope) * shadow - 1.0) * fadeFloor;
+            floorSlope *= fadeFloor;
+        }
+        factor = lerp(0.989 + (raw - 0.989) * k, floorFactor, floorShare);
         // Lattice slopes are in rotated metres; turn them back to world x/z.
-        slope = mul(transpose(rotate), crownSlope) * k * weight;
+        slope = mul(transpose(rotate), lerp(crownSlope * k, floorSlope, floorShare));
     }
-    return 1.0 + (factor - 1.0) * weight;
+    return factor;
 }

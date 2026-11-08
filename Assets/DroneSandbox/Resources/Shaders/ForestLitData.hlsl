@@ -292,18 +292,20 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     #endif
 #endif
 
-    // World-stable crowns, footprint-filtered, give every canopy level individual sunlit and shaded crowns.
+    // World-stable crowns, footprint-filtered, give every canopy level individual sunlit and shaded crowns; the macro
+    // cover (alpha) and its derivatives thin them crown by crown towards a glade's grass and scrub floor, and the
+    // vertex normal keeps steep edge faces in foliage.
     if (_ForestTier >= 3.0 && _ForestEnabled > 0.5)
     {
         float2 forestWorld = GetAbsolutePositionWS(input.positionRWS).xz + _ForestOrigin.xy;
-        float crownWeight = smoothstep(0.1, 0.7, alpha);
         // Ray tracing has no derivatives; an eight-metre footprint keeps the crowns' far-field mean there.
-        float2 worldDx = float2(8.0, 0.0), worldDy = float2(0.0, 8.0);
+        float2 worldDx = float2(8.0, 0.0), worldDy = float2(0.0, 8.0), coverD = 0.0;
 #if !defined(SHADER_STAGE_RAY_TRACING)
-        worldDx = ddx(forestWorld); worldDy = ddy(forestWorld);
+        worldDx = ddx(forestWorld); worldDy = ddy(forestWorld); coverD = float2(ddx(alpha), ddy(alpha));
 #endif
         float2 slope;
-        float crownFactor = ForestCrownDetail(forestWorld, worldDx, worldDy, surfaceData.baseColor, crownWeight, _ForestOrigin.zw, slope);
+        float crownFactor = ForestCrownDetail(forestWorld, worldDx, worldDy, surfaceData.baseColor, alpha, coverD,
+            input.tangentToWorld[2].y, _ForestOrigin.zw, slope);
         surfaceData.baseColor *= crownFactor;
         surfaceData.normalWS = normalize(surfaceData.normalWS + float3(slope.x, 0.0, slope.y));
     }
