@@ -1,0 +1,383 @@
+{
+  "plans": [
+    {
+      "name": "Ashcombe",
+      "town": false,
+      "radius": 266.85236,
+      "builtPlots": 22,
+      "emptyPlots": 0,
+      "church": 1,
+      "fringe": 34,
+      "paddocks": 21,
+      "orchards": 2,
+      "rough": 8,
+      "vegetables": 3,
+      "fencedFringe": 23,
+      "buildings": 23,
+      "trees": 22,
+      "blocks": 7
+    },
+    {
+      "name": "Brenmoor",
+      "town": true,
+      "radius": 927.6463,
+      "builtPlots": 1677,
+      "emptyPlots": 13,
+      "church": 1,
+      "fringe": 133,
+      "paddocks": 55,
+      "orchards": 2,
+      "rough": 73,
+      "vegetables": 3,
+      "fencedFringe": 28,
+      "buildings": 1680,
+      "trees": 944,
+      "blocks": 234
+    }
+  ],
+  "hd180": {
+    "focusX": -1882.6667,
+    "focusZ": -8387.121,
+    "rmsPixels": 48.034594467165014,
+    "frames": [
+      {
+        "distance": 50,
+        "buildings": [
+          {
+            "model": "Scenery_House_B",
+            "x": -1876.0437,
+            "z": -8403.737,
+            "px": 1454.6426,
+            "py": 615.199,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_B",
+            "x": -1907.8813,
+            "z": -8389.041,
+            "px": 179.2265,
+            "py": 708.6538,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_B",
+            "x": -1885.2704,
+            "z": -8366.932,
+            "px": 680.6144,
+            "py": 184.44827,
+            "underPanel": false
+          }
+        ],
+        "plots": 4,
+        "builtPlots": 3,
+        "fringePlots": 1,
+        "fencedFringe": 1
+      },
+      {
+        "distance": 300,
+        "buildings": [
+          {
+            "model": "Scenery_House_D",
+            "x": -1847.4415,
+            "z": -8530.558,
+            "px": 1542.1699,
+            "py": 993.0933,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1819.94,
+            "z": -8548.113,
+            "px": 1730.7874,
+            "py": 1001.4391,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_House_A",
+            "x": -1806.0079,
+            "z": -8563.344,
+            "px": 1858.1704,
+            "py": 1038.0112,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1823.2408,
+            "z": -8522.987,
+            "px": 1607.0803,
+            "py": 892.1254,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1808.8928,
+            "z": -8532.085,
+            "px": 1698.9958,
+            "py": 897.1533,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_Church",
+            "x": -1916.8682,
+            "z": -8498.211,
+            "px": 1111.7307,
+            "py": 1026.7155,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1888.333,
+            "z": -8503.937,
+            "px": 1262.8507,
+            "py": 977.70056,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1874.9623,
+            "z": -8512.186,
+            "px": 1351.9962,
+            "py": 980.6597,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1891.1992,
+            "z": -8481.146,
+            "px": 1173.0931,
+            "py": 881.94385,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1877.4493,
+            "z": -8489.195,
+            "px": 1259.1606,
+            "py": 881.66724,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1863.7781,
+            "z": -8497.463,
+            "px": 1345.814,
+            "py": 882.72034,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_D",
+            "x": -1850.7323,
+            "z": -8506.056,
+            "px": 1430.0614,
+            "py": 888.93585,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_B",
+            "x": -1876.0437,
+            "z": -8403.737,
+            "px": 1023.68756,
+            "py": 558.2675,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_A",
+            "x": -1916.2498,
+            "z": -8417.404,
+            "px": 892.54877,
+            "py": 687.9565,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_B",
+            "x": -1907.8813,
+            "z": -8389.041,
+            "px": 864.73425,
+            "py": 570.5504,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_B",
+            "x": -1885.2704,
+            "z": -8366.932,
+            "px": 907.2514,
+            "py": 468.79926,
+            "underPanel": false
+          },
+          {
+            "model": "Scenery_House_A",
+            "x": -1788.0212,
+            "z": -8534.005,
+            "px": 1783.078,
+            "py": 853.18384,
+            "underPanel": true
+          },
+          {
+            "model": "Scenery_Barn",
+            "x": -1742.9681,
+            "z": -8518.058,
+            "px": 1863.438,
+            "py": 689.8187,
+            "underPanel": false
+          }
+        ],
+        "plots": 32,
+        "builtPlots": 16,
+        "fringePlots": 16,
+        "fencedFringe": 9
+      }
+    ]
+  },
+  "disc": [
+    {
+      "name": "Ashcombe",
+      "bands": [
+        {
+          "band": "gardens",
+          "samples": 313,
+          "r": 98.16293,
+          "g": 104.43769,
+          "b": 72.690094,
+          "spread": 6.786519,
+          "fromOpenLand": 21.447964
+        },
+        {
+          "band": "fringe plots",
+          "samples": 727,
+          "r": 114.254456,
+          "g": 120.95873,
+          "b": 83.25587,
+          "spread": 6.273005,
+          "fromOpenLand": 20.024183
+        },
+        {
+          "band": "open ground 0-6 m from a plot",
+          "samples": 610,
+          "r": 109.21147,
+          "g": 118.16724,
+          "b": 78.16886,
+          "spread": 11.459061,
+          "fromOpenLand": 15.605627
+        },
+        {
+          "band": "open ground 6-20 m from a plot",
+          "samples": 749,
+          "r": 114.503334,
+          "g": 118.15088,
+          "b": 69.923904,
+          "spread": 21.814775,
+          "fromOpenLand": 6.8865695
+        },
+        {
+          "band": "open ground 20-60 m from a plot",
+          "samples": 538,
+          "r": 118.834564,
+          "g": 120.91076,
+          "b": 67.6357,
+          "spread": 21.899982,
+          "fromOpenLand": 8.262395
+        },
+        {
+          "band": "open ground 60\u002B m from a plot",
+          "samples": 58,
+          "r": 96.12069,
+          "g": 98.13793,
+          "b": 45.810345,
+          "spread": 7.7562957,
+          "fromOpenLand": 31.284521
+        },
+        {
+          "band": "open land 1.6-2.6 radii out",
+          "samples": 21152,
+          "r": 115.5324,
+          "g": 114.00721,
+          "b": 64.52058,
+          "spread": 24.648384,
+          "fromOpenLand": 0
+        }
+      ]
+    },
+    {
+      "name": "Brenmoor",
+      "bands": [
+        {
+          "band": "gardens",
+          "samples": 22221,
+          "r": 99.15308,
+          "g": 105.50494,
+          "b": 73.364235,
+          "spread": 6.372996,
+          "fromOpenLand": 23.91175
+        },
+        {
+          "band": "fringe plots",
+          "samples": 2455,
+          "r": 114.03665,
+          "g": 121.38253,
+          "b": 83.31529,
+          "spread": 6.136204,
+          "fromOpenLand": 14.163198
+        },
+        {
+          "band": "open ground 0-6 m from a plot",
+          "samples": 11759,
+          "r": 105.06686,
+          "g": 114.81842,
+          "b": 80.46698,
+          "spread": 8.257569,
+          "fromOpenLand": 17.619678
+        },
+        {
+          "band": "open ground 6-20 m from a plot",
+          "samples": 6671,
+          "r": 108.31974,
+          "g": 116.562325,
+          "b": 78.05786,
+          "spread": 12.579471,
+          "fromOpenLand": 13.344731
+        },
+        {
+          "band": "open ground 20-60 m from a plot",
+          "samples": 1421,
+          "r": 119.64885,
+          "g": 118.7544,
+          "b": 71.67416,
+          "spread": 22.380535,
+          "fromOpenLand": 1.3563936
+        },
+        {
+          "band": "open ground 60\u002B m from a plot",
+          "samples": 456,
+          "r": 112.52197,
+          "g": 112.09433,
+          "b": 67.969284,
+          "spread": 22.822058,
+          "fromOpenLand": 9.413676
+        },
+        {
+          "band": "open land 1.6-2.6 radii out",
+          "samples": 248109,
+          "r": 119.197624,
+          "g": 118.22641,
+          "b": 70.50907,
+          "spread": 23.724766,
+          "fromOpenLand": 0
+        }
+      ]
+    }
+  ],
+  "detailCaptureMs": 237.6674,
+  "timing": {
+    "villagePlanMs": 89.7578,
+    "Ashcombe": {
+      "settlementPlanMs": 0.1208,
+      "tileMs": 121.637,
+      "regionalPageMs": 250.2245
+    },
+    "Brenmoor": {
+      "settlementPlanMs": 0.5698,
+      "tileMs": 173.6516,
+      "regionalPageMs": 340.0748
+    }
+  }
+}

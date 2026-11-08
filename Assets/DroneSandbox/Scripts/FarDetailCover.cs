@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
+using Random = System.Random;
 
 namespace DroneSandbox
 {
@@ -8,6 +10,7 @@ namespace DroneSandbox
     {
         readonly Cover[] grid;
         readonly byte[] interior;
+        readonly byte[] farmed; // FarDetailCover.Farmed's settlement cells
         readonly int count, seed;
 
         // Cache uniform neighbourhoods once per snapshot; their 6 m warp cannot change membership at any sampled point.
@@ -22,6 +25,55 @@ namespace DroneSandbox
                     if (grid[(j + z) * count + i + x] != kind) { same = false; break; }
                 if (same) interior[j * count + i] = (byte)((int)kind + 1);
             }
+            farmed = Farmed(grid, count);
+        }
+
+        // For each village and town cell, the open land nearest it (1 farmland, 2 anything else; 0 elsewhere): cells on a
+        // settlement's edge look at their neighbours outside it, and the answer spreads inward a cell at a time, so the
+        // settlement's own open ground can be painted as the fields round it, or as the pasture where it stands in grazing land.
+        static byte[] Farmed(Cover[] grid, int count)
+        {
+            var land = new byte[grid.Length];
+            var queue = new Queue<int>();
+            for (int k = 0; k < grid.Length; k++)
+            {
+                if (!Settled(grid[k])) continue;
+                int i = k % count, j = k / count;
+                bool edge = false, farm = false;
+                for (int n = 0; n < 4; n++)
+                {
+                    int x = i + (n == 0 ? 1 : n == 1 ? -1 : 0), z = j + (n == 2 ? 1 : n == 3 ? -1 : 0);
+                    if ((uint)x >= (uint)count || (uint)z >= (uint)count || Settled(grid[z * count + x])) continue;
+                    edge = true; farm |= grid[z * count + x] == Cover.Farmland;
+                }
+                if (!edge) continue;
+                land[k] = (byte)(farm ? 1 : 2); queue.Enqueue(k);
+            }
+            while (queue.Count > 0)
+            {
+                int k = queue.Dequeue(), i = k % count, j = k / count;
+                for (int n = 0; n < 4; n++)
+                {
+                    int x = i + (n == 0 ? 1 : n == 1 ? -1 : 0), z = j + (n == 2 ? 1 : n == 3 ? -1 : 0);
+                    if ((uint)x >= (uint)count || (uint)z >= (uint)count) continue;
+                    int m = z * count + x;
+                    if (land[m] != 0 || !Settled(grid[m])) continue;
+                    land[m] = land[k]; queue.Enqueue(m);
+                }
+            }
+            return land;
+        }
+
+        // Village and town cover.
+        static bool Settled(Cover kind) => kind == Cover.Village || kind == Cover.Town;
+
+        // Whether the land at a point is farmed: farmland itself, or a settlement's ground in farmland (its nearest cell's).
+        public bool Farmed(float x, float z)
+        {
+            int i = (int)FarDetailData.Clamp((float)Math.Floor((x + WorldPlan.Half) / 32f + .5f), 0, count - 1);
+            int j = (int)FarDetailData.Clamp((float)Math.Floor((z + WorldPlan.Half) / 32f + .5f), 0, count - 1);
+            int k = j * count + i;
+            return grid[k] == Cover.Farmland || farmed[k] == 1;
         }
 
         // Four categorical corners retain memberships rather than interpolating enum values.

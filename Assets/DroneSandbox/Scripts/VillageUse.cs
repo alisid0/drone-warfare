@@ -242,7 +242,8 @@ namespace DroneSandbox
             }
             if (boundary != 0)
             {
-                float half = boundary == 1 ? .375f : .15f;
+                // Post-and-rail is its 11 cm rails (Features.Edge), not a soil line outlining each paddock like a bare plot.
+                float half = boundary == 1 ? .375f : boundary == 2 ? .055f : .15f;
                 float cover = FarDetailData.BandCoverage(half-BoundaryDistance(new Vector2(u,v)),half,pixel);
                 colour += ((boundary == 1 ? hedge : boundary == 2 ? soil : gravel)-colour)*cover;
             }
