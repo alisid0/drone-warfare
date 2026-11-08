@@ -94,6 +94,7 @@ namespace DroneSandbox
             Atmosphere.Setup(cam, sun);
             FarTerrain.SetOrigin(FarTerrain.VarrowSpot()); // the first sector is the Varrow Valley
             world = World.Build(transform, preview: false);
+            sectorTerrain = Ground.Current != null ? Ground.Current.terrainData : null;
             Canopy.Build(world);
             gameObject.AddComponent<DayNight>().Init(sun);
             MapSnapshot.Capture(world);
@@ -142,6 +143,8 @@ namespace DroneSandbox
 
         // ---- Sectors ----
 
+        TerrainData sectorTerrain; // the live sector's, freed when the next one is built
+
         // Tears down the map and builds this sector in its place (the terrain, water, villages, everything).
         public void LoadSector(SectorPlan plan)
         {
@@ -150,14 +153,25 @@ namespace DroneSandbox
                 : plan.world != null && current.world.center.Equals(plan.world.center) && current.world.seed == plan.world.seed;
             if (current.kind == plan.kind && current.seed == plan.seed && sameWorld && world != null) return;
             ClearUnits();
-            var oldTerrain = Ground.Current != null ? Ground.Current.terrainData : null;
+            // The live sector's own terrain data, not Ground.Current: a theatre map preview builds its own terrain through
+            // Ground and frees it, so Ground.Current named a dead preview and every sector's heights, splat and grass maps
+            // leaked (26 splat maps, 550 MB, over the autotest's sector tour).
+            var oldTerrain = sectorTerrain;
             if (world != null) DestroyImmediate(world.gameObject);
-            if (oldTerrain != null) Destroy(oldTerrain); // heights, splat and grass maps aren't freed with the GameObject
+            if (oldTerrain != null)
+            {
+                // Heights, splat and grass maps aren't freed with the GameObject, and the splat maps outlive their terrain
+                // data in a player (two 21 MB maps a sector piled up over the tour even with the data destroyed).
+                foreach (var splat in oldTerrain.alphamapTextures) Destroy(splat);
+                Destroy(oldTerrain);
+            }
             Farmland.Release();
             MapLayout.Use(plan);
             world = World.Build(transform, preview: false);
+            sectorTerrain = Ground.Current != null ? Ground.Current.terrainData : null;
             Canopy.Build(world);
             MapSnapshot.Capture(world);
+            Resources.UnloadUnusedAssets(); // whatever else the last sector left behind, during the loading pause
         }
 
         // Flies into a theatre hotspot: builds its sector (a moment's pause while the land is laid out), then

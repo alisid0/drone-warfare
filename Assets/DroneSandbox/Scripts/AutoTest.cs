@@ -16,7 +16,7 @@ namespace DroneSandbox
         StreamWriter log;
         int errors;
         bool demo;
-        static string only; // -autotest-only seek: just the hunts and Hide and Seek, to chase the D3D12 memory burst
+        static string only; // -autotest-only seek (the hunts and Hide and Seek) or tour (the sector tour, for its memory growth)
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Launch()
@@ -91,6 +91,14 @@ namespace DroneSandbox
             game.StartSandbox();
             Recon.ForceShowAll = true; // the model close-ups first, everything drawn
             yield return new WaitForSeconds(0.5f);
+            if (only == "tour")
+            {
+                yield return SectorTour(game, rts);
+                log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
             if (only == "seek")
             {
                 yield return HuntMission(game, rts, false);
@@ -1349,6 +1357,7 @@ namespace DroneSandbox
                 yield return new WaitForSeconds(1.5f);
                 yield return ForestMassesSettle($"31_sector_{n:00}_{kind}");
                 yield return Shot($"31_sector_{n:00}_{kind}");
+                if (n == 0 || n == 11 || n == 5) log.WriteLine($"  textures after sector {n}: {TextureTally()}");
                 // What of the woods this view drew: hd145's dense forest drew nothing in a Deep Forest sector.
                 log.WriteLine($"  {ForestLine()}");
                 log.WriteLine($"  forest screen: full/reduced/card {FarScatter.FullTreesDrawn}/{FarScatter.ReducedTreesDrawn}/{FarScatter.CardTreesDrawn}, effective px {FarScatter.TierPixels.x:F1}/{FarScatter.TierPixels.y:F1}/{FarScatter.TierPixels.z:F1}, crown reach {FarScatter.CrownReach:F0} m, ready radius {FarScatter.ReadyRadius:F0} m; missing {ForestHlod.MissingBlocks}, coarse {ForestHlod.CoarseBlocks}, near coarse {ForestHlod.NearCoarseBlocks}, build {ForestHlod.BuildMs:F3} ms");
@@ -2511,6 +2520,39 @@ namespace DroneSandbox
             $"canopy triangles {ForestHlod.TrianglesDrawn}, forest CPU {FarScatter.MainThreadMs:F3} ms (mean {FarScatter.MeanMs:F3}, worst {FarScatter.WorstMs:F3}, " +
             $"{FarScatter.Samples} frames), crown CPU {Canopy.QueryMs:F3} ms, fallback materials {ForestMaterials.FallbackCount}";
 
+        // The largest kinds of texture in memory, by name with digits dropped, estimated at their size and format with
+        // mipmaps: which of them grow from sector to sector (hd179 gained 45 MB of textures per sector).
+        static string TextureTally()
+        {
+            var bytes = new Dictionary<string, long>();
+            var counts = new Dictionary<string, int>();
+            foreach (var t in Resources.FindObjectsOfTypeAll<Texture>())
+            {
+                if (t == null) continue;
+                int depth = t is Texture2DArray array ? array.depth : t is Cubemap ? 6 : t is Texture3D volume ? volume.depth : 1;
+                long texels = (long)t.width * t.height * depth;
+                float perTexel = t.graphicsFormat.ToString().Contains("BC1") || t.graphicsFormat.ToString().Contains("DXT1") ? 0.5f
+                    : t.graphicsFormat.ToString().Contains("BC") || t.graphicsFormat.ToString().Contains("DXT") ? 1f : 4f;
+                long size = (long)(texels * perTexel * (t.mipmapCount > 1 ? 1.33f : 1f));
+                var key = new string(System.Array.FindAll((t.GetType().Name + ":" + t.name).ToCharArray(), c => !char.IsDigit(c)));
+                bytes.TryGetValue(key, out long b); bytes[key] = b + size;
+                counts.TryGetValue(key, out int c2); counts[key] = c2 + 1;
+            }
+            var keys = new List<string>(bytes.Keys);
+            keys.Sort((a, b) => bytes[b].CompareTo(bytes[a]));
+            var text = new System.Text.StringBuilder();
+            for (int i = 0; i < Mathf.Min(14, keys.Count); i++) text.Append($" {keys[i]} x{counts[keys[i]]} {bytes[keys[i]] / 1048576} MB;");
+            return text.ToString();
+        }
+
+        // Vertices held by every mesh in memory, for the sector-change memory check (hd179 grew 2.8 GB over the tour).
+        static long MeshVertices()
+        {
+            long total = 0;
+            foreach (var mesh in Resources.FindObjectsOfTypeAll<Mesh>()) total += mesh.vertexCount;
+            return total;
+        }
+
         IEnumerator Shot(string name)
         {
             yield return new WaitForEndOfFrame();
@@ -2523,7 +2565,9 @@ namespace DroneSandbox
             long committed = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
             log.WriteLine($"[{Time.time:F1}] screenshot {name}   tex {Texture.currentTextureMemory / 1048576} MB, " +
                           $"{Resources.FindObjectsOfTypeAll<Texture2D>().Length} tex2d, {Resources.FindObjectsOfTypeAll<RenderTexture>().Length} rt, " +
-                          $"{Resources.FindObjectsOfTypeAll<Material>().Length} mat, {Resources.FindObjectsOfTypeAll<Mesh>().Length} mesh, committed {committed / 1048576} MB");
+                          $"{Resources.FindObjectsOfTypeAll<Material>().Length} mat, {Resources.FindObjectsOfTypeAll<Mesh>().Length} mesh, committed {committed / 1048576} MB, " +
+                          $"managed {System.GC.GetTotalMemory(false) / 1048576} MB, {Resources.FindObjectsOfTypeAll<Texture2DArray>().Length} arrays, " +
+                          $"{Resources.FindObjectsOfTypeAll<Cubemap>().Length} cubes, {MeshVertices() / 1000}k vertices, {Resources.FindObjectsOfTypeAll<GameObject>().Length} objects");
         }
     }
 }
