@@ -1,0 +1,226 @@
+{
+  "views": {
+    "view300": {
+      "before": {
+        "wood_luma": 104.0,
+        "floor_luma": 126.4,
+        "rim_luma": 113.9,
+        "floor_minus_wood": 22.3,
+        "rim_minus_darker_side": 9.9,
+        "floor_texture_rms": 0.35,
+        "pixels_wood_rim_floor": [
+          1891878,
+          104260,
+          42890
+        ]
+      },
+      "after": {
+        "wood_luma": 103.9,
+        "floor_luma": 130.0,
+        "rim_luma": 113.8,
+        "floor_minus_wood": 26.1,
+        "rim_minus_darker_side": 9.8,
+        "floor_texture_rms": 3.04,
+        "pixels_wood_rim_floor": [
+          1889851,
+          91966,
+          66365
+        ]
+      }
+    },
+    "view1000": {
+      "before": {
+        "wood_luma": 105.3,
+        "floor_luma": 126.2,
+        "rim_luma": 110.9,
+        "floor_minus_wood": 20.9,
+        "rim_minus_darker_side": 5.6,
+        "floor_texture_rms": 0.7,
+        "pixels_wood_rim_floor": [
+          1747705,
+          199894,
+          55786
+        ]
+      },
+      "after": {
+        "wood_luma": 105.3,
+        "floor_luma": 129.1,
+        "rim_luma": 113.6,
+        "floor_minus_wood": 23.9,
+        "rim_minus_darker_side": 8.4,
+        "floor_texture_rms": 4.28,
+        "pixels_wood_rim_floor": [
+          1769311,
+          166954,
+          83927
+        ]
+      }
+    },
+    "view2500": {
+      "before": {
+        "wood_luma": 108.5,
+        "floor_luma": 122.7,
+        "rim_luma": 112.5,
+        "floor_minus_wood": 14.2,
+        "rim_minus_darker_side": 3.9,
+        "floor_texture_rms": 1.74,
+        "pixels_wood_rim_floor": [
+          1700503,
+          202913,
+          49608
+        ]
+      },
+      "after": {
+        "wood_luma": 108.5,
+        "floor_luma": 125.4,
+        "rim_luma": 114.6,
+        "floor_minus_wood": 16.9,
+        "rim_minus_darker_side": 6.1,
+        "floor_texture_rms": 4.99,
+        "pixels_wood_rim_floor": [
+          1735030,
+          163287,
+          72210
+        ]
+      }
+    },
+    "topdown": {
+      "before": {
+        "wood_luma": 103.3,
+        "floor_luma": 123.6,
+        "rim_luma": 107.1,
+        "floor_minus_wood": 20.3,
+        "rim_minus_darker_side": 3.8,
+        "floor_texture_rms": 0.33,
+        "pixels_wood_rim_floor": [
+          893391,
+          98266,
+          25726
+        ]
+      },
+      "after": {
+        "wood_luma": 103.2,
+        "floor_luma": 128.2,
+        "rim_luma": 108.0,
+        "floor_minus_wood": 25.0,
+        "rim_minus_darker_side": 4.8,
+        "floor_texture_rms": 3.41,
+        "pixels_wood_rim_floor": [
+          916819,
+          73388,
+          36942
+        ]
+      }
+    }
+  },
+  "survey": {
+    "before": {
+      "woodSamples": 895477,
+      "gladeOpenOfWoodland": 0.0447,
+      "gladeOpeningOfWoodland": 0.0782,
+      "openings": 62,
+      "roundnessP10P50P90": [
+        0.7095206,
+        0.86396873,
+        0.9482439
+      ],
+      "areaP50": 3908,
+      "edgeCrossings": 1020,
+      "edgeDropP10P50P90": [
+        6.5,
+        11.5,
+        22.5
+      ],
+      "edgeDropWithin8m": 0.206,
+      "trees": 30387,
+      "treesInOpenings": 346,
+      "loneTrees": 0
+    },
+    "after": {
+      "woodSamples": 895477,
+      "gladeOpenOfWoodland": 0.0743,
+      "gladeOpeningOfWoodland": 0.0844,
+      "openings": 62,
+      "roundnessP10P50P90": [
+        0.40921205,
+        0.5302025,
+        0.69660866
+      ],
+      "areaP50": 3812,
+      "edgeCrossings": 1112,
+      "edgeDropP10P50P90": [
+        1.5,
+        6.5,
+        25
+      ],
+      "edgeDropWithin8m": 0.567,
+      "trees": 30292,
+      "treesInOpenings": 124,
+      "loneTrees": 7
+    }
+  },
+  "build": {
+    "view300": {
+      "before_ms": 633.3,
+      "after_ms": 634.7,
+      "before_triangles": 387091,
+      "after_triangles": 367573,
+      "steps": [
+        16,
+        16,
+        32,
+        16,
+        16,
+        32,
+        16,
+        16,
+        32
+      ]
+    },
+    "view1000": {
+      "before_ms": 584.7,
+      "after_ms": 593.1,
+      "before_triangles": 359730,
+      "after_triangles": 340819,
+      "steps": [
+        16,
+        16,
+        32,
+        16,
+        16,
+        32,
+        32,
+        32,
+        32
+      ]
+    },
+    "view2500": {
+      "before_ms": 467.1,
+      "after_ms": 474,
+      "before_triangles": 271720,
+      "after_triangles": 257689,
+      "steps": [
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        32,
+        64
+      ]
+    },
+    "topdown": {
+      "before_ms": 620.4,
+      "after_ms": 621.2,
+      "before_triangles": 0,
+      "after_triangles": 0,
+      "steps": []
+    }
+  },
+  "target": [
+    21244,
+    17860
+  ]
+}

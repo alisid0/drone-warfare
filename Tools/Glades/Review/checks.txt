@@ -1,0 +1,51 @@
+run.py after cracks (Tools/CanopyCracks harness on this branch)
+GAP CHECK internal 0, shared 0 over 128 level pairs and 65536 perimeter units, worst seam height difference 0.0000 m; flipped 0, degenerate 0, vertical 0
+exposure bootstrap: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure coarse64: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure prepared32: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined32-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined16-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+pattern {"gladeOpenOfWoodland":0.0568,"gladeOpeningOfWoodland":0.064,"broadReliefHalfRange":4.13,"reliefRegularity":0.061,"reliefPeakLag":352,"glades":63,"gladeClarkEvans":1.12,"speciesRunMetres":53.1,"lightHalfRange":{"16":7.1,"32":7.1,"64":7.1},"denseGreenHalfRange":{"16":17.6,"32":17.6,"64":17.6},"gladeGreenMinusDense":{"16":19.1,"32":14.7,"64":6.6},"crownRatioStd":0.123,"crownRatioHalfRange":0.205,"crownNeighbourCorrelation":0.516,"trees":6389,"edgeMedianMetres":16,"edgeTransects":87}
+
+run.py before cracks (the same harness with f7588a1's forest sources)
+GAP CHECK internal 0, shared 0 over 128 level pairs and 65536 perimeter units, worst seam height difference 0.0000 m; flipped 0, degenerate 0, vertical 0
+exposure bootstrap: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure coarse64: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure prepared32: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined32-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined16-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+pattern {"gladeOpenOfWoodland":0.0344,"gladeOpeningOfWoodland":0.0603,"broadReliefHalfRange":4.13,"reliefRegularity":0.074,"reliefPeakLag":352,"glades":61,"gladeClarkEvans":1.15,"speciesRunMetres":53,"lightHalfRange":{"16":7.11,"32":7.11,"64":7.11},"denseGreenHalfRange":{"16":17.62,"32":17.62,"64":17.62},"gladeGreenMinusDense":{"16":15.6,"32":11.8,"64":4.7},"crownRatioStd":0.123,"crownRatioHalfRange":0.206,"crownNeighbourCorrelation":0.527,"trees":6293,"edgeMedianMetres":16,"edgeTransects":87}
+
+canopy build, 24 block-levels (3 blocks x 8 levels): before 1245 ms / 763723 triangles, after 1260 ms / 727577 triangles
+
+check_shader.py (D3DCompile ps_5_0; DXBC instructions include ForestFade and a stand-in lighting line)
+before raster: compiled, 879 instructions (1 texture samples), 878 slots
+before ray-helper: compiled, 143 instructions (0 texture samples), 142 slots
+after raster: compiled, 1105 instructions (1 texture samples), 1104 slots
+after ray-helper: compiled, 149 instructions (0 texture samples), 148 slots
+after, dense wood raster: compiled, 885 instructions (1 texture samples), 884 slots
+after, dense wood ray-helper: compiled, 137 instructions (0 texture samples), 136 slots
+after, open floor raster: compiled, 306 instructions (0 texture samples), 305 slots
+after, open floor ray-helper: compiled, 136 instructions (0 texture samples), 135 slots
+
+check_parity.py (ForestDetail.hlsl executed on D3D11 WARP vs Tools/Glades/crowns.py, 256x256 per footprint)
+dense footprint 0.25 m: factor mean 1.1038 vs 1.1037, |diff| mean 0.00059 p99.9 0.0051 max 0.1978; slope |diff| mean 0.00118 p99.9 0.0134; pixels over 0.02: 0.026%
+dense footprint 1.00 m: factor mean 1.0434 vs 1.0434, |diff| mean 0.00037 p99.9 0.0018 max 0.0473; slope |diff| mean 0.00043 p99.9 0.0020; pixels over 0.02: 0.005%
+dense footprint 2.00 m: factor mean 1.0143 vs 1.0143, |diff| mean 0.00029 p99.9 0.0016 max 0.0654; slope |diff| mean 0.00028 p99.9 0.0015; pixels over 0.02: 0.005%
+dense footprint 3.00 m: factor mean 0.9982 vs 0.9982, |diff| mean 0.00008 p99.9 0.0005 max 0.0243; slope |diff| mean 0.00006 p99.9 0.0005; pixels over 0.02: 0.003%
+edge  footprint 0.25 m: factor mean 1.0317 vs 1.0317, |diff| mean 0.00033 p99.9 0.0037 max 0.1978; slope |diff| mean 0.00064 p99.9 0.0119; pixels over 0.02: 0.011%
+edge  footprint 1.00 m: factor mean 1.0186 vs 1.0187, |diff| mean 0.00024 p99.9 0.0017 max 0.0024; slope |diff| mean 0.00027 p99.9 0.0019; pixels over 0.02: 0.000%
+edge  footprint 2.00 m: factor mean 1.0030 vs 1.0030, |diff| mean 0.00018 p99.9 0.0015 max 0.0444; slope |diff| mean 0.00017 p99.9 0.0014; pixels over 0.02: 0.003%
+edge  footprint 3.00 m: factor mean 0.9977 vs 0.9977, |diff| mean 0.00005 p99.9 0.0005 max 0.0243; slope |diff| mean 0.00004 p99.9 0.0004; pixels over 0.02: 0.002%
+side  footprint 0.25 m: factor mean 1.0306 vs 1.0305, |diff| mean 0.00047 p99.9 0.0040 max 0.1978; slope |diff| mean 0.00058 p99.9 0.0084; pixels over 0.02: 0.018%
+side  footprint 1.00 m: factor mean 1.0216 vs 1.0216, |diff| mean 0.00034 p99.9 0.0018 max 0.0192; slope |diff| mean 0.00024 p99.9 0.0013; pixels over 0.02: 0.000%
+side  footprint 2.00 m: factor mean 1.0051 vs 1.0051, |diff| mean 0.00027 p99.9 0.0016 max 0.0444; slope |diff| mean 0.00016 p99.9 0.0010; pixels over 0.02: 0.003%
+side  footprint 3.00 m: factor mean 0.9973 vs 0.9973, |diff| mean 0.00008 p99.9 0.0005 max 0.0243; slope |diff| mean 0.00004 p99.9 0.0003; pixels over 0.02: 0.002%
+open  footprint 0.25 m: factor mean 1.0150 vs 1.0150, |diff| mean 0.00003 p99.9 0.0004 max 0.0008; slope |diff| mean 0.00007 p99.9 0.0006; pixels over 0.02: 0.000%
+open  footprint 1.00 m: factor mean 0.9920 vs 0.9920, |diff| mean 0.00001 p99.9 0.0001 max 0.0002; slope |diff| mean 0.00002 p99.9 0.0002; pixels over 0.02: 0.000%
+open  footprint 2.00 m: factor mean 0.9976 vs 0.9976, |diff| mean 0.00002 p99.9 0.0003 max 0.0004; slope |diff| mean 0.00006 p99.9 0.0005; pixels over 0.02: 0.000%
+open  footprint 3.00 m: factor mean 0.9998 vs 0.9998, |diff| mean 0.00001 p99.9 0.0001 max 0.0001; slope |diff| mean 0.00002 p99.9 0.0001; pixels over 0.02: 0.000%
+PARITY OK: WARP-executed ForestDetail.hlsl matches Tools/Glades/crowns.py (99.9th percentile factor error 0.0051)
+
+Tools/PredictiveStreaming/run.py api
+api: compile passed (zero warnings/errors)
