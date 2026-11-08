@@ -15,7 +15,8 @@ namespace DroneSandbox
         public static readonly float[] RadiusPerHeight = { 0.39738891f, 0.17586441f, 0.21163066f, 0.21589965f };
         public static readonly Color Ground = new Color(49f / 255f, 70f / 255f, 45f / 255f).linear;
         public static readonly Color Meadow = new Color(105f / 255f, 126f / 255f, 86f / 255f).linear;
-        static readonly Color GladeFloor = Color.Lerp(Meadow, Ground, 0.3f);
+        static readonly Color GladeGrass = new Color(100f / 255f, 124f / 255f, 76f / 255f).linear;
+        static readonly Color GladeScrub = new Color(80f / 255f, 99f / 255f, 60f / 255f).linear;
         static readonly Color32[] PhotoColours = { new Color32(77, 98, 51, 255), new Color32(99, 116, 61, 255),
             new Color32(64, 87, 58, 255), new Color32(80, 99, 64, 255) };
         static readonly byte[] Pictures = System.Convert.FromBase64String(
@@ -98,12 +99,19 @@ namespace DroneSandbox
 
         // Ten-to-25-metre crowns ride on 40-to-120-metre masses; coarse texels integrate away the small crowns.
         // A glade fills only part of a coarse texel and its floor lies partly in crown shade, so it brightens less from afar.
+        // Glade floors are sunlit grass broken by 15-40 m bracken and scrub patches, brighter than the crowns round them.
         public static Color Surface(ForestPattern.Stand stand, float x, float z, float footprint)
         {
             float woodOpen = 1f - Mathf.SmoothStep(0f, 1f, stand.wood);
             float gladeOpen = Mathf.Max(0f, 1f - Mathf.SmoothStep(0f, 1f, stand.cover) - woodOpen);
-            Color floor = Color.Lerp(GladeFloor, Meadow, woodOpen / Mathf.Max(0.0001f, woodOpen + gladeOpen));
-            float open = woodOpen + gladeOpen * Mathf.Lerp(0.8f, 0.5f, Mathf.Clamp01((footprint - 16f) / 48f));
+            Color glade = GladeGrass;
+            if (gladeOpen > 0f)
+            {
+                float patch = ForestPattern.Noise(x, z, 29f, 132) * 0.65f + ForestPattern.Noise(x + 11f, z, 11f, 133) * 0.35f;
+                glade = Color.Lerp(GladeGrass, GladeScrub, Mathf.SmoothStep(0f, 1f, (patch - 0.42f) / 0.2f));
+            }
+            Color floor = Color.Lerp(glade, Meadow, woodOpen / Mathf.Max(0.0001f, woodOpen + gladeOpen));
+            float open = woodOpen + gladeOpen * Mathf.Lerp(0.95f, 0.55f, Mathf.Clamp01((footprint - 16f) / 48f));
             Color colour = Color.Lerp(Linear(stand), floor, open).gamma;
             // Highlights follow the correlated stand height, so sunlit tall crowns group instead of forming texel-sized spots.
             float light = (stand.age - 0.5f) * 12f
@@ -115,10 +123,12 @@ namespace DroneSandbox
             return colour;
         }
 
-        // Density after Poisson rejection and clustering is measured by the production-source harness.
+        // Density after Poisson rejection and clustering is measured by the production-source harness. Coverage uses
+        // the crown size at the wood mask alone: a glade edge shows full sunlit crowns, then meadow, not a dark ring.
         public static Color Linear(ForestPattern.Stand stand)
         {
-            float coverage = 1f - Mathf.Exp(-Mathf.PI * stand.radius * stand.radius * 0.0277f);
+            float radius = Mathf.Lerp(2f, 2.8f + 1.8f * stand.age, stand.wood);
+            float coverage = 1f - Mathf.Exp(-Mathf.PI * radius * radius * 0.0277f);
             return Color.Lerp(Ground, Crown(stand), coverage) * 1.06f;
         }
 
