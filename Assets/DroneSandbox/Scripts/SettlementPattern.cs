@@ -57,7 +57,9 @@ namespace DroneSandbox
 
         // Iterate a settlement incrementally; generation depends only on world positions and the world seed. Every
         // farm's barn stands behind its yard exactly where the sector puts it (World.Garden), so a village keeps its
-        // farms at every distance; a town's avenues are planted as trees.
+        // farms at every distance; a town's avenues are planted as trees. So are the trees the sector plants on the
+        // plots (World.Garden, World.Orchards and the churchyard's pair), which outside a sector stood only as bare lawn
+        // and empty orchard rows.
         public static IEnumerable<Block> Build(WorldSettlement settlement)
         {
             int owner = WorldPlan.Settlements.IndexOf(settlement);
@@ -67,7 +69,9 @@ namespace DroneSandbox
             if (detail == null || detail.seed != WorldPlan.Seed) detail = WorldPlan.CaptureDetail(null);
             foreach (var p in detail.villages.plots)
             {
-                if (p.owner != owner || p.square || p.model == null) continue;
+                if (p.owner != owner) continue;
+                if (p.landUse == 7) { Orchard(groups, p); continue; }
+                if (p.square || p.model == null) continue;
                 int kind = System.Array.IndexOf(Models, p.model);
                 if (kind < 0) kind = 9;
                 Vector2 at = p.House;
@@ -78,6 +82,8 @@ namespace DroneSandbox
                 Vector2 barn = p.Point(p.frontage < 28f ? 0f : -4f, Mathf.Min(p.depth - 9f, p.YardEnd + 5f));
                 if (p.farm && kind <= 3 && !FarScatter.InSector(barn - FarTerrain.Origin))
                     Add(groups, new House { world = barn, kind = Barn, scale = .8f, yaw = yaw });
+                if (p.church) foreach (float side in new[] { -1f, 1f }) Plant(groups, at + p.outward * 19f + p.along * (side * 9f), side * 45f, .45f);
+                else if (p.model.StartsWith("Scenery_House_") || p.model.StartsWith("Scenery_Townhouse_")) Garden(groups, p, barn);
             }
             foreach (var tree in detail.villages.trees)
             {
@@ -86,6 +92,37 @@ namespace DroneSandbox
                 Add(groups, new House { world = tree.at, kind = Tree, yaw = turn, scale = size });
             }
             foreach (var block in groups.Values) yield return block;
+        }
+
+        // A garden's trees as World.Garden plants them: two young ones in an untended garden, one in a third of the kept
+        // vegetable gardens, at the back of the plot; never on a farm's barn.
+        static void Garden(SortedDictionary<long, Block> groups, VillagePlot p, Vector2 barn)
+        {
+            int trees = p.untended ? 2 : p.cultivated && p.identity % 3 == 0 ? 1 : 0;
+            for (int i = 0; i < trees; i++)
+            {
+                Vector2 at = p.Point(-p.frontage * .15f + i * 3.6f, p.depth - 4f - (i % 2) * 5f);
+                if (!p.Contains(at, -2f) || p.farm && (at - barn).sqrMagnitude < 9.2f * 9.2f) continue;
+                Plant(groups, at, p.identity % 360, p.untended ? .18f + i * .03f : .35f);
+            }
+        }
+
+        // A fringe orchard's fruit trees on its painted 7 m rows, up to six, as World.Orchards plants them.
+        static void Orchard(SortedDictionary<long, Block> groups, VillagePlot p)
+        {
+            int planted = 0;
+            for (float u = -p.frontage * .5f + 4.8f; u < p.frontage * .5f - 2f && planted < 6; u += 7f)
+                for (float v = 6f; v < p.depth - 3f && planted < 6; v += 8f)
+                {
+                    Plant(groups, p.Point(u, v), (p.identity + planted * 47) % 360, .32f + (p.identity >> (planted % 8) & 3) * .025f);
+                    planted++;
+                }
+        }
+
+        // One tree of the plan, unless the sector stands there and plants its own.
+        static void Plant(SortedDictionary<long, Block> groups, Vector2 at, float yaw, float scale)
+        {
+            if (!FarScatter.InSector(at - FarTerrain.Origin)) Add(groups, new House { world = at, kind = Tree, yaw = yaw, scale = scale });
         }
 
         // A street tree's turn and size from its world position, shared with the sector (World.StreetTrees).
