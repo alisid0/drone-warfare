@@ -414,17 +414,23 @@ namespace DroneSandbox
                 int known = 0;
                 bool identified = false;
                 float newest = -1000f;
+                int newestTurn = 0;
                 foreach (var other in c.group.members)
                 {
                     if (other.live != null || other.destroyed || other.intel == Intel.Unknown) continue;
                     known++;
                     identified |= other.intel >= Intel.Identified;
                     newest = Mathf.Max(newest, other.lastSeenAt);
+                    newestTurn = Mathf.Max(newestTurn, other.seenTurn);
                 }
                 var style = Tinted(small, identified ? new Color(Amber.r, Amber.g, Amber.b, 0.9f) : grey);
                 style.alignment = TextAnchor.UpperCenter;
+                // Seen in an earlier campaign operation: how many turns ago.
+                int turns = Theatre.Turn - newestTurn;
+                string seen = game.Hotspot == null || newest >= WorldActivity.OperationStart ? Ago(Time.time - newest)
+                    : turns <= 1 ? "last turn" : $"{turns} turns ago";
                 GUI.Label(new Rect(g.x - 110f * s, g.y + 12f * s, 220f * s, 16f * s),
-                    $"{PositionName(c.group.kind)}, {known} known, seen {Ago(Time.time - newest)}", style);
+                    $"{PositionName(c.group.kind)}, {known} known, seen {seen}", style);
             }
         }
 

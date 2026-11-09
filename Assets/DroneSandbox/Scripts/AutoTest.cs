@@ -16,7 +16,7 @@ namespace DroneSandbox
         StreamWriter log;
         int errors;
         bool demo;
-        static string only; // -autotest-only seek (the hunts and Hide and Seek), tour (the sector tour, for its memory growth), flight or world (WorldRecon)
+        static string only; // -autotest-only seek (the hunts and Hide and Seek), tour (the sector tour, for its memory growth), flight or world (WorldRecon and WorldCampaign)
         static bool profileFlight; // record profiler captures round the flight's stops (development builds)
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -108,6 +108,7 @@ namespace DroneSandbox
             if (only == "world")
             {
                 yield return WorldRecon(game, rts);
+                yield return WorldCampaign(game, rts);
                 log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
                 yield return new WaitForSecondsRealtime(0.5f);
                 Application.Quit();
@@ -832,6 +833,7 @@ namespace DroneSandbox
             yield return ContinuousFlight(game, rts, 1);
             yield return ContinuousFlight(game, rts, 2);
             yield return WorldRecon(game, rts);
+            yield return WorldCampaign(game, rts);
 
             // Select the nearest requested cover outside Backdrop, then record a real 40-60 m view with a live tile.
             IEnumerator LowWorldShot(Cover cover, string name, Vector3 near)
@@ -2504,6 +2506,177 @@ namespace DroneSandbox
                           $"committed {committedBefore / 1048576} -> {System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / 1048576} MB, {Screen.width}x{Screen.height}");
             if (reached < best.Count || swift == null || !swift.IsAlive || Mathf.Max(slow95, fast95) > 16.7f || FarDetail.WorstCommitMs > 2.0 ||
                 farContacts > 0 || Mathf.Abs(battery) > 2f) { if (pass <= 2) errors++; }
+        }
+
+        // The theatre feeding the campaign (the owner's call after WorldRecon). A real campaign operation: its Swift flies
+        // out of the sector over the nearest Dravin air defence site without a jammer (mapping it, and seen by its radar),
+        // then to the depot or supply convoy nearest that, whose sector is made the announced threat for the test, and
+        // shoots one of its units once it's alive. Abandoning the operation (a loss, the real way out) must put the site's sector on
+        // guard, sharpen its reports and make the threat's build-up slip a turn. Then, as in a new session, the next
+        // operation rebuilds the theatre from the save alone: the unit shot still destroyed, the site still mapped, the
+        // vehicles seen now only rough contacts where they were, and the guarded sector's Dravin warier if it's played.
+        IEnumerator WorldCampaign(SandboxGame game, RtsController rts)
+        {
+            bool showAll = Recon.ForceShowAll;
+            Recon.ForceShowAll = false;
+            Theatre.NewCampaign();
+            // An operation that won't end on its own while the Swift is away (no column to escape, no spotters on the base).
+            var calm = new[] { Situation.AmmoDepot, Situation.AAScreen, Situation.JammingNode, Situation.RepairYard, Situation.FuelDepot, Situation.RadarStation,
+                Situation.TankLaager, Situation.DugInTanks, Situation.AirDefenceBelt, Situation.WoodlandDump, Situation.LogisticsHub, Situation.CommandPost };
+            var first = Theatre.Offers[0].spot;
+            foreach (var h in Theatre.Hotspots) if (!h.final && System.Array.IndexOf(calm, h.situation) >= 0) { first = h; break; }
+            game.PlayHotspot(first);
+            while (game.Loading) yield return null;
+            yield return null;
+            yield return null; // the campaign's theatre is restored at the next tick
+            game.CloseBriefing();
+            Vector3 ToLocal(Vector2 world) => new Vector3(world.x - FarTerrain.Origin.x, 0f, world.y - FarTerrain.Origin.y);
+            Vector2 ToWorld(Vector3 local) => new Vector2(local.x, local.z) + FarTerrain.Origin;
+            Vector2 Where(WorldGroup g)
+            {
+                foreach (var c in g.members) if (!c.destroyed) return c.live != null ? ToWorld(c.live.transform.position) : c.position;
+                return g.centre;
+            }
+            Vector2 sector = FarTerrain.Origin;
+            WorldGroup site = null, supply = null;
+            foreach (var g in WorldActivity.Groups)
+                if (g.kind == WorldGroupKind.AirDefence && !g.members.Exists(m => m.type == EnemyType.Jammer) // a jammer would bring the Swift down overhead
+                    && !WorldActivity.NearSector(g.centre) && WorldActivity.SectorOf(g) != null
+                    && (site == null || (g.centre - sector).sqrMagnitude < (site.centre - sector).sqrMagnitude)) site = g;
+            if (site != null)
+                foreach (var g in WorldActivity.Groups)
+                    if ((g.kind == WorldGroupKind.Depot || g.kind == WorldGroupKind.Convoy) && !WorldActivity.NearSector(Where(g)) && WorldActivity.SectorOf(g) != null
+                        && (supply == null || (Where(g) - site.centre).sqrMagnitude < (Where(supply) - site.centre).sqrMagnitude)) supply = g;
+            var swift = game.SpawnDrone(DroneType.Recon);
+            if (WorldActivity.Operation != first || site == null || supply == null || swift == null)
+            {
+                log.WriteLine($"World campaign: {first.sectorName} ({first.situation}) loaded {WorldActivity.Operation == first} (mode {game.Mode}, playing it {game.Hotspot == first}, " +
+                              $"result {game.Result} {game.ResultReason}, Swifts {game.StockLeft(DroneType.Recon)}), site {site != null}, supply {supply != null}, Swift {swift != null}");
+                errors++;
+                game.OpenMenu();
+                Theatre.NewCampaign();
+                Recon.ForceShowAll = showAll;
+                yield break;
+            }
+            var guarded = WorldActivity.SectorOf(site);
+            var threat = WorldActivity.SectorOf(supply);
+            Progress.Set("theatre.threat", Theatre.Hotspots.IndexOf(threat) + 1);
+            Progress.Set("theatre.threatRound", Theatre.Round);
+            Progress.Set("theatre.threatDue", Theatre.Turn + 1);
+            Progress.Set("theatre.threatSlipped", 0);
+            int due = Theatre.ThreatDue;
+            rts.selected.Clear();
+            rts.selected.Add(swift);
+            swift.MoveTo(ToLocal(site.centre));
+            float started = Time.realtimeSinceStartup, overSite = -1f;
+            bool mapped = false, seen = false;
+            // To the site and over it, until it's identified and has seen the Swift (or 40 s of game time there).
+            while (swift != null && swift.IsAlive && game.Result == MissionResult.None && Time.realtimeSinceStartup - started < 300f)
+            {
+                Time.timeScale = 4f;
+                rts.LookAt(swift.transform.position, 400f, 30f);
+                yield return null;
+                if (swift == null) break;
+                if (overSite < 0f && Vector2.Distance(ToWorld(swift.transform.position), site.centre) < 150f) overSite = Time.time;
+                if (overSite < 0f) continue;
+                foreach (var c in site.members)
+                {
+                    mapped |= !c.Mobile && c.CurrentIntel >= Intel.Identified;
+                    seen |= c.live != null && c.live.AlertedAt >= c.liveSince;
+                }
+                if ((mapped && seen) || Time.time - overSite > 40f) break;
+            }
+            // On to the supply position, following a convoy as it drives. Its first unit in reach (a depot's ammo store) is
+            // shot once another of its vehicles is identified (or after 15 s there), so the next operation has a vehicle
+            // sighting to age.
+            WorldContact shot = null;
+            float leg = Time.realtimeSinceStartup, retarget = 0f, inReach = -1f;
+            while (shot == null && swift != null && swift.IsAlive && game.Result == MissionResult.None && Time.realtimeSinceStartup - leg < 300f)
+            {
+                Time.timeScale = 4f;
+                if (Time.realtimeSinceStartup > retarget)
+                {
+                    retarget = Time.realtimeSinceStartup + 1f;
+                    swift.MoveTo(ToLocal(Where(supply)));
+                }
+                rts.LookAt(swift.transform.position, 400f, 30f);
+                yield return null;
+                if (swift == null) break;
+                foreach (var c in supply.members)
+                {
+                    if (c.destroyed || c.live == null || (supply.kind == WorldGroupKind.Depot && c.type != EnemyType.Depot)) continue;
+                    if (Vector2.Distance(ToWorld(swift.transform.position), ToWorld(c.live.transform.position)) > 250f) continue;
+                    if (inReach < 0f) inReach = Time.time;
+                    bool sighted = false;
+                    foreach (var o in supply.members) sighted |= o != c && !o.destroyed && o.Mobile && o.CurrentIntel >= Intel.Identified;
+                    if (!sighted && Time.time - inReach < 15f) break;
+                    shot = c;
+                    c.live.TakeDamage(1000000f);
+                    break;
+                }
+            }
+            for (float t = 0f; shot != null && !shot.destroyed && t < 3f; t += Time.unscaledDeltaTime) yield return null;
+            Time.timeScale = 1f;
+            bool destroyed = shot != null && shot.destroyed;
+            float wariness = EnemyUnit.Wariness;
+            int turn = Theatre.Turn;
+            string ending = game.Result == MissionResult.None ? "abandoned" : $"{game.Result} ({game.ResultReason})";
+            game.OpenMenu(); // under way, that's a loss: the real way out
+            string news = Theatre.TheatreNews;
+            bool guard = Theatre.OnGuard(guarded), sharper = Theatre.IntelFactorAt(guarded) < Theatre.IntelFactor - 0.01f;
+            int mappedThere = Theatre.Mapped(guarded);
+            bool slipped = Theatre.ThreatSpot == threat && Theatre.ThreatDue == due + 1 && Theatre.ThreatSlipped;
+            bool saved = Progress.Get("campaign.world.layout") > 0 && shot != null && (Progress.Get("campaign.world." + shot.id) & 1) == 1;
+            // What the next operation should find: the site's guns and radar mapped, and the vehicles seen this time.
+            var siteMapped = new List<int>();
+            var vehiclesSeen = new List<(int id, Vector2 marker)>();
+            foreach (var c in WorldActivity.Contacts)
+            {
+                if (c.destroyed) continue;
+                if (!c.Mobile && c.group == site && c.intel >= Intel.Identified) siteMapped.Add(c.id);
+                if (c.Mobile && c.seenTurn == turn && c.intel != Intel.Unknown) vehiclesSeen.Add((c.id, c.MarkerPosition));
+            }
+            WorldActivity.Reset(); // a new session: only the save is left
+            var second = Theatre.Offered(guarded) ? guarded : Theatre.ThreatSpot ?? Theatre.Offers[0].spot;
+            game.PlayHotspot(second);
+            while (game.Loading) yield return null;
+            yield return null;
+            yield return null;
+            var now = WorldActivity.Contacts;
+            bool stillDestroyed = shot != null && now.Count >= shot.id && now[shot.id - 1].destroyed;
+            int keptMapped = 0, rough = 0, sharp = 0;
+            foreach (int id in siteMapped) if (now[id - 1].intel >= Intel.Identified) keptMapped++;
+            foreach (var (id, marker) in vehiclesSeen)
+            {
+                var c = now[id - 1];
+                if (c.intel >= Intel.Identified) sharp++;
+                else if (c.intel == Intel.Contact && Vector2.Distance(c.contactPosition, marker) < 2f) rough++;
+            }
+            bool warier = second != guarded || Mathf.Approximately(EnemyUnit.Wariness, 1.3f);
+            yield return new WaitForSecondsRealtime(0.4f);
+            yield return Shot("94_campaign_briefing");
+            game.OpenMenu(); // from the briefing: not a loss
+            var hud = game.GetComponent<SandboxHud>();
+            hud.TheatreOpen = true;
+            hud.Chosen = guarded;
+            yield return new WaitForSecondsRealtime(0.6f);
+            yield return Shot("95_campaign_theatre");
+            hud.TheatreOpen = false;
+            hud.Chosen = null;
+            log.WriteLine($"World campaign: played {first.sectorName} ({first.situation}), {ending} after {Time.realtimeSinceStartup - started:F0} s; " +
+                          $"site {site.kind} near {site.near} counts for {guarded.sectorName}: mapped {mapped}, saw the Swift {seen}; " +
+                          $"supply {supply.kind} near {supply.near} counts for {threat.sectorName} (made the threat): shot {(shot != null ? shot.Label + " " + shot.type : "none")}, destroyed {destroyed}; " +
+                          $"wariness in the operation {wariness:F2}");
+            log.WriteLine($"World campaign news: {news}");
+            log.WriteLine($"World campaign after: {guarded.sectorName} on guard {guard}, mapped {mappedThere} (reports x{Theatre.IntelFactorAt(guarded) / Theatre.IntelFactor:F2}); " +
+                          $"threat slipped {slipped} (due {due} -> {Theatre.ThreatDue}); saved {saved}; next operation {second.sectorName}: shot still destroyed {stillDestroyed}, " +
+                          $"site kept mapped {keptMapped}/{siteMapped.Count}, vehicles seen {vehiclesSeen.Count}: rough contacts {rough}, still sharp {sharp}; warier {warier} ({EnemyUnit.Wariness:F2})");
+            bool gate = mapped && seen && destroyed && guard && mappedThere >= 1 && sharper && slipped && saved && stillDestroyed && siteMapped.Count >= 1
+                        && keptMapped == siteMapped.Count && vehiclesSeen.Count >= 1 && sharp == 0 && rough == vehiclesSeen.Count && warier;
+            log.WriteLine($"World campaign gate -> {(gate ? "PASS" : "FAIL")}");
+            if (!gate) errors++;
+            Theatre.NewCampaign();
+            Recon.ForceShowAll = showAll;
         }
 
         // ChatGPT's gameplay gate (critique 20): a Swift flies 15-20 km through Dravin country outside the battle sector, where

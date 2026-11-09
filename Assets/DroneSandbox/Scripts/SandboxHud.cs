@@ -52,6 +52,7 @@ namespace DroneSandbox
         public bool TheatreOpen; // the theatre map, opened from the main menu
         public bool SettingsOpen; // interface size, shake, flashes and sound, from the main menu
         Hotspot chosen;          // the hotspot picked on the theatre map
+        public Hotspot Chosen { get => chosen; set => chosen = value; } // for the autotest's pictures of a card
         float newCampaignAsked = -100f; // when New campaign was first clicked (it asks again before it acts)
         float abandonAsked = -100f;     // the same for leaving a campaign operation under way
         static Texture2D dotTexture;
@@ -732,7 +733,7 @@ namespace DroneSandbox
             var m = game.Mission;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
             bool campaign = game.Hotspot != null;
-            Rect r = Centered(620f, campaign ? 392f : 340f);
+            Rect r = Centered(620f, campaign ? 414f : 340f);
             Fill(r, ModalColor);
             float x = r.x + 28f * s, w = r.width - 56f * s;
             string where = game.Hotspot != null
@@ -763,9 +764,21 @@ namespace DroneSandbox
                     GUI.enabled = true;
                     bx += 112f * s;
                 }
-                if (Theatre.IsAlerted(game.Hotspot))
-                    GUI.Label(new Rect(x, y + 28f * s, w, 22f * s), "<b>ALERTED:</b> they're on edge here: drones are noticed further off, and the alarm spreads wider",
+                // How the theatre around the sector stands: on edge after an ignored threat or after seeing our drones, and
+                // what we've mapped of the Dravin positions nearby.
+                float note = y + 28f * s;
+                if (Theatre.IsAlerted(game.Hotspot) || Theatre.OnGuard(game.Hotspot))
+                {
+                    GUI.Label(new Rect(x, note, w, 22f * s), Theatre.IsAlerted(game.Hotspot)
+                        ? "<b>ALERTED:</b> on edge here: drones are noticed further off, the alarm spreads wider"
+                        : "<b>ON GUARD:</b> Dravin nearby saw our drones: they notice drones further off",
                         Tinted(label, Hostile));
+                    note += 22f * s;
+                }
+                int mapped = Theatre.Mapped(game.Hotspot);
+                if (mapped > 0)
+                    GUI.Label(new Rect(x, note, w, 22f * s), $"<b>Theatre intel:</b> {mapped} Dravin position{(mapped == 1 ? "" : "s")} mapped around the sector: reports {mapped * 10}% sharper",
+                        Tinted(label, Teal));
             }
             var start = new Rect(r.x + (r.width - 220f * s) / 2f, r.yMax - 76f * s, 220f * s, 46f * s);
             bool enter = Event.current.type == EventType.KeyDown &&
@@ -818,6 +831,9 @@ namespace DroneSandbox
             string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
             GUI.Label(new Rect(r.x, r.y + 202f * s, r.width, 22f * s),
                 $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
+            if (game.Hotspot != null && Theatre.TheatreNews.Length > 0)
+                GUI.Label(new Rect(r.x + 16f * s, r.y + 228f * s, r.width - 32f * s, 36f * s), Theatre.TheatreNews,
+                    Tinted(new GUIStyle(small) { alignment = TextAnchor.UpperCenter, wordWrap = true }, Teal));
 
             float bw = 130f * s, gap = 12f * s;
             float x0 = r.x + (r.width - 3f * bw - 2f * gap) / 2f, y = r.yMax - 72f * s;
@@ -896,7 +912,8 @@ namespace DroneSandbox
                 if (threat != null)
                     GUI.Label(new Rect(strip.x + 6f * s, strip.y + 2f * s, strip.width - 12f * s, 18f * s),
                         $"<b>DRAVIN THREAT AT {threat.sectorName.ToUpperInvariant()}</b>   " +
-                        (Theatre.ThreatDue <= Theatre.Turn ? "<b>LAST TURN</b> to deal with it" : "expires in 2 turns") + "   ignored, the front gives ground", Tinted(line, Hostile));
+                        (Theatre.ThreatDue <= Theatre.Turn ? "<b>LAST TURN</b> to deal with it" : $"expires in {Theatre.ThreatDue - Theatre.Turn + 1} turns") +
+                        "   ignored, the front gives ground", Tinted(line, Hostile));
                 if (Theatre.News.Length > 0)
                     GUI.Label(new Rect(strip.x + 6f * s, strip.y + 20f * s, strip.width - 12f * s, 18f * s), Theatre.News, Tinted(line, TargetColor));
             }
@@ -920,7 +937,7 @@ namespace DroneSandbox
                 if (offered && !h.final && !Theatre.Victory)
                 {
                     string tag = Theatre.RewardOf(h).ToString().ToUpperInvariant();
-                    string headline = Theatre.IsThreat(h) ? "DRAVIN THREAT" : Theatre.IsAlerted(h) ? "ALERTED" : null;
+                    string headline = Theatre.IsThreat(h) ? "DRAVIN THREAT" : Theatre.IsAlerted(h) ? "ALERTED" : Theatre.OnGuard(h) ? "ON GUARD" : null;
                     var tagStyle = Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold }, Teal);
                     float width = tagStyle.CalcSize(new GUIContent(headline != null && headline.Length > tag.Length ? headline : tag)).x + 12f * s;
                     float height = (headline != null ? 30f : 15f) * s;
@@ -949,7 +966,7 @@ namespace DroneSandbox
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 10f * s, card.width - 300f * s, 30f * s),
                     (spot.final ? "<b>FINAL OPERATION</b>  \u00b7  " : "") + $"<b>{spot.sectorName}</b>  \u00b7  {type.name}" +
                     (Theatre.IsThreat(spot) ? "   <color=#FF5040><b>DRAVIN THREAT</b></color>" : "") +
-                    (Theatre.IsAlerted(spot) ? "   <color=#FFA040><b>ALERTED</b></color>" : ""), heading);
+                    (Theatre.IsAlerted(spot) ? "   <color=#FFA040><b>ALERTED</b></color>" : Theatre.OnGuard(spot) ? "   <color=#FFA040><b>ON GUARD</b></color>" : ""), heading);
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 44f * s, card.width - 300f * s, 22f * s),
                     $"<b>{Situations.Name(spot.situation)}</b>     {spot.daylight}, {spot.weather.ToString().ToLowerInvariant()}     km {km:0} of the front     " +
                     $"activity {Mathf.RoundToInt(spot.heat * 100f)}%" + (Theatre.Done(spot) ? "     <b>WON</b>" : ""), label);
@@ -966,6 +983,9 @@ namespace DroneSandbox
                         : $"<b>{reward.ToString().ToUpperInvariant()}:</b> {Theatre.RewardText(reward)}" + (Theatre.RewardMaxed(reward) ? "  (already at most)" : "") +
                           "     <b>A loss:</b> -1 progress", Tinted(label, onOffer || spot.final ? Teal : new Color(1f, 1f, 1f, 0.5f)));
                 GUI.Label(new Rect(card.x + 16f * s, card.y + 114f * s, card.width - 300f * s, 30f * s), type.blurb, smallWrap);
+                string theatre = TheatreNote(spot);
+                if (theatre.Length > 0)
+                    GUI.Label(new Rect(card.xMax - 280f * s, card.y + 80f * s, 264f * s, card.height - 84f * s), theatre, smallWrap);
                 if (chosen != null && (Theatre.Offered(chosen) || Theatre.Victory))
                 {
                     var fly = new Rect(card.xMax - 250f * s, card.y + 22f * s, 230f * s, 50f * s);

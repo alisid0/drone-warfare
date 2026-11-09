@@ -73,6 +73,20 @@ namespace DroneSandbox
             return Mathf.Clamp(Mathf.RoundToInt(c * 100f), 20, 95);
         }
 
+        // What the theatre around a sector adds (Theatre, WorldActivity): the Dravin positions mapped near it, whether
+        // its Dravin are on guard, and for the announced threat, the supply that feeds the build-up.
+        static string TheatreNote(Hotspot h)
+        {
+            if (h.final || Theatre.Done(h)) return "";
+            var lines = new System.Collections.Generic.List<string>();
+            int mapped = Theatre.Mapped(h), supply = Theatre.Supplies(h);
+            if (mapped > 0) lines.Add($"<color=#49DFCF><b>Mapped nearby:</b> {mapped} Dravin position{(mapped == 1 ? "" : "s")}, reports {mapped * 10}% sharper</color>");
+            if (Theatre.OnGuard(h)) lines.Add("<color=#FFA040><b>On guard:</b> Dravin nearby saw our drones</color>");
+            if (Theatre.IsThreat(h) && !Theatre.ThreatSlipped && supply > 0)
+                lines.Add($"<color=#FF8060><b>Its supply:</b> {supply} depot{(supply == 1 ? "" : "s")} or convoy{(supply == 1 ? "" : "s")} within 8 km; hit one and the build-up slips a turn</color>");
+            return string.Join("\n", lines);
+        }
+
         // A badge on the theatre map: control colour, country glyph, and an activity ring.
         // Not on offer this turn (dim): faded, no activity ring.
         void HotspotBadge(Vector2 c, Hotspot h, bool done, bool chosenOne, bool hovered, bool dim = false)

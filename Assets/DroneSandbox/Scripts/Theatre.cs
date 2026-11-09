@@ -32,7 +32,8 @@ namespace DroneSandbox
     // puts another hotspot on alert. At ProgressForFinal the final operation opens: a strike on the Dravin front
     // command; destroy it and the campaign is complete (the ground offensive breaks through: the drones open the
     // way, they don't win the war on their own). Support charges (start 1, at most 3) buy an extra drone before a
-    // mission. Saved through Progress.
+    // mission. The Dravin positions out in the theatre around the sectors feed in too (WorldActivity; see "The theatre
+    // around the sectors" below). Saved through Progress.
     public static class Theatre
     {
         public const int HotspotCount = 11;
@@ -192,6 +193,7 @@ namespace DroneSandbox
             Achievements.CampaignResult(h, true);
             Record(dronesLost);
             Outcome = News = "";
+            FromTheatre(h, true);
             if (h.final)
             {
                 Progress.Set("theatre.victory", 1);
@@ -235,6 +237,7 @@ namespace DroneSandbox
             Achievements.CampaignResult(h, false);
             Record(dronesLost);
             Outcome = News = "";
+            FromTheatre(h, false);
             if (h.final || Done(h))
             {
                 Progress.Save();
@@ -364,9 +367,12 @@ namespace DroneSandbox
                     var t = candidates[new System.Random(Seed * 7 + turn).Next(candidates.Count)];
                     SetSpot("theatre.threat", t);
                     Progress.Set("theatre.threatDue", turn + 1);
+                    Progress.Set("theatre.threatSlipped", 0);
                     News += (News.Length > 0 ? "  " : "") + $"New threat: the Dravin are building up at {t.sectorName}.";
                 }
             }
+            if (theatreChanged) WorldActivity.Tally(); // the sector just won, or a new round, changes who counts for what
+            theatreChanged = false;
             Progress.Save();
         }
 
@@ -374,6 +380,49 @@ namespace DroneSandbox
         {
             Progress.Set("theatre.fights", Fights + 1);
             Progress.Set("theatre.dronesLost", DronesLost + dronesLost);
+        }
+
+        // ---- The theatre around the sectors (WorldActivity) ----
+
+        // Each Dravin position out in the theatre counts for the open sector nearest it, within 8 km. Mapped guns, radars,
+        // launchers and depots sharpen that sector's reports (contact circles 10% tighter each, at most 30%, and with
+        // the Intel reward never below half their size, so a sector still has to be searched); a position
+        // that noticed our drones puts it on guard for three turns (its Dravin warier, as when ALERTED); and a depot or
+        // supply convoy hit near the announced threat makes the build-up there slip a turn, once per threat.
+        public const int MaxMapped = 3;
+        public static int Mapped(Hotspot h) => h != null ? Mathf.Min(MaxMapped, Progress.Get(h.Key + ".mapped")) : 0;
+        public static int Supplies(Hotspot h) => h != null ? Progress.Get(h.Key + ".supply") : 0;
+        public static bool OnGuard(Hotspot h) => h != null && Turn <= Progress.Get(h.Key + ".guardUntil");
+        public static bool ThreatSlipped => Progress.Get("theatre.threatSlipped") == 1;
+        public static float IntelFactorAt(Hotspot h) => Mapped(h) > 0 ? Mathf.Max(0.5f, IntelFactor * (1f - 0.1f * Mapped(h))) : IntelFactor; // a sector's contact circles
+        public static string TheatreNews = ""; // what the last operation's flying in the theatre did (on the results)
+        static bool theatreChanged;
+
+        // What the operation did out in the theatre, before the turn moves on; the theatre is saved with the campaign.
+        static void FromTheatre(Hotspot h, bool won)
+        {
+            TheatreNews = "";
+            var report = WorldActivity.EndOperation(h);
+            if (report == null) return; // not flown in the theatre (credited by a test, say)
+            var news = new List<string>();
+            if (report.mapped > 0) news.Add($"{report.mapped} Dravin position{(report.mapped == 1 ? "" : "s")} mapped");
+            if (report.destroyed > 0) news.Add($"{report.destroyed} of their units destroyed");
+            foreach (var spot in report.seenFrom)
+            {
+                if (spot.final || (won && spot == h)) continue;
+                Progress.Set(spot.Key + ".guardUntil", Turn + 3);
+                news.Add($"seen near {spot.sectorName}: on guard");
+            }
+            var threat = ThreatSpot;
+            if (report.supplyHit && threat != null && !ThreatSlipped)
+            {
+                Progress.Set("theatre.threatDue", ThreatDue + 1);
+                Progress.Set("theatre.threatSlipped", 1);
+                news.Add($"supply hit: the build-up at {threat.sectorName} slips a turn");
+            }
+            if (news.Count > 0) TheatreNews = "Theatre: " + string.Join("  \u00b7  ", news);
+            WorldActivity.Tally();
+            theatreChanged = true;
         }
 
         // Starts the war over: a new front (a new seed), no sectors won, no campaign bonuses. Tech-shop purchases
@@ -387,7 +436,7 @@ namespace DroneSandbox
             hotspots = null;
             offers = null;
             builtRound = -1;
-            Outcome = News = "";
+            Outcome = News = TheatreNews = "";
             mapAdvance = -1f;
             Progress.Set("theatre.seed", Random.Range(1, 1000000));
             WorldActivity.Reset(); // the Dravin positions out in the theatre, seeded afresh

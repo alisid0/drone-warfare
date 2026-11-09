@@ -130,6 +130,7 @@ namespace DroneSandbox
         public void StartSandbox()
         {
             ClearUnits();
+            WorldActivity.Fresh(); // free play has the seeded theatre: nothing done there reaches the campaign
             Mode = GameMode.Sandbox;
             rts.Orbit(false);
             DayNight.Instance.SetTime(10f, 1f); // a full day every 24 minutes; N skips ahead
@@ -234,6 +235,9 @@ namespace DroneSandbox
         void Begin(Mission mission, int index, Hotspot hotspot)
         {
             ClearUnits();
+            // A campaign operation has the campaign's theatre around it; an Asset Hunt mission the seeded one.
+            if (hotspot != null) WorldActivity.BeginOperation(hotspot);
+            else WorldActivity.Fresh();
             Mode = GameMode.Mission;
             MissionIndex = index;
             Mission = mission;
@@ -246,7 +250,7 @@ namespace DroneSandbox
             Coordinated = 0;
             Coach.Begin(mission, index);
             System.Array.Clear(supportFor, 0, supportFor.Length);
-            EnemyUnit.Wariness = Theatre.IsAlerted(hotspot) ? 1.3f : 1f;
+            EnemyUnit.Wariness = Theatre.IsAlerted(hotspot) || Theatre.OnGuard(hotspot) ? 1.3f : 1f;
             rts.Orbit(false);
             DayNight.Instance.SetTime(Mission.startHour, 0.25f);
 
@@ -310,7 +314,7 @@ namespace DroneSandbox
                     enemy.Hide(position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * off);
                 }
                 // The briefing's intelligence: fixed defences are mapped, vehicles only roughly placed.
-                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius * Theatre.IntelFactor * Difficulty.ReportCircleFactor);
+                else enemy.Brief(enemy.IsMobile ? Intel.Contact : Intel.Identified, Mission.contactRadius * Theatre.IntelFactorAt(hotspot) * Difficulty.ReportCircleFactor);
                 if (u.target) TargetsTotal++;
             }
 

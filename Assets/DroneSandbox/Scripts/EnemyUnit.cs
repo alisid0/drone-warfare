@@ -21,7 +21,7 @@ namespace DroneSandbox
         public const float JamRadius = 24f * Scale.Distance;     // drones inside a jammer's circle lose their link
         public const float AlertSeconds = 30f;  // how long a unit stays on alert after the last trouble
         public const float AlertShare = 42f * Scale.Distance;    // units this close to one that's hit or destroyed go on alert too
-        public static float Wariness = 1f;      // an ALERTED campaign sector (Theatre): drones noticed further off, the alarm spreading wider
+        public static float Wariness = 1f;      // an ALERTED or ON GUARD campaign sector (Theatre): drones noticed further off, the alarm spreading wider
 
         public EnemyType type;
         public bool isTarget;          // a mission objective

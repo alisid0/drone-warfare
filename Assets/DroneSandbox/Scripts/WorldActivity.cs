@@ -24,6 +24,7 @@ namespace DroneSandbox
         public Intel intel;
         public Vector2 lastSeen, contactPosition;
         public float lastSeenAt = -1000f, contactRadius, alertedAt = -1000f;
+        public int seenTurn;       // the campaign turn it was last seen (0: never)
         // The live unit while a drone is near, when it came alive, and the world origin it was placed with (a sector
         // change moves the origin before its units are cleared away).
         public EnemyUnit live;
@@ -41,7 +42,7 @@ namespace DroneSandbox
     public sealed class WorldGroup
     {
         public WorldGroupKind kind;
-        public Vector2 centre;
+        public Vector2 centre, seededCentre; // where it is, and where it was seeded (the save keeps the difference)
         public string near;                 // the closest settlement, for the news
         public readonly List<WorldContact> members = new List<WorldContact>();
         public List<Vector2> road;           // patrols and convoys: the stretch they drive up and down
@@ -99,8 +100,10 @@ namespace DroneSandbox
     //   unwatched, it goes back to data. The ground under it needn't be streamed in: it stands on whatever height the
     //   world has there and settles again as the detail arrives.
     // - Nothing comes alive in or near the battle sector, so a mission's own enemies are the only ones in it.
-    // - Destroyed units stay destroyed (a new campaign seeds the world afresh) and earn no points: points are for
-    //   objectives.
+    // - Destroyed units stay destroyed and earn no points: points are for objectives.
+    // - In a campaign operation the theatre is the campaign's: saved when the operation ends and aged by the turns
+    //   between (see "The campaign" below), and it feeds the sectors around it (Theatre). Free play and the Asset
+    //   Hunt missions have the seeded theatre, and nothing they do there is kept.
     public class WorldActivity : MonoBehaviour
     {
         public const float LiveRadius = 1500f, ReleaseRadius = 2000f;
@@ -130,13 +133,19 @@ namespace DroneSandbox
             Groups.Clear();
             Contacts.Clear();
             seededFor = int.MinValue;
+            holdsCampaign = false;
+            Operation = null;
         }
 
         void Update()
         {
             var game = SandboxGame.Instance;
             if (game == null || !WorldPlan.Ready) return;
-            if (seededFor != WorldPlan.Seed) Seed();
+            if (seededFor != WorldPlan.Seed)
+            {
+                Seed();
+                if (Operation != null) Restore();
+            }
             if (game.Mode == GameMode.Menu || game.Loading) return;
             timer -= Time.deltaTime; // game time: a tactical pause stops the theatre too
             if (timer <= 0f)
@@ -242,13 +251,25 @@ namespace DroneSandbox
 
         static Vector3 Local(Vector2 world, Vector2 origin) => Ground.OnGround(new Vector3(world.x - origin.x, 0f, world.y - origin.y));
 
-        // Back to data: where it got to, its health, what we know of it and whether it's on alert. A vehicle park that
-        // noticed the drone packs up and moves a few minutes later.
+        // Back to data, with what it has come to. A vehicle park that noticed the drone packs up and moves a few minutes
+        // later; in a campaign operation, any position that noticed one is remembered (it puts its sector on guard).
         static void Release(SandboxGame game, WorldContact c)
         {
             var u = c.live;
             c.live = null;
             if (u == null) return;
+            WriteBack(c, u);
+            var g = c.group;
+            if (g.CanRelocate && g.relocateAt < 0f && c.alertedAt >= c.liveSince) g.relocateAt = Time.time + Random.Range(60f, 150f);
+            if (Operation != null && c.alertedAt >= c.liveSince) sawUs.Add(g);
+            if (game != null) game.enemies.Remove(u);
+            Destroy(u.gameObject);
+            Released++;
+        }
+
+        // What a live unit has come to: where it got to, its health, what we know of it and whether it's on alert.
+        static void WriteBack(WorldContact c, EnemyUnit u)
+        {
             Vector2 o = c.liveOrigin;
             c.position = Flat(u.transform.position) + o;
             c.heading = u.transform.eulerAngles.y;
@@ -259,12 +280,7 @@ namespace DroneSandbox
             c.contactPosition = Flat(u.ContactPosition) + o;
             c.contactRadius = u.ContactRadius;
             c.alertedAt = u.AlertedAt;
-            var g = c.group;
-            if (g.OnRoad) c.along = g.Project(c.position);
-            if (g.CanRelocate && g.relocateAt < 0f && c.alertedAt >= c.liveSince) g.relocateAt = Time.time + Random.Range(60f, 150f);
-            if (game != null) game.enemies.Remove(u);
-            Destroy(u.gameObject);
-            Released++;
+            if (c.group.OnRoad) c.along = c.group.Project(c.position);
         }
 
         // Every live unit back to data, before the game clears its units (a new mode or sector).
@@ -285,6 +301,7 @@ namespace DroneSandbox
             c.destroyed = true;
             c.health = 0f;
             c.live = null;
+            if (Operation != null) hit.Add(c);
         }
 
         static Vector2 Flat(Vector3 p) => new Vector2(p.x, p.z);
@@ -449,7 +466,7 @@ namespace DroneSandbox
 
         static WorldGroup NewGroup(WorldGroupKind kind, Vector2 centre)
         {
-            var g = new WorldGroup { kind = kind, centre = centre, near = NearestPlace(centre) };
+            var g = new WorldGroup { kind = kind, centre = centre, seededCentre = centre, near = NearestPlace(centre) };
             Groups.Add(g);
             return g;
         }
@@ -581,6 +598,222 @@ namespace DroneSandbox
                 if (d < best) { best = d; name = s.name; }
             }
             return name;
+        }
+
+        // ---- The campaign ----
+
+        // The campaign operation the theatre is loaded for, and when it began (Time.time); null in free play and the
+        // Asset Hunt missions.
+        public static Hotspot Operation { get; private set; }
+        public static float OperationStart { get; private set; }
+        public const float SectorReach = 8000f;  // a position counts for the nearest open sector this close to its centre
+        static bool holdsCampaign;               // the theatre in memory is the campaign's, not the seeded one
+        static readonly HashSet<WorldGroup> sawUs = new HashSet<WorldGroup>(); // positions that noticed our drones this operation
+        static readonly List<WorldContact> hit = new List<WorldContact>();     // units destroyed this operation
+        static List<(Hotspot spot, Vector2 centre)> spots;
+        static List<Hotspot> spotsFor;
+
+        // What a campaign operation did out in the theatre, for Theatre.
+        public sealed class Report
+        {
+            public readonly List<Hotspot> seenFrom = new List<Hotspot>(); // sectors whose Dravin noticed our drones
+            public bool supplyHit;  // a depot or supply convoy near the announced threat
+            public int mapped, destroyed; // positions with something identified this operation, and units destroyed
+        }
+
+        // A campaign operation begins: at the next tick the theatre is seeded afresh and given what the campaign saved.
+        public static void BeginOperation(Hotspot h)
+        {
+            ReleaseAll();
+            Operation = h;
+            OperationStart = Time.time;
+            sawUs.Clear();
+            hit.Clear();
+            seededFor = int.MinValue;
+            holdsCampaign = true;
+        }
+
+        // Free play or an Asset Hunt mission: the seeded theatre again, if the campaign's is in memory.
+        public static void Fresh()
+        {
+            Operation = null;
+            if (holdsCampaign) Reset();
+        }
+
+        // The operation is over (won, lost or abandoned): what it did, and the theatre saved with the campaign. Live
+        // units stay where they are until the game clears them; what they know is written back first. Null if the
+        // theatre wasn't loaded for this operation.
+        public static Report EndOperation(Hotspot h)
+        {
+            if (Operation == null || Operation != h || seededFor != WorldPlan.Seed) return null;
+            foreach (var c in Contacts)
+            {
+                if (c.live == null) continue;
+                WriteBack(c, c.live);
+                if (c.alertedAt >= c.liveSince) sawUs.Add(c.group);
+            }
+            var report = new Report { destroyed = hit.Count };
+            foreach (var g in sawUs)
+            {
+                var spot = SectorOf(g);
+                if (spot != null && !report.seenFrom.Contains(spot)) report.seenFrom.Add(spot);
+            }
+            var threat = Theatre.ThreatSpot;
+            foreach (var c in hit)
+                if (threat != null && Supply(c.group) && SectorOf(c.group) == threat) report.supplyHit = true;
+            var mapped = new HashSet<WorldGroup>();
+            foreach (var c in Contacts)
+                if (!c.destroyed && c.lastSeenAt >= OperationStart && c.intel >= Intel.Identified) mapped.Add(c.group);
+            report.mapped = mapped.Count;
+            Save();
+            Operation = null;
+            return report;
+        }
+
+        static bool Supply(WorldGroup g) => g.kind == WorldGroupKind.Depot || g.kind == WorldGroupKind.Convoy;
+
+        // The open campaign sector a position counts for: the nearest not yet won, within SectorReach of its centre.
+        public static Hotspot SectorOf(WorldGroup g)
+        {
+            var roster = Theatre.Hotspots;
+            if (spotsFor != roster)
+            {
+                spotsFor = roster;
+                try { spots = WorldSectors.AllSpots(roster); }
+                catch (System.InvalidOperationException) { spots = new List<(Hotspot, Vector2)>(); }
+            }
+            Hotspot best = null;
+            float nearest = SectorReach * SectorReach;
+            foreach (var (spot, centre) in spots)
+            {
+                if (Theatre.Done(spot)) continue;
+                float d = (centre - g.centre).sqrMagnitude;
+                if (d < nearest) { nearest = d; best = spot; }
+            }
+            return best;
+        }
+
+        // For the theatre map, saved with the campaign: each open sector's mapped positions (a gun, radar, launcher or
+        // depot still standing and identified) and its supply (depots and convoys with something left).
+        public static void Tally()
+        {
+            foreach (var h in Theatre.Hotspots)
+            {
+                Progress.Set(h.Key + ".mapped", 0);
+                Progress.Set(h.Key + ".supply", 0);
+            }
+            foreach (var g in Groups)
+            {
+                var spot = SectorOf(g);
+                if (spot == null) continue;
+                bool mapped = false, standing = false;
+                foreach (var c in g.members)
+                {
+                    if (c.destroyed) continue;
+                    standing = true;
+                    mapped |= !c.Mobile && c.intel >= Intel.Identified;
+                }
+                if (mapped) Progress.Set(spot.Key + ".mapped", Progress.Get(spot.Key + ".mapped") + 1);
+                if (standing && Supply(g)) Progress.Set(spot.Key + ".supply", Progress.Get(spot.Key + ".supply") + 1);
+            }
+        }
+
+        static int Layout => Contacts.Count * 1000 + Groups.Count; // a save from a different seeding doesn't fit
+
+        // The theatre into the campaign's save, as its changes from the seeded one. Per unit: destroyed, health, what we
+        // know and the turn it was last seen, packed in one number, and where a vehicle was last seen. Per position: how
+        // far it has moved, and the turn it began packing up to move.
+        static void Save()
+        {
+            Progress.Forget("campaign.world.");
+            Progress.Set("campaign.world.layout", Layout);
+            int turn = Theatre.Turn;
+            foreach (var c in Contacts)
+            {
+                if (c.lastSeenAt >= OperationStart) c.seenTurn = turn;
+                if (!c.destroyed && c.intel == Intel.Unknown && c.health >= 0.995f) continue;
+                string key = "campaign.world." + c.id;
+                Progress.Set(key, c.seenTurn * 1024 + Mathf.RoundToInt(c.health * 100f) * 8 + (int)c.intel * 2 + (c.destroyed ? 1 : 0));
+                if (c.Mobile && c.intel != Intel.Unknown)
+                {
+                    Progress.Set(key + ".x", Mathf.RoundToInt(c.MarkerPosition.x));
+                    Progress.Set(key + ".z", Mathf.RoundToInt(c.MarkerPosition.y));
+                }
+            }
+            for (int i = 0; i < Groups.Count; i++)
+            {
+                var g = Groups[i];
+                Vector2 shift = g.centre - g.seededCentre;
+                if (shift.sqrMagnitude > 1f)
+                {
+                    Progress.Set($"campaign.world.g{i}.x", Mathf.RoundToInt(shift.x));
+                    Progress.Set($"campaign.world.g{i}.z", Mathf.RoundToInt(shift.y));
+                }
+                if (g.relocateAt > 0f) Progress.Set($"campaign.world.g{i}.move", turn);
+            }
+        }
+
+        // The campaign's theatre: the seeded one with the save applied, aged by the turns since. Guns, radars and depots
+        // stay mapped; a vehicle seen in an earlier operation is only a rough contact where it was, and forgotten after
+        // two turns. A position that was packing up has moved, and the patrols and convoys are elsewhere on their roads.
+        static void Restore()
+        {
+            int turn = Theatre.Turn;
+            bool saved = Progress.Get("campaign.world.layout") == Layout;
+            foreach (var c in Contacts)
+            {
+                if (!saved) break;
+                string key = "campaign.world." + c.id;
+                int v = Progress.Get(key, -1);
+                if (v < 0) continue;
+                c.destroyed = (v & 1) != 0;
+                c.health = c.destroyed ? 0f : (v >> 3 & 127) / 100f;
+                c.seenTurn = v >> 10;
+                var intel = (Intel)(v >> 1 & 3);
+                if (c.destroyed || intel == Intel.Unknown) continue;
+                c.contactRadius = Scale.D(18f);
+                if (!c.Mobile)
+                {
+                    c.intel = intel;
+                    c.lastSeen = c.contactPosition = c.position; // guns, radars and depots don't move
+                    c.lastSeenAt = OperationStart - 1f;
+                }
+                else if (turn - c.seenTurn <= 1)
+                {
+                    c.intel = Intel.Contact;
+                    c.lastSeen = c.contactPosition = new Vector2(Progress.Get(key + ".x"), Progress.Get(key + ".z"));
+                    c.lastSeenAt = OperationStart - Recon.GhostSeconds - 1f;
+                }
+            }
+            for (int i = 0; i < Groups.Count; i++)
+            {
+                var g = Groups[i];
+                if (saved)
+                {
+                    var shift = new Vector2(Progress.Get($"campaign.world.g{i}.x"), Progress.Get($"campaign.world.g{i}.z"));
+                    g.centre += shift;
+                    foreach (var c in g.members) c.position += shift;
+                    int move = Progress.Get($"campaign.world.g{i}.move");
+                    if (move > 0 && move < turn) Relocate(g);
+                    else if (move > 0) g.relocateAt = OperationStart + Random.Range(60f, 150f); // a won sector replayed: still packing up
+                }
+                if (g.OnRoad) Wander(g, i, turn);
+            }
+        }
+
+        // A patrol or convoy in a new turn: somewhere else along its road, the same place for the same turn.
+        static void Wander(WorldGroup g, int index, int turn)
+        {
+            var r = new System.Random(unchecked(Theatre.Seed * 31 + turn * 7919 + index));
+            float start = (float)r.NextDouble() * g.Length, direction = r.NextDouble() < 0.5 ? -1f : 1f;
+            for (int k = 0; k < g.members.Count; k++)
+            {
+                var c = g.members[k];
+                c.along = Mathf.Clamp(start - direction * k * (g.kind == WorldGroupKind.Convoy ? 30f : 40f), 0f, g.Length);
+                c.direction = direction;
+                c.position = g.PointAt(c.along, out Vector2 tangent);
+                c.heading = Mathf.Atan2(tangent.x * direction, tangent.y * direction) * Mathf.Rad2Deg;
+            }
         }
 
         // ---- For the map and the autotest ----

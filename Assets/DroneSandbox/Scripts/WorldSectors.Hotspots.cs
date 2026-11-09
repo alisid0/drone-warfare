@@ -32,6 +32,29 @@ namespace DroneSandbox
             throw new InvalidOperationException("Hotspot was not in its own allocation roster.");
         }
 
+        // Every hotspot of a roster with the centre SpotFor gives it, in one allocation pass (the Varrow Valley at its own
+        // spot, as PlayHotspot loads it), for WorldActivity's campaign link.
+        public static List<(Hotspot spot, Vector2 centre)> AllSpots(List<Hotspot> hotspots)
+        {
+            if (!WorldPlan.Ready) WorldPlan.Generate(World.WorldSeed);
+            var roster = new List<Hotspot>(hotspots);
+            roster.Sort(CompareSpots);
+            var used = new List<Vector2>();
+            if (WorldPlan.Dams.Count > 0)
+            {
+                var dam = WorldPlan.Dams[0];
+                used.Add((dam.a + dam.b) / 2f - SectorPlan.Varrow().damPoint);
+            }
+            var spots = new List<(Hotspot, Vector2)>();
+            foreach (var spot in roster)
+            {
+                Vector2 position = ChooseSpot(spot, used);
+                used.Add(position);
+                spots.Add((spot, spot.kind == SectorKind.VarrowValley ? FarTerrain.VarrowSpot() : position));
+            }
+            return spots;
+        }
+
         // Identity uses saved hotspot fields, not object references or a randomized string hash.
         static bool SameSpot(Hotspot a, Hotspot b) => a.kind == b.kind && a.seed == b.seed && a.final == b.final
             && a.mapPosition.x == b.mapPosition.x && a.mapPosition.y == b.mapPosition.y;
