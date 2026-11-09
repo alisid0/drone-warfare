@@ -1,0 +1,100 @@
+[
+  {
+    "altitude": 300,
+    "phase": "before",
+    "forestPixels": 1261771,
+    "pasturePixels": 138451,
+    "forestY": 0.08580667418695798,
+    "pastureY": 0.16943306006981468,
+    "forestGrey": 81.53681910301891,
+    "pastureGrey": 114.36518178998955,
+    "linearRatio": 0.5064340699011246,
+    "greyscaleRatio": 0.712951423036656
+  },
+  {
+    "altitude": 300,
+    "phase": "after",
+    "forestPixels": 1216636,
+    "pasturePixels": 166510,
+    "forestY": 0.07150833733150558,
+    "pastureY": 0.1694822893946586,
+    "forestGrey": 74.82577790474929,
+    "pastureGrey": 114.3806424869222,
+    "linearRatio": 0.4219221818805525,
+    "greyscaleRatio": 0.6541821787135402
+  },
+  {
+    "altitude": 1000,
+    "phase": "before",
+    "forestPixels": 1202946,
+    "pasturePixels": 156750,
+    "forestY": 0.08386928338533593,
+    "pastureY": 0.16737669975120154,
+    "forestGrey": 81.02018678458832,
+    "pastureGrey": 113.71474883990221,
+    "linearRatio": 0.5010809958017103,
+    "greyscaleRatio": 0.7124861780124562
+  },
+  {
+    "altitude": 1000,
+    "phase": "after",
+    "forestPixels": 1164408,
+    "pasturePixels": 187085,
+    "forestY": 0.07101518276218471,
+    "pastureY": 0.16737765820873554,
+    "forestGrey": 74.62042961644681,
+    "pastureGrey": 113.71505179290985,
+    "linearRatio": 0.42428113478336615,
+    "greyscaleRatio": 0.6562053874129212
+  },
+  {
+    "altitude": 2500,
+    "phase": "before",
+    "forestPixels": 394889,
+    "pasturePixels": 42537,
+    "forestY": 0.0858139101631324,
+    "pastureY": 0.16670573761176363,
+    "forestGrey": 81.90076923340804,
+    "pastureGrey": 113.50131987239943,
+    "linearRatio": 0.5147627873671753,
+    "greyscaleRatio": 0.7215842892882885
+  },
+  {
+    "altitude": 2500,
+    "phase": "after",
+    "forestPixels": 393286,
+    "pasturePixels": 46915,
+    "forestY": 0.07340622020805049,
+    "pastureY": 0.1666871090191191,
+    "forestGrey": 75.89310721027573,
+    "pastureGrey": 113.49537805508783,
+    "linearRatio": 0.4403833064237184,
+    "greyscaleRatio": 0.6686889678753183
+  },
+  {
+    "altitude": 9000,
+    "phase": "before",
+    "forestPixels": 492925,
+    "pasturePixels": 301624,
+    "forestY": 0.09245328513596912,
+    "pastureY": 0.16961452857076273,
+    "forestGrey": 85.25365645067126,
+    "pastureGrey": 114.42363524301537,
+    "linearRatio": 0.5450788084901457,
+    "greyscaleRatio": 0.7450703368199036,
+    "forestFieldRatio": 0.5708699484855886
+  },
+  {
+    "altitude": 9000,
+    "phase": "after",
+    "forestPixels": 485030,
+    "pasturePixels": 301080,
+    "forestY": 0.06878670143705762,
+    "pastureY": 0.16961435519499987,
+    "forestGrey": 73.64511495072729,
+    "pastureGrey": 114.42358144861645,
+    "linearRatio": 0.4055476398679574,
+    "greyscaleRatio": 0.6436183347730527,
+    "forestFieldRatio": 0.42474430881240616
+  }
+]

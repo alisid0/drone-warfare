@@ -1,0 +1,57 @@
+--- a/Assets/DroneSandbox/Scripts/Farmland.cs
++++ b/Assets/DroneSandbox/Scripts/Farmland.cs
+@@ -35,6 +35,7 @@
+             foreach (var o in made) Art.Discard(o);
+             made.Clear();
+             details.Clear();
++            FieldMargins.Release();
+         }
+ 
+         // Builds every field surface, then shares the prop allowance between fields so a large farm count
+@@ -48,7 +49,8 @@
+             var root = new GameObject("Farmland").transform;
+             root.SetParent(parent, false);
+             foreach (var plot in MapLayout.Fields) BuildField(plot, root, rng);
+-            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count);
++            int useRenderers = FieldMargins.Build(root);
++            int remaining = Mathf.Max(0, RendererLimit - MapLayout.Fields.Count - useRenderers);
+             int rows = Mathf.Min(480, remaining / 8);
+             remaining -= rows;
+             // Pay for every boundary's inexpensive silhouette first; fences and mature trees share what remains.
+@@ -168,10 +170,12 @@
+                 for (int x = 0; x < nw; x++)
+                 {
+                     float across = x * 2f, along = y * 2f;
+-                    growth[y * nw + x] = new Vector2(
+-                        Mathf.PerlinNoise(across * 0.03f + seed, along * 0.03f + seed * 0.5f) * 0.65f
+-                            + Mathf.PerlinNoise(across * 0.11f + seed * 2f, along * 0.11f + 7f) * 0.35f,
+-                        plot.crop == Crop.Wheat ? Mathf.PerlinNoise(across * 0.09f + seed * 3f, along * 0.09f + 40f) : 0f);
++                    // Match the physical world coordinates of the distant painter, including tapered parcels.
++                    Vector2 point = plot.center + plot.along * (along - length * .5f) + plot.Across * (across - width * .5f);
++                    if (MapLayout.Plan.world != null) point += MapLayout.Plan.world.center;
++                    else point += FieldPlot.Warp(point);
++                    growth[y * nw + x] = new Vector2(FieldAppearance.Growth(point.x, point.y),
++                        plot.crop == Crop.Wheat ? FieldAppearance.Patch(point.x, point.y) : 0f);
+                 }
+             });
+             var bytes = new byte[w * h];
+@@ -206,7 +210,7 @@
+         {
+             // Drifts of better and worse growth (soil, damp, how the seed fell), bigger and smaller.
+             float drift = noise.x;
+-            float patchy = crop == Crop.Ploughed ? 0.5f : crop == Crop.YoungCrop ? 0.34f : crop == Crop.MownHay ? 0.2f : 0.28f;
++            float patchy = .55f;
+             float f = 1f + (drift - 0.5f) * patchy;
+             // A paddock too small for the big machines shows no headland or tramlines (drawn there they make a
+             // stamped frame), and of the big fields only about two in three show them clearly.
+@@ -280,7 +284,9 @@
+         // An entrance is kept open for 4 m, and an existing track always has at least 4 m of clear width.
+         static bool BoundaryGap(FieldBoundary edge, float t, float length, float extra = 0f)
+         {
+-            float gate = 0.25f + Mathf.Repeat(edge.a.x * 0.017f + edge.a.y * 0.031f, 0.5f);
++            // Keep tractor access near a gate corner; the shared painter uses this same physical gap.
++            Vector2 opening = edge.hasGate ? edge.gate : FieldAppearance.Gate(edge.a, edge.b);
++            float gate = Vector2.Dot(opening-edge.a, edge.b-edge.a) / Mathf.Max(.01f, length*length);
+             if (Mathf.Abs(t - gate) * length < 2f + extra) return true;
+             Vector2 p = edge.Point(t);
+             return MapLayout.TrackField.Distance(p.x, p.y) < 2.2f + extra;

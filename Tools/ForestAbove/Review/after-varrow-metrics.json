@@ -1,0 +1,1 @@
+{"sector":"varrow","logical":9399,"full":0,"reduced":524,"cards":115,"coverageFrames":3,"nearRefinementFrames":472,"jumpCoverageFrames":6,"jumpRefinementFrames":116,"flight":{"managedP95Ms":0.4754,"blankFrames":0},"lowFlight":{"metresPerSecond":240,"height":187.5,"managedP95Ms":0.7506,"blankFrames":4},"nativeUploadsAndGpuMeasured":false}

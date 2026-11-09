@@ -1,0 +1,112 @@
+Glade rims - codex/glade-rims, based on 2d99a10
+
+Runtime commits
+
+ffb997b  Taper glade and field margins with young leaning crowns
+bf1484b  Remove canopy skirts and reveal sunlit glade floors
+
+Changes
+
+Natural glades are warped ellipses with nominal aspect 1.7-2.7, an area-preserving
+radius and a seeded 10-25 m margin. Height uses a squared, convex profile and
+reaches zero at the opening. The same height function drives bootstrap,
+prepared and refined HLOD. Reserved logging glades preserve their original
+clear interior, extend along one axis and follow nearby tracks/streams when
+available. A 4 m clearance field tapers woods before fields, tracks and other
+existing protected land. It adds about 1 MB per active sector, built once.
+
+The existing candidate grid supplies 2-4 m young trees in openings and lower,
+sparser crowns through the rim. Lean follows the opening's gradient and is
+cached per accepted stem; all three render tiers and Canopy clearance/occlusion
+use that direction. No new models, materials, packages or tree budgets.
+Logical occupancy changes with the new glade shapes; it is not count-identical.
+All existing full/reduced/card/triangle budget constants and selection caps are
+unchanged, including fast flight and the drone feed.
+
+HLOD no longer retains a 2.5 m slab or baked dark olive inside empty glades.
+Its low margins blend to meadow/scrub (105,126,86); ordinary interior woods
+retain the hd155 olive understorey. Glades fade with their nearby individual
+trees, exposing the terrain instead of keeping a uniform dark floor. This also
+removes one macro-map read from the canopy fade helper. HDRP's actual lighting
+and the existing shadow policy supply directional shading; no sun direction
+is baked into the rim colour.
+
+The old bootstrap's vertical skirts are gone. Bootstrap and refined blocks
+share exact perimeter samples without skirts; sparse caches avoid allocating
+full 4 m height/index grids for coarse blocks during flight. Prepared recipe
+groves retain their 4 m mesh; regional rims retain their existing 8 m spacing.
+
+Ground.cs
+
+Unchanged; no Ground patch is required by this implementation. The dark glade
+slab was HLOD geometry/material, above the actual terrain. Existing meadow and
+rough grass remain exposed between sparse saplings; the existing forest-floor
+painter continues using actual stem density. Keep the integrated hd155 olive
+litter and Varrow decorative-tree exclusion. Confirm the native splat/shadows
+in the integration build: the offline floor shader is an approximation.
+
+Evidence and limits
+
+Open Review/index.html for all eight paired views: glade and farmland edge,
+before/after, at 140 m and 300 m above the target. The baseline is exactly
+2d99a10. Review/measurements.json includes frozen eye/target/origin coordinates,
+logical counts, geometry checks and managed scheduler counters.
+
+C# 9 compiled against installed Unity 6000.6.7f1 assemblies: zero warnings and
+errors. Unrelated game services/HDRP setup use the established harness contracts;
+this is not a complete player build. Windows D3DCompile accepted both raster
+and ray-helper branches of the forest HLSL helpers. Full HDRP variants still
+require Unity. Geometry checks pass for bootstrap, 64/32/16 m world tiers and
+4 m recipe woods: no vertical faces, no overlapping faces, no raised unmatched
+internal edges. The baseline glade bootstrap had 256 vertical skirt faces.
+Empty-glade height is zero, convexity checks pass, protected land stays clear,
+and repeated tree queries preserve species, dimensions and lean.
+
+Both 360-frame managed fast-flight runs pass the existing budget checks.
+Deep Forest managed p95: 0.5200 -> 0.6605 ms; Varrow edge: 0.3791 -> 0.3330 ms.
+These are recording-engine CPU timings on the shared machine, not frame/GPU
+timings or proof of a performance improvement. The new recipe adds one-time
+margin/lean construction work; native sector-load cost also needs checking.
+The required native flight p95 <=11.7 ms is NOT verified here. Unity was never
+opened. Only one two-thread Blender process ran at a time.
+
+Claude's build checklist
+
+1. Integrate the two runtime commits and review artifacts. No Ground patch,
+   new Unity asset import or shader regeneration is needed. Retain 3471618's
+   woods-build changes already present at this branch's base.
+2. Build the HDRP player and check all forest shader depth/colour/shadow variants,
+   fallback logs and runtime errors. Re-run the existing canopy occlusion and
+   drone-clearance autotests against the shorter, leaning edge trees.
+3. Repeat hd155's DeepForest photo camera, then the recorded 140/300 m poses.
+   Inspect natural and reserved glades, Varrow's farmland edge, first coverage
+   and settled refinement. Cross 2 km block seams and turn/teleport the camera.
+   Require continuous descending rims, bright grass, irregular elongated
+   openings and no persistent dark ring or vertical bootstrap skirts.
+4. Repeat with a different sun direction: rim shade should follow the light.
+   Check the native ground layers, tree/card handover and drone feed as well as
+   the photo camera. The offline views cannot validate native dither, terrain
+   splats, shadow cascades, shader stripping or atmospheric exposure.
+5. Run the same 1600x900 hd155 flight on a comparable workload. Require zero
+   errors, flight p95 <=11.7 ms, unchanged per-camera tree caps and no refinement
+   churn during fast flight. Compare canopy triangle/upload counts, sector-load
+   time and memory. If this gate fails, return its interval counters for tuning;
+   the managed numbers above do not replace it.
+
+Reproduce without Unity
+
+Use Python 3.13 with -I, from this worktree. Run sequentially:
+  Tools/GladeRims/run.py api
+  Tools/CanopyRelief/check_shader.py
+  Tools/GladeRims/run.py before glade
+  Tools/GladeRims/run.py after glade
+  Tools/GladeRims/run.py before edge
+  Tools/GladeRims/run.py after edge
+  Tools/GladeRims/render_all.py
+  Tools/GladeRims/report.py
+
+The optional '--geometry' final argument on run.py performs just the geometry
+audit after world construction. render_all.py accepts '--edge-only' or a phase
+to avoid rerendering unaffected views. Generated assemblies, mesh exports and
+logs remain in ignored Temp/glade-rims; only eight images and compact evidence
+are committed. The renderer uses one hidden headless Blender job at a time.

@@ -1,0 +1,116 @@
+Persistent world landmarks - Claude handoff
+Branch: codex/world-landmarks, based on 3c111af
+
+WorldPlan now owns the landmark layout, grade, clearance and transport links.
+Sectors project those saved buildings; mission seeds and crop origins cannot
+reroll them. GenerationVersion is 3. The three implementation commits are:
+  b10fa95  Plan permanent world landmarks and reserve graded footprints
+  dc35814  Bind campaign sectors to validated permanent landmark layouts
+  efa62f0  Render shared landmark volumes and expose immutable terrain hooks
+
+Each tested world has four 450 x 350 m works near railway towns, two airfields
+(880 x 30 m runways inside 1020 x 340 m footprints), and four 800 x 200 m rail
+junctions with four connected sidings. Norvane's airfield uses its existing
+Airbase site exactly. All features have a 64 m reserve and real road access.
+Indexed reservations exclude farms, field parcels, forest and mission pads.
+Height owns the graded platform and blended rim; local detail cannot regrade it.
+Natural forest/marsh remain cover-based. DeepForest density work has not begun.
+
+Hotspots reserve distinct feature windows before using generic geography.
+If no usable feature remains, PlanAt returns a farmland sector instead of an
+empty Industrial/Airfield/Rail identity. Generic windows leave landmark slots
+free. A bounded wider base-pad search handles a wetland window whose central
+island has insufficient space. Sub-two-metre road joins retain the gate link.
+
+LandmarkMesh supplies the same slabs and building roots to local scenery and
+LandmarkHlod. Local/distant slab clipping is complementary. FarScatter owns the
+HLOD cache and releases it on origin/seed changes. There is no object per HLOD
+building. Nine material submissions per landmark is the structural maximum;
+the exported works/airfield/junction use 7/6/6 submissions and 330/196/344
+triangles. These are mesh submissions, not measured HDRP render-pass counts.
+
+Verification
+  20 valid seeds: 1200-1213 and 1215-1220; 200 permanent features.
+  364,975 assertions; 860 sector plans; 24 World.Build harness runs.
+  132,840 dry/graded/clear samples, plus road/rail, farm, parcel and pad checks.
+  Full layout/height/link fingerprints repeat; changed mission seeds and crop
+  origins preserve building roots/yaw. Reversed hotspot order and advance keep
+  allocation fixed. Twenty-slot campaigns and Varrow build. Immutable worker
+  snapshots survive regeneration; slab clipping conserves projected area.
+  Production-source API groups and proposed terrain hooks compile as C# 9
+  against Unity 6000.6.7f1 assemblies with zero warnings/errors.
+
+Seed 1214 fails BEFORE feature planning with "No dry 8-12 km launch-site chain".
+The separate benchmark reproduces that failure at both 3c111af and this branch.
+It is excluded explicitly, with 1220 supplying the twentieth valid world.
+
+Managed timings versus 3c111af (raw samples are in Review/benchmark-*.json):
+  Feature planning: median 66 ms, maximum 229 ms including the cold run.
+  Whole generation: warm paired median delta +6 ms, maximum delta +113 ms.
+  Representative warm sector medians, before -> after (planning / World.Build):
+    Works:     115 -> 41 ms / 726 -> 605 ms
+    Airfield:   33 -> 13 ms / 598 -> 425 ms
+    Junction:  123 -> 11 ms / 556 -> 432 ms
+These use identical managed substitutes on both revisions. Native Perlin,
+GameObjects, materials, grass/base rendering services and GPU work are not
+executed. Actual Ground/MapLayout/FieldParcels/World/Features source runs, and
+placed model roots are captured. Unity play/build/autotest and the 0.3 ms GPU
+target remain UNVERIFIED; no Unity editor or Library import was run here.
+
+Renders and reproduction
+  Review/world-map.png: full 56 km world, true-scale footprints and reserves.
+  Review/IndustrialZone-comparison.png, Airfield-comparison.png,
+  RailJunction-comparison.png: HLOD at 2.5 km, built sector at the identical
+  2.5 km camera, and a 1 km inspection view. Individual PNGs are beside them.
+  Offline Blender renders use exported production HLOD/slab triangles and
+  actual FBXs at harness-captured roots. Surrounding cover/lighting is a simple
+  reconstruction, not an HDRP screenshot or final forest appearance.
+  Review/validation.json and geometry.json retain the machine-readable audit.
+  Run: powershell -File Tools/WorldLandmarks/run.ps1
+  Fast rerun: add -SkipRender -SkipBenchmark. Uses installed Python 3.13 with
+  -I, Unity's .NET SDK and Blender 5.2; no packages or Unity editor are invoked.
+
+Required terrain hooks for Claude / the terrain owner
+  terrain-hooks.patch contains the exact hunks against this integration base.
+  It is NOT applied here. Both patched files were compiled from Temp copies.
+  Apply/adapt it after reconciling the other session's terrain changes.
+
+  FarTerrain.BuildWorldTexture: after all road strokes, overlay each texel at
+  its unwarped world centre using WorldPlan.FeatureSurfaceAt(wx,wz,out Color c).
+  Store c directly (sRGB). CanopyGroundColour uses the same query first and
+  returns c.linear. The patch includes the full loop and coordinate conversion.
+
+  FarDetailData: capture WorldPlan.CaptureFeatureMap() on the main thread with
+  the height/cover snapshot. Paint first queries features.SurfaceAt(x,z,out
+  Color c), using unwarped world metres and returning c (sRGB). Surface uses:
+    float detail = Mix(CoarseHeight(x,z), Height(x,z)+roughness,
+                       Smooth(edge/128f));
+    return Mix(Height(x,z), detail, features.DetailWeight(x,z));
+  This height hook is necessary: ordinary tile roughness/coarse-edge blending
+  must not cut through the platform. The snapshot is independent of later worlds.
+
+  Cover audit: no new Cover value. Reserves use Pasture.
+  - FarTerrain.BuildWorldTexture's Cover switch: default pasture remains valid;
+    the feature-surface overlay follows roads so they cannot paint over runways.
+  - FarTerrain.CanopyGroundColour's Cover if-chain: default pasture remains
+    valid; the early feature query supplies the exact linear surface colour.
+  - FarDetailData.Paint's Cover if-chain: default pasture remains valid; the
+    early snapshot query supplies feature surfaces before cover displacement.
+  - FarDetail.cs's stage++ and chunkStage++ switches are uploader states, not
+    Cover. FarDetailChunks.cs/FarDetailRay.cs have no Cover switches to change.
+
+Claude build checklist
+  [ ] Review/merge this branch; coordinate and integrate terrain-hooks.patch.
+  [ ] Compile/build in the main Unity checkout; run the normal autotest.
+  [ ] Wire Debug.Log(LandmarkCheck.Run(MapLayout.Plan)) after a sector is built.
+      It returns one LANDMARK PASS/FAIL line without mutating the world.
+  [ ] Visit all 20 campaign hotspots plus Varrow; verify base/HQ access and
+      footprint clearance. Repeat a landmark with another mission seed/origin.
+  [ ] Inspect all three kinds at 2.5-3 km, tile edges and the local/far boundary;
+      check platforms, slabs, roots and coarse terrain LOD transitions in HDRP.
+  [ ] Profile LandmarkHlod.DrawCalls/TrianglesDrawn and HDRP Frame Debugger/GPU
+      timing; confirm <=15 submissions per landmark and <=0.3 ms GPU.
+  [ ] Smoke-test legacy Operations; track seed 1214's launch-chain issue separately.
+
+Protected terrain, setup, AutoTest and gameplay-owner files were not modified.
+No push, merge or rebase was performed.

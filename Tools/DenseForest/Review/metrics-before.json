@@ -1,0 +1,17 @@
+{
+  "buildMs": 1953.6389,
+  "woodsMs": 0,
+  "Timings": "layout 590, ground 961, water 0, fields 0, villages 2, woods 213, forest floor 183, grass 0, undergrowth 0, bases 0, 11500 trees, 0 houses on 0 streets; layout: river 10 ms, roads 8 ms, villages 20 ms, road fields 170 ms, fields 379 ms, blocked map 226 ms, parcels 133 ms, district occupancy 1%",
+  "renderedObjects": 11500,
+  "logical": 0,
+  "pattern": null,
+  "flight": {
+    "samples": 101,
+    "speed": 40,
+    "fullPeak": 0,
+    "reducedPeak": 0,
+    "cardPeak": 0,
+    "trianglePeak": 0
+  },
+  "measurement": "Managed stand-ins: not native Unity performance"
+}

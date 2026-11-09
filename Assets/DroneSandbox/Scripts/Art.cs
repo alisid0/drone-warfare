@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace DroneSandbox
 {
@@ -20,7 +21,7 @@ namespace DroneSandbox
         static readonly Dictionary<Color, Material> matte = new Dictionary<Color, Material>();
         static readonly Dictionary<Color, Material> glowing = new Dictionary<Color, Material>();
 
-        // A new material using the project's lit shader, so colours show up correctly
+        // A new material using the project's lit shader (HDRP Lit), so colours show up correctly
         // (no pink "missing shader" boxes).
         public static Material NewMaterial(Color color, bool glow = false)
         {
@@ -28,19 +29,17 @@ namespace DroneSandbox
             if (glowTemplate == null) glowTemplate = LoadTemplate("Materials/BaseLitGlow");
             var m = new Material(glow ? glowTemplate : template);
             m.color = color;
-            m.SetFloat("_Glossiness", 0.15f); // Built-in Standard shader
-            m.SetFloat("_Smoothness", 0.15f); // URP Lit shader
-            if (glow)
-            {
-                m.EnableKeyword("_EMISSION");
-                m.SetColor("_EmissionColor", color);
-            }
+            m.SetFloat("_Smoothness", 0.15f);
+            if (glow) Glow(m, color);
             return m;
         }
 
-        // URP Lit material assets saved by ProjectSetup. Loading them from Resources keeps the shader (and its
-        // emission variant) in player builds, where a primitive's default material is the unsupported
-        // Built-in one. Without them, fall back to whatever material a new primitive gets.
+        // Makes a material glow this colour. The glow template ignores the camera's exposure, so a glow reads the
+        // same at noon and at midnight (muzzle flashes, lit windows, the thermal view's hot vehicles).
+        public static void Glow(Material m, Color color) => m.SetColor("_EmissiveColor", color.linear * 1.5f);
+
+        // HDRP Lit material assets saved by ProjectSetup. Loading them from Resources keeps the shader in player
+        // builds. Without them, fall back to whatever material a new primitive gets.
         static Material LoadTemplate(string path)
         {
             var m = Resources.Load<Material>(path);
@@ -49,9 +48,9 @@ namespace DroneSandbox
             m = probe.GetComponent<Renderer>().sharedMaterial;
             Discard(probe);
             if (m != null) return m;
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
-            if (shader == null) shader = Shader.Find("Standard");
-            return new Material(shader);
+            m = new Material(Shader.Find("HDRP/Lit"));
+            HDMaterial.ValidateMaterial(m);
+            return m;
         }
 
         public static Material Shared(Color color, bool glow = false)
@@ -82,14 +81,78 @@ namespace DroneSandbox
         // when there's no such model, so callers can fall back to primitive shapes.
         public static GameObject TryModel(string name, Transform parent, float scale = 1f)
         {
-            var prefab = Resources.Load<GameObject>("Models/" + name);
+            var prefab = Resources.Load<GameObject>("Models/" + Variant(name, parent != null ? parent.position : Vector3.zero));
             if (prefab == null) return null;
             var go = Object.Instantiate(prefab, parent, false);
             go.name = name;
             go.transform.localScale = Vector3.one * scale;
             foreach (var c in go.GetComponentsInChildren<Collider>()) Discard(c);
             UsePhotoMaterials(go);
+            var lods = go.GetComponent<LODGroup>();
+            if (lods != null) TuneLods(lods, name.StartsWith("Scenery_Spruce"));
             return go;
+        }
+
+        static readonly Dictionary<string, int> variantCounts = new Dictionary<string, int>();
+
+        // Some models come in several versions, "<name>", "<name>_V2", "<name>_V3".. (the trees, so a wood isn't
+        // the same tree over and over). Picks one by where it stands, so the same place always gets the same one.
+        static string Variant(string name, Vector3 at)
+        {
+            if (!variantCounts.TryGetValue(name, out int extra))
+            {
+                while (Resources.Load<GameObject>("Models/" + name + "_V" + (extra + 2)) != null) extra++;
+                variantCounts[name] = extra;
+            }
+            if (extra == 0) return name;
+            int hash = (Mathf.FloorToInt(at.x * 3.7f) * 73856093) ^ (Mathf.FloorToInt(at.z * 3.7f) * 19349663);
+            int pick = (hash & 0x7fffffff) % (extra + 1);
+            return pick == 0 ? name : name + "_V" + (pick + 1);
+        }
+
+        static readonly Dictionary<string, int> rendererCounts = new Dictionary<string, int>();
+
+        // Counts all LOD renderers of the same variant TryModel will use, so decoration budgets include hidden
+        // levels too. Missing models cost one renderer for World's primitive fallback. Cached once per asset.
+        public static int ModelRendererCount(string name, Vector3 at)
+        {
+            string variant = Variant(name, at);
+            if (!rendererCounts.TryGetValue(variant, out int count))
+            {
+                var prefab = Resources.Load<GameObject>("Models/" + variant);
+                count = prefab != null ? Mathf.Max(1, prefab.GetComponentsInChildren<Renderer>(true).Length) : 1;
+                rendererCounts[variant] = count;
+            }
+            return count;
+        }
+
+        // The existing trees have two meshes and a billboard, not a third mesh. At 45 degrees and lodBias 1,
+        // keep full detail to 65 m, the lighter mesh to 250 m, then the billboard to 2 km. Spruce's lighter mesh
+        // still has up to 12k triangles, so it switches at 200 m. Derive screen heights from each group's world size
+        // to keep variants and differently sized trees within the same distance budget.
+        // Scans retain screen-size culling, since their smallest leaves and stones disappear much nearer.
+        static void TuneLods(LODGroup group, bool heavyTree)
+        {
+            var lods = group.GetLODs();
+            if (lods.Length == 3)
+            {
+                Vector3 scale = group.transform.lossyScale;
+                float size = group.size * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+                float projected = size / (2f * Mathf.Tan(Scale.CameraFov * 0.5f * Mathf.Deg2Rad));
+                lods[0].screenRelativeTransitionHeight = Mathf.Clamp(projected / 65f, 0.002f, 0.9f);
+                lods[1].screenRelativeTransitionHeight = Mathf.Min(lods[0].screenRelativeTransitionHeight * 0.9f, projected / (heavyTree ? 200f : 250f));
+                lods[2].screenRelativeTransitionHeight = Mathf.Min(lods[1].screenRelativeTransitionHeight * 0.9f, projected / Scale.D(480f));
+                for (int tier = 1; tier < lods.Length; tier++)
+                    foreach (var renderer in lods[tier].renderers)
+                        if (renderer != null) renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+            else if (lods.Length == 2)
+            {
+                lods[0].screenRelativeTransitionHeight = 0.15f;
+                lods[1].screenRelativeTransitionHeight = 0.008f;
+            }
+            else if (lods.Length == 1) lods[0].screenRelativeTransitionHeight = 0.01f;
+            group.SetLODs(lods);
         }
 
         static Dictionary<string, Material> photoMaterials;
@@ -123,6 +186,24 @@ namespace DroneSandbox
                         changed = true;
                     }
                 }
+                if (changed) renderer.sharedMaterials = materials;
+            }
+        }
+
+        // Gives every part of a model wearing the photo material `from` the photo material `to` instead.
+        public static void Swap(GameObject go, string from, string to)
+        {
+            if (go == null || from == to || photoMaterials == null || !photoMaterials.TryGetValue(from, out var a) || !photoMaterials.TryGetValue(to, out var b)) return;
+            foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < materials.Length; i++)
+                    if (materials[i] == a)
+                    {
+                        materials[i] = b;
+                        changed = true;
+                    }
                 if (changed) renderer.sharedMaterials = materials;
             }
         }

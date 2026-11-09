@@ -5,7 +5,8 @@ Models face Blender's -Y, which becomes +Z (forward) in Unity after export.
 import math
 
 import bpy
-from mathutils import Vector
+from bpy_extras.io_utils import axis_conversion
+from mathutils import Matrix, Vector
 
 
 # ---------- scene helpers ----------
@@ -114,6 +115,27 @@ def export(root_obj, path):
     )
 
 
+def export_model(root_obj, path):
+    """common.export, with objects two levels below the root counter-rotated for the export. With
+    bake_space_transform, Blender's FBX exporter writes such an object's local transform as
+    G T^-1 G^-1 T B G^-1 instead of G B G^-1 (T the parent's local matrix, B the object's, G the axis conversion),
+    which turns it 90 degrees about X; giving the object T^-1 G T B for the export cancels that out."""
+    G = axis_conversion(to_forward="-Z", to_up="Y").to_4x4()
+    saved = []
+    for o in root_obj.children_recursive:
+        if o.parent is not None and o.parent is not root_obj:
+            T, B = o.parent.matrix_local.copy(), o.matrix_local.copy()
+            saved.append((o, o.matrix_parent_inverse.copy(), o.matrix_basis.copy()))
+            o.matrix_parent_inverse = Matrix.Identity(4)
+            o.matrix_basis = T.inverted() @ G @ T @ B
+    bpy.context.view_layer.update()
+    export(root_obj, path)
+    for o, pinv, basis_ in saved:
+        o.matrix_parent_inverse = pinv
+        o.matrix_basis = basis_
+    bpy.context.view_layer.update()
+
+
 def hexa(name, corners, mat, parent, bevel=0.02):
     """A six-sided block from 8 corners (bottom 4 then top 4, counter-clockwise), for sloped armour etc."""
     faces = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
@@ -196,9 +218,10 @@ def box_uvs(obj):
     """Box-projected UVs in world metres (1 UV unit = 1 m), so Unity can lay tiling photo textures over the
     model at a real-world scale. Each face takes the two axes across its normal."""
     import bmesh
+    single_uv_layer(obj)
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    uv = bm.loops.layers.uv.verify()
+    uv = bm.loops.layers.uv["UVMap"]
     world = obj.matrix_world
     turn = world.to_3x3()
     for face in bm.faces:
@@ -209,6 +232,27 @@ def box_uvs(obj):
             loop[uv].uv = (co.y, co.z) if axis == 0 else (co.x, co.z) if axis == 1 else (co.x, co.y)
     bm.to_mesh(obj.data)
     bm.free()
+
+
+SECOND_UV = "UVFall"  # an optional second UV set (Unity's uv2), kept through joins; see make_dam.water_sheet
+
+
+def single_uv_layer(obj, second=False):
+    """Gives a mesh exactly one UV layer, named UVMap (plus UVFall, second, when asked). Meshes built from raw
+    vertices start with none, and bmesh would name a new one Float2; when parts with different layer names are
+    joined, the model ends up with two layers and Unity reads only the first, so half the parts got all-zero UVs
+    (one flat colour)."""
+    layers = obj.data.uv_layers
+    if "UVMap" not in layers:
+        if len(layers) > 0 and layers[0].name != SECOND_UV:
+            layers[0].name = "UVMap"
+        else:
+            layers.new(name="UVMap")
+    for layer in [l for l in layers if l.name != "UVMap" and not (second and l.name == SECOND_UV)]:
+        layers.remove(layer)
+    if second and SECOND_UV not in layers:
+        layers.new(name=SECOND_UV)
+    layers.active = layers["UVMap"]
 
 
 def box_uv_all(root_obj):
@@ -237,9 +281,12 @@ def join_meshes(root_obj):
         o.select_set(True)
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.convert(target="MESH")
+    # If any part has a second UV set, every part gets one (unused, a copy of its first), so they line up.
+    second = any(SECOND_UV in o.data.uv_layers for o in meshes)
     for o in meshes:
         if not o.get("keep_uv"):  # leaf cards keep their own 0-1 UVs
             box_uvs(o)
+        single_uv_layer(o, second)
     bpy.ops.object.join()
     joined = bpy.context.view_layer.objects.active
     joined.name = root_obj.name + "_Mesh"

@@ -1,0 +1,4 @@
+before tile: compiled {'slots': 534, 'sample': 11, 'load': 4}
+before chunk: compiled {'slots': 116, 'sample': 2, 'load': 0}
+after tile: compiled {'slots': 1068, 'sample': 20, 'load': 8}
+after chunk: compiled {'slots': 258, 'sample': 3, 'load': 0}

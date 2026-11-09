@@ -1,0 +1,91 @@
+{
+  "checks": 737955,
+  "seed": 1200,
+  "tiles": [
+    {
+      "name": "farmland",
+      "tileX": -3,
+      "tileZ": 0,
+      "generationMedianMs": 18.8925,
+      "generationMaxMs": 19.9869,
+      "edgeErrorMetres": 0,
+      "vertexCount": 17157,
+      "triangles": 34816,
+      "managedArrayBytes": 1266604,
+      "gpuPayloadBytes": 1107445,
+      "clipping": {
+        "milliseconds": 25.3642,
+        "vertices": 5050,
+        "triangles": 8637,
+        "boundaryErrorMetres": 0,
+        "areaError": 0.0004711151123046875
+      }
+    },
+    {
+      "name": "village",
+      "tileX": -45,
+      "tileZ": -45,
+      "generationMedianMs": 35.8248,
+      "generationMaxMs": 37.1968,
+      "edgeErrorMetres": 0,
+      "vertexCount": 17157,
+      "triangles": 34816,
+      "managedArrayBytes": 1266604,
+      "gpuPayloadBytes": 1107445,
+      "clipping": {
+        "milliseconds": 1.4439,
+        "vertices": 5457,
+        "triangles": 9010,
+        "boundaryErrorMetres": 0,
+        "areaError": 9.202957153320312E-05
+      }
+    },
+    {
+      "name": "river-crossing",
+      "tileX": -24,
+      "tileZ": 31,
+      "generationMedianMs": 41.6412,
+      "generationMaxMs": 42.657,
+      "edgeErrorMetres": 0,
+      "vertexCount": 17157,
+      "triangles": 34816,
+      "managedArrayBytes": 1266604,
+      "gpuPayloadBytes": 1107445,
+      "clipping": {
+        "milliseconds": 1.5969,
+        "vertices": 4399,
+        "triangles": 8319,
+        "boundaryErrorMetres": 0,
+        "areaError": 7.62939453125E-05
+      }
+    },
+    {
+      "name": "forest-edge",
+      "tileX": -3,
+      "tileZ": -1,
+      "generationMedianMs": 15.3829,
+      "generationMaxMs": 18.7007,
+      "edgeErrorMetres": 0,
+      "vertexCount": 17157,
+      "triangles": 34816,
+      "managedArrayBytes": 1266604,
+      "gpuPayloadBytes": 1107445,
+      "clipping": {
+        "milliseconds": 3.8159,
+        "vertices": 5050,
+        "triangles": 8636,
+        "boundaryErrorMetres": 0,
+        "areaError": 4.76837158203125E-06
+      }
+    }
+  ],
+  "streaming": {
+    "frames": 12351,
+    "maximumLive": 25,
+    "committed": 279,
+    "startCommitted": 25,
+    "cameraTileMisses": 0,
+    "note": "State-machine simulation. Worker completion is synchronized between frames; virtual 60 Hz and managed uploads do not measure runtime throughput."
+  },
+  "caveat": "Managed reference Perlin replaces Unity native Perlin in both painters. Runtime Unity sampling uses native Perlin on the main thread. No GPU, upload, collider-cook or frame-time claim is made by this harness."
+}

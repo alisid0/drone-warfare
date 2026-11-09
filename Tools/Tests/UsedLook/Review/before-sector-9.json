@@ -1,0 +1,24 @@
+{
+  "owner": 9,
+  "name": "Carrick",
+  "houses": 24,
+  "renderers": 75,
+  "fields": 588,
+  "hedgeEdges": 341,
+  "hedgeShareOfFieldPerimeter": 0.2867977190875576,
+  "fringe": 0,
+  "marginBlocks": 250,
+  "blocksWithTracks": 0,
+  "models": {
+    "Scenery_House_A": 2,
+    "Scenery_House_B": 6,
+    "Scenery_House_D": 16,
+    "Scenery_Hut": 17,
+    "Scenery_LogPile": 2,
+    "Scenery_Tree": 2
+  },
+  "layoutMs": 295.1309,
+  "groundMs": 92.2097,
+  "villagesMs": 58.5802,
+  "marginsMs": 50.0557
+}

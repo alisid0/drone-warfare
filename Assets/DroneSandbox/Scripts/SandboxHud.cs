@@ -2,14 +2,15 @@ using UnityEngine;
 
 namespace DroneSandbox
 {
-    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, mission briefing and results,
-    // health bars, selection brackets, target markers, search circles, AA threat rings, launch buttons and help.
+    // On-screen HUD drawn with Unity's immediate-mode GUI (OnGUI): the main menu, the theatre map, tech shop, mission
+    // briefing and results, health bars, selection brackets, target markers, search circles, AA threat rings,
+    // jamming circles, launch buttons and help.
     // Fine for a prototype; move to UI Toolkit once the look of the game is decided.
-    public class SandboxHud : MonoBehaviour
+    public partial class SandboxHud : MonoBehaviour
     {
         const float LaunchButtonWidth = 160f;
         const float LaunchButtonGap = 8f;
-        const float DroneFlightAltitude = 8f; // threat rings show AA reach at this height
+        const float DroneFlightAltitude = 8f * DroneSandbox.Scale.Distance; // threat rings show AA reach at this height
 
         static readonly Color Friendly = new Color(0.35f, 1f, 0.6f);
         static readonly Color Hostile = new Color(1f, 0.32f, 0.25f);
@@ -17,29 +18,49 @@ namespace DroneSandbox
         static readonly Color PanelColor = new Color(0.04f, 0.07f, 0.09f, 0.8f);
         static readonly Color ModalColor = new Color(0.03f, 0.05f, 0.07f, 0.94f);
 
-        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze" };
-        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack" };
+        static readonly string[] LaunchNames = { "Scout", "Strike", "Kamikaze", "Nightjar", "Swift" };
+        static readonly string[] LaunchInfo = { "fast, machine gun", "long-range missiles", "one-way attack", "heavy bomber, rearms", "long-range recon, unarmed" };
         static readonly string[] HelpLines =
         {
             "<b>CONTROLS</b>   (H to hide)",
             "Left-click / drag  -  select drones",
             "Shift + click  -  add to selection",
             "Right-click  -  move, or attack an enemy",
+            "Shift + right-click  -  queue a waypoint",
+            "Ctrl + right-click  -  attack-move (engage on the way)",
+            "Tab  -  tactical pause     F  -  centre on selection",
+            "]  /  [  -  fast-forward to 2x or 4x, and back (drops to 1x when a drone is threatened)",
+            "B  -  bring selected (or all) drones home",
+            "Double-click a drone  -  follow it with the camera",
+            "G  -  coordinated strike: drones with attack orders hit together",
+            "C  -  look at the fight     hold Z  -  inspect the drone feed (wheel zooms)",
+            "V  -  show or hide the drone's camera feed",
             "WASD / arrows  -  pan     Q / E  -  rotate",
             "Mouse wheel  -  zoom",
-            "1 / 2 / 3  -  launch Scout / Strike / Kamikaze",
+            "1 - 4  -  launch Scout / Strike / Kamikaze / Nightjar",
             "Space  -  select all     X  -  stop     Esc  -  deselect",
+            "Drone feed: click a contact to look at it, right-click to attack it",
             "Red dots: AA gun reach. Radars boost nearby AA.",
-            "T  -  thermal view (needs a Scout)     N  -  skip 2 h (free play)",
+            "T  -  thermal view (Wren-T Scout or Nightjar)",
+            "N  -  skip 2 hours (free play)",
+            "P  -  photo mode: fly a camera drone, F12 saves",
             "Yellow: mission targets and search areas.",
         };
 
-        public bool showHelp = true;
-        public float Scale => Mathf.Max(1f, Screen.height / 900f);
+        public bool showHelp = false; // the full controls, on H; otherwise a one-line hint strip
+        public bool ShopOpen;  // the tech shop, opened from the main menu
+        public bool TheatreOpen; // the theatre map, opened from the main menu
+        public bool SettingsOpen; // interface size, shake, flashes and sound, from the main menu
+        Hotspot chosen;          // the hotspot picked on the theatre map
+        public Hotspot Chosen { get => chosen; set => chosen = value; } // for the autotest's pictures of a card
+        float newCampaignAsked = -100f; // when New campaign was first clicked (it asks again before it acts)
+        float abandonAsked = -100f;     // the same for leaving a campaign operation under way
+        static Texture2D dotTexture;
+        public float Scale => Mathf.Max(1f, Screen.height / 900f) * Settings.UiScale;
 
         SandboxGame game;
         RtsController rts;
-        GUIStyle label, title, small, centered, button, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
+        GUIStyle label, title, small, smallWrap, centered, button, chosenButton, leftButton, big, heading, wrap, targetLabel, lockedLabel, placeLabel, placeShadow;
         float stylesBuiltForScale;
         static Texture2D starTexture;
 
@@ -62,10 +83,25 @@ namespace DroneSandbox
             return new Rect(Screen.width - 392f * s, 12f * s, 380f * s, height);
         }
 
+        // The drone types on the launch bar: the three always, the Nightjar and the Swift when they're on offer.
+        readonly System.Collections.Generic.List<DroneType> launchTypes = new System.Collections.Generic.List<DroneType>();
+        System.Collections.Generic.List<DroneType> LaunchTypes()
+        {
+            launchTypes.Clear();
+            launchTypes.Add(DroneType.Scout);
+            launchTypes.Add(DroneType.Strike);
+            launchTypes.Add(DroneType.Kamikaze);
+            if (game.BomberAvailable) launchTypes.Add(DroneType.Bomber);
+            if (game.ReconAvailable) launchTypes.Add(DroneType.Recon);
+            return launchTypes;
+        }
+
+        int LaunchCount => LaunchTypes().Count;
+
         Rect LaunchBar()
         {
             float s = Scale;
-            float width = (3f * LaunchButtonWidth + 2f * LaunchButtonGap) * s;
+            float width = (LaunchCount * LaunchButtonWidth + (LaunchCount - 1) * LaunchButtonGap) * s;
             return new Rect((Screen.width - width) / 2f, Screen.height - 64f * s, width, 50f * s);
         }
 
@@ -80,6 +116,7 @@ namespace DroneSandbox
         // Mouse position is in screen space (origin bottom-left), as the input backends report it.
         public bool IsPointerOverHud(Vector2 screenPosition)
         {
+            if (WorldMapBlocksInput) return true;
             if (game != null && game.UiBlocking) return true;
             var p = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
             float pad = 6f * Scale;
@@ -89,6 +126,7 @@ namespace DroneSandbox
                 || StatsPanel().Contains(p)
                 || MenuButton().Contains(p)
                 || (showHelp && HelpPanel().Contains(p))
+                || (FeedShowing && FeedPanel().Contains(p))
                 || (rts != null && rts.selected.Count > 0 && SelectionPanel().Contains(p));
         }
 
@@ -98,25 +136,54 @@ namespace DroneSandbox
         {
             if (game == null || rts == null || rts.Cam == null) return;
             BuildStyles();
+            if (WorldMapOpen && (game.UiBlocking || game.Loading || !FarTerrain.Active)) CloseWorldMap();
+            if (WorldMapOpen)
+            {
+                DrawWorldMap();
+                return;
+            }
 
+            if (game.Loading)
+            {
+                DrawLoading();
+                return;
+            }
             if (game.Mode == GameMode.Menu)
             {
-                DrawMenu();
+                if (ShopOpen) DrawShop();
+                else if (TheatreOpen) DrawTheatre();
+                else if (ControlsOpen) DrawControls();
+                else if (AchievementsOpen) DrawAchievements();
+                else if (SettingsOpen) DrawSettings();
+                else DrawMenu();
+                UnityEngine.Profiling.Profiler.BeginSample("HUD toast"); DrawAchievementToast(); UnityEngine.Profiling.Profiler.EndSample();
+                return;
+            }
+
+            if (PhotoMode.Active)
+            {
+                DrawPhotoMode();
                 return;
             }
 
             if (Event.current.type == EventType.Repaint)
             {
-                DrawWorldOverlays();
+                UnityEngine.Profiling.Profiler.BeginSample("HUD world overlays"); DrawWorldOverlays(); UnityEngine.Profiling.Profiler.EndSample();
                 DrawDragBox();
             }
+            if (!game.UiBlocking) AutoHideHelp();
             GUI.enabled = !game.UiBlocking;
-            DrawStats();
-            DrawLaunchBar();
-            DrawSelection();
-            DrawHelp();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD stats"); DrawStats(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD launch bar"); DrawLaunchBar(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD selection"); DrawSelection(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD help"); DrawHelp(); UnityEngine.Profiling.Profiler.EndSample();
             GUI.enabled = true;
-            DrawMessage();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD message"); DrawMessage(); UnityEngine.Profiling.Profiler.EndSample();
+            DrawAchievementToast();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD coach"); DrawCoach(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD pause banner"); DrawPauseBanner(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD telemetry"); DrawTelemetry(); UnityEngine.Profiling.Profiler.EndSample();
+            if (Event.current.type == EventType.Repaint) { UnityEngine.Profiling.Profiler.BeginSample("HUD feed"); DrawFeed(); UnityEngine.Profiling.Profiler.EndSample(); }
 
             if (game.BriefingOpen) DrawBriefing();
             else if (game.Result != MissionResult.None && Time.unscaledTime >= game.ResultsAt) DrawResults();
@@ -133,9 +200,22 @@ namespace DroneSandbox
             title = new GUIStyle(label) { fontSize = Mathf.RoundToInt(18f * s), fontStyle = FontStyle.Bold };
             small = new GUIStyle(label) { fontSize = Mathf.RoundToInt(12f * s) };
             small.normal.textColor = new Color(0.65f, 0.75f, 0.8f);
+            smallWrap = new GUIStyle(small) { wordWrap = true };
             centered = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(14f * s), richText = true };
+            // Flat command-console buttons: dark slate, a teal edge and lighter on hover, teal when pressed.
+            button.normal.background = Flat(new Color(0.09f, 0.14f, 0.17f), new Color(0.2f, 0.3f, 0.34f));
+            button.hover.background = Flat(new Color(0.12f, 0.2f, 0.24f), Teal);
+            button.active.background = Flat(new Color(0.1f, 0.32f, 0.33f), Teal);
+            button.onNormal.background = button.normal.background;
+            button.normal.textColor = new Color(0.85f, 0.95f, 1f);
+            button.hover.textColor = Color.white;
+            button.active.textColor = Color.white;
+            button.border = new RectOffset(2, 2, 2, 2);
             leftButton = new GUIStyle(button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(Mathf.RoundToInt(16f * s), 8, 4, 4) };
+            chosenButton = new GUIStyle(button); // the picked option in a row of choices
+            chosenButton.normal.background = chosenButton.hover.background = button.active.background;
+            chosenButton.normal.textColor = Color.white;
             big = new GUIStyle(label) { fontSize = Mathf.RoundToInt(34f * s), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             heading = new GUIStyle(label) { fontSize = Mathf.RoundToInt(24f * s), fontStyle = FontStyle.Bold };
             wrap = new GUIStyle(label) { wordWrap = true };
@@ -150,40 +230,55 @@ namespace DroneSandbox
         void DrawWorldOverlays()
         {
             float s = Scale;
-            if (rts.Distance >= 55f) DrawPlaceNames();
-
+            UnityEngine.Profiling.Profiler.BeginSample("HUD place names");
+            if (rts.Distance >= 55f * DroneSandbox.Scale.Camera) DrawPlaceNames();
+            UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD ground zones"); DrawGroundZones(); UnityEngine.Profiling.Profiler.EndSample();
             foreach (var e in game.enemies)
             {
                 if (e.Hidden) SearchCircle(e.searchCenter);
+                else if (e.Intel < Intel.Identified) continue; // a gun nobody has found draws no ring
                 else if (e.type == EnemyType.AAGun) ThreatRing(e, e == rts.HoveredEnemy);
+                else if (e.type == EnemyType.Jammer) JamCircle(e);
             }
 
             foreach (var e in game.enemies)
             {
-                if (e.Hidden || !ToGui(e.AimPoint, out Vector2 c)) continue;
+                if (e.Hidden) continue;
+                if (!e.Drawn)
+                {
+                    IntelMarker(e);
+                    continue;
+                }
+                if (!ToGui(e.AimPoint, out Vector2 c)) continue;
                 bool hovered = e == rts.HoveredEnemy;
-                float half = PixelRadius(e.AimPoint, e.radius);
+                float half = Mathf.Max(PixelRadius(e.AimPoint, e.radius), 14f * s);
                 if (hovered)
                 {
-                    Brackets(c, half, Hostile);
-                    GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), e.unitName, centered);
+                    TargetBrackets(e, c, half, Hostile);
+                    GUI.Label(new Rect(c.x - 80f * s, c.y - half - 36f * s, 160f * s, 20f * s), (e.ContactId != null ? e.ContactId + "  " : "") + e.unitName, centered);
                 }
-                else if (e.isTarget)
+                else if (e.LooksLikeTarget)
                 {
-                    Brackets(c, half + 4f * s, TargetColor);
-                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), "<b>TARGET</b>", targetLabel);
+                    TargetBrackets(e, c, half + 4f * s, TargetColor);
+                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 34f * s, 120f * s, 18f * s), e.isTarget && e.Intel == Intel.Confirmed ? "<b>TARGET</b>" : "<b>TARGET?</b>", targetLabel);
                 }
+                else if (e.ExposedDecoy)
+                    GUI.Label(new Rect(c.x - 60f * s, c.y - half - 22f * s, 120f * s, 18f * s), "<b>DECOY</b>", Tinted(centered, new Color(0.75f, 0.78f, 0.8f)));
+                else EnemyMarker(e, c);
+                PriorityMarker(e, c);
                 if (hovered || e.hp < e.maxHp) HealthBar(new Vector2(c.x, c.y - half - 10f * s), e.hp / e.maxHp, Hostile);
+                // An enemy that knows we're here: an amber "!" over it.
+                if (e.Alerted && !e.isTarget)
+                {
+                    var bang = Tinted(centered, Amber);
+                    bang.fontSize = Mathf.RoundToInt(16f * s);
+                    GUI.Label(new Rect(c.x - 10f * s, c.y - half - 30f * s, 20f * s, 20f * s), "<b>!</b>", bang);
+                }
             }
 
-            foreach (var d in game.drones)
-            {
-                if (!ToGui(d.AimPoint, out Vector2 c)) continue;
-                bool isSelected = rts.selected.Contains(d);
-                float half = PixelRadius(d.AimPoint, d.radius);
-                if (isSelected) Brackets(c, half, Friendly);
-                if (isSelected || d.hp < d.maxHp) HealthBar(new Vector2(c.x, c.y - half - 8f * s), d.hp / d.maxHp, Friendly);
-            }
+            UnityEngine.Profiling.Profiler.BeginSample("HUD world contacts"); DrawWorldContacts(); UnityEngine.Profiling.Profiler.EndSample();
+            UnityEngine.Profiling.Profiler.BeginSample("HUD tactical"); DrawTactical(); UnityEngine.Profiling.Profiler.EndSample();
         }
 
         // Dotted line on the ground showing how far this AA gun reaches a drone cruising at DroneFlightAltitude
@@ -204,20 +299,41 @@ namespace DroneSandbox
             }
         }
 
-        // Names of the (fictional) places, shown when the camera is zoomed out.
+        // Names of the (fictional) places, shown when the camera is zoomed out: the sector's villages, the two
+        // bases, and its river where it passes nearest the middle (the Varrow Valley's by the lake).
         void DrawPlaceNames()
         {
-            for (int i = 0; i < MapLayout.Villages.Length && i < Factions.Villages.Length; i++)
+            var plan = MapLayout.Plan;
+            for (int i = 0; i < plan.villages.Count && i < plan.villageNames.Count; i++)
             {
-                Vector2 v = MapLayout.Villages[i];
-                PlaceName(new Vector3(v.x, 0f, v.y), 12f, Factions.Villages[i]);
+                Vector2 v = plan.villages[i];
+                PlaceName(new Vector3(v.x, 0f, v.y), 12f, plan.villageNames[i]);
             }
             PlaceName(game.basePosition, 16f, Factions.PlayerBase);
             PlaceName(game.enemyHqPosition, 18f, Factions.EnemyBase);
-            Vector2 river = MapLayout.RiverField.points[0];
-            foreach (var p in MapLayout.RiverField.points)
-                if ((p - new Vector2(-105f, 2f)).sqrMagnitude < (river - new Vector2(-105f, 2f)).sqrMagnitude) river = p;
-            PlaceName(new Vector3(river.x, 0f, river.y), 4f, Factions.River);
+            var points = MapLayout.RiverField.points;
+            if (points.Count == 0) return;
+            Vector2 near = plan.kind == SectorKind.VarrowValley ? new Vector2(-105f, 2f) * DroneSandbox.Scale.Distance : Vector2.zero;
+            Vector2 river = points[0];
+            foreach (var p in points)
+                if ((p - near).sqrMagnitude < (river - near).sqrMagnitude) river = p;
+            PlaceName(new Vector3(river.x, 0f, river.y), 4f, plan.kind == SectorKind.VarrowValley ? Factions.River : plan.riverName);
+        }
+
+        // A jammer's circle on the ground: drones that fly into it lose their link.
+        void JamCircle(EnemyUnit jammer)
+        {
+            const int dashes = 48;
+            float size = 3.5f * Scale;
+            var color = new Color(0.75f, 0.45f, 1f, 0.7f);
+            for (int i = 0; i < dashes; i++)
+            {
+                if (i % 3 == 2) continue;
+                float a = i * Mathf.PI * 2f / dashes;
+                Vector3 p = jammer.transform.position + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * EnemyUnit.JamRadius;
+                p.y = Ground.HeightAt(p) + 0.1f;
+                if (ToGui(p, out Vector2 g)) Fill(new Rect(g.x - size / 2f, g.y - size / 2f, size, size), color);
+            }
         }
 
         void PlaceName(Vector3 at, float height, string text)
@@ -225,6 +341,7 @@ namespace DroneSandbox
             if (!ToGui(Ground.OnGround(at) + Vector3.up * height, out Vector2 g)) return;
             float s = Scale;
             var r = new Rect(g.x - 110f * s, g.y - 10f * s, 220f * s, 20f * s);
+            if (StatsPanel().Overlaps(r) || MenuButton().Overlaps(r)) return; // never under the top-left panels
             GUI.Label(new Rect(r.x + 1.5f * s, r.y + 1.5f * s, r.width, r.height), text, placeShadow);
             GUI.Label(r, text, placeLabel);
         }
@@ -247,6 +364,42 @@ namespace DroneSandbox
                 GUI.Label(new Rect(m.x - 70f * Scale, m.y - 10f * Scale, 140f * Scale, 20f * Scale), "<b>SEARCH AREA</b>", targetLabel);
         }
 
+        // Hide and Seek: when the next salvo lands, how hard (the robots still spotting), and the base's integrity.
+        void DrawShelling(Rect r)
+        {
+            float s = Scale;
+            Fill(r, PanelColor);
+            float left = Mathf.Max(0f, game.NextSalvoAt - game.MissionTime);
+            int spotters = game.Spotters;
+            bool close = left < 15f && spotters > 0;
+            int jammed = 0;
+            float shortest = float.MaxValue;
+            foreach (var b in Wildlife.Birds)
+                if (b != null && b.Robot && !b.Down && Mimic.Jammed(b))
+                {
+                    jammed++;
+                    shortest = Mathf.Min(shortest, Mimic.JamLeft(b));
+                }
+            string jams = jammed == 0 ? "" : $"   <color=#5AADFF><b>{jammed} jammed</b>" + (shortest < Mimic.JamSeconds - 0.5f ? $", {shortest:0} s left" : ", held while watched") + "</color>";
+            Color warn = close ? Hostile : DravinOrange;
+            if (close && Mathf.Repeat(Time.unscaledTime, 0.8f) < 0.4f) Fill(r, new Color(Hostile.r, Hostile.g, Hostile.b, 0.18f));
+            GUI.Label(new Rect(r.x + 10f * s, r.y + 3f * s, r.width - 20f * s, 20f * s),
+                $"<b>NEXT SALVO {Clock(left)}</b>   " + (spotters > 0 ? $"expected damage <b>{game.ExpectedDamage:0}</b>" : "it will fall wide"),
+                Tinted(label, spotters > 0 ? warn : Teal));
+            GUI.Label(new Rect(r.x + 10f * s, r.y + 23f * s, r.width - 20f * s, 18f * s),
+                (spotters > 0 ? $"{spotters} spotting for the guns" : "no spotter on the air") + jams, Tinted(small, spotters > 0 ? warn : Teal));
+            var bar = new Rect(r.x + 10f * s, r.y + 47f * s, r.width - 96f * s, 8f * s);
+            Fill(bar, new Color(1f, 1f, 1f, 0.12f));
+            float integrity = game.BaseIntegrity / 100f;
+            Fill(new Rect(bar.x, bar.y, bar.width * integrity, bar.height), integrity > 0.5f ? Teal : integrity > 0.25f ? DravinOrange : Hostile);
+            if (spotters > 0)
+            {
+                float after = Mathf.Max(0f, game.BaseIntegrity - game.ExpectedDamage) / 100f;
+                Fill(new Rect(bar.x + bar.width * after, bar.y, bar.width * (integrity - after), bar.height), new Color(Hostile.r, Hostile.g, Hostile.b, close ? 0.9f : 0.5f));
+            }
+            GUI.Label(new Rect(bar.xMax + 8f * s, r.y + 41f * s, 86f * s, 20f * s), $"base <b>{game.BaseIntegrity:0}%</b>", label);
+        }
+
         void DrawDragBox()
         {
             if (!rts.IsDragging) return;
@@ -267,16 +420,16 @@ namespace DroneSandbox
             {
                 var m = game.Mission;
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), m.name.ToUpperInvariant(), title);
-                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
-                    $"Targets: <b>{game.TargetsDestroyed} / {game.TargetsTotal}</b>     Time: {Clock(game.MissionTime)}", label);
+                GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s), Objective(), label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
-                    $"Drones used: <b>{game.DronesUsed}</b>     Three stars: {m.par} or fewer", label);
+                    $"Drones used <b>{game.DronesUsed}</b>/{m.par}   lost <b>{game.dronesLost}</b>     {Clock(game.MissionTime)}", label);
+                if (game.IsSpotting && game.Phase != MissionPhase.Extract) DrawShelling(new Rect(r.x, r.yMax + 4f * s, r.width, 64f * s));
             }
             else
             {
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 6f * s, r.width, 26f * s), "FREE PLAY", title);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 34f * s, r.width, 22f * s),
-                    $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Enemy units: {game.enemies.Count}", label);
+                    $"Targets destroyed: <b>{game.enemiesDestroyed}</b>     Known enemies: {KnownEnemies()}", label);
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 56f * s, r.width, 22f * s),
                     $"Drones: <b>{game.drones.Count}</b>/{SandboxGame.MaxDrones}     Lost: {game.dronesLost}     Expended: {game.dronesExpended}", label);
             }
@@ -287,7 +440,22 @@ namespace DroneSandbox
                 GUI.Label(new Rect(r.x + 10f * s, r.y + 9f * s, r.width - 20f * s, 22f * s), clock,
                     new GUIStyle(small) { alignment = TextAnchor.UpperRight, richText = true });
             }
-            if (GUI.Button(MenuButton(), "Menu", button)) game.OpenMenu();
+            bool asking = Time.unscaledTime - abandonAsked < 4f;
+            if (asking)
+            {
+                var warn = MenuButton();
+                GUI.Label(new Rect(warn.xMax + 8f * s, warn.y, 320f * s, warn.height), "<b>Abandon the operation?</b> It counts as a loss. Click again",
+                    Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleLeft, richText = true }, Hostile));
+            }
+            if (GUI.Button(MenuButton(), asking ? "<b>Abandon</b>" : "Menu", button))
+            {
+                if (!game.AbandonIsLoss || asking)
+                {
+                    abandonAsked = -100f;
+                    game.OpenMenu();
+                }
+                else abandonAsked = Time.unscaledTime;
+            }
         }
 
         void DrawLaunchBar()
@@ -298,14 +466,16 @@ namespace DroneSandbox
             Fill(new Rect(bar.x - pad, bar.y - pad, bar.width + 2f * pad, bar.height + 2f * pad), PanelColor);
 
             bool wasEnabled = GUI.enabled;
-            for (int i = 0; i < 3; i++)
+            var types = LaunchTypes();
+            for (int i = 0; i < types.Count; i++)
             {
-                int left = game.StockLeft((DroneType)i);
+                int t = (int)types[i];
+                int left = game.StockLeft(types[i]);
                 GUI.enabled = wasEnabled && game.drones.Count < SandboxGame.MaxDrones && left != 0;
                 var b = new Rect(bar.x + i * (LaunchButtonWidth + LaunchButtonGap) * s, bar.y, LaunchButtonWidth * s, bar.height);
                 string count = left >= 0 ? $"   x{left}" : "";
-                string text = $"<b>[{i + 1}] {LaunchNames[i]}{count}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[i]}</size>";
-                if (GUI.Button(b, text, button)) game.SpawnDrone((DroneType)i);
+                string text = $"<b>[{t + 1}] {LaunchNames[t]}{count}</b>\n<size={Mathf.RoundToInt(11f * s)}>{LaunchInfo[t]}</size>";
+                if (GUI.Button(b, text, button)) game.SpawnDrone(types[i]);
             }
             GUI.enabled = wasEnabled;
         }
@@ -329,24 +499,34 @@ namespace DroneSandbox
             if (sel.Count == 1)
             {
                 var d = sel[0];
-                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP", label);
-                Line(d.Status, label);
-                Line(d.IsKamikaze ? "Right-click an enemy to dive on it." : "Fires at enemies in range when idle.", small);
+                string bombs = d.IsBomber ? $"     Bombs {d.BombsLeft}/{Drone.BomberLoad}"
+                    : d.type == DroneType.Strike ? $"     Missiles {d.MissilesLeft}/{Drone.StrikeLoad}" : "";
+                Line($"<b>{d.unitName}</b>     {Mathf.CeilToInt(d.hp)} / {Mathf.CeilToInt(d.maxHp)} HP{bombs}     Battery {Mathf.RoundToInt(d.Battery * 100f)}%", label);
+                // Hull as a bar under the name, and what it's doing, red when it's in trouble.
+                Fill(new Rect(x, y - 4f * s, r.width - 20f * s, 3f * s), new Color(0f, 0f, 0f, 0.5f));
+                Fill(new Rect(x, y - 4f * s, (r.width - 20f * s) * Mathf.Clamp01(d.hp / d.maxHp), 3f * s), d.UnderFire ? Amber : Teal);
+                Line(d.Status, Tinted(label, d.UnderFire || d.IsJammed ? Hostile : new Color(0.85f, 0.95f, 1f)));
+                Line(d.IsKamikaze ? "Right-click an enemy to dive on it."
+                    : d.IsBomber ? "Right-click an enemy to bomb it. Rearms at base."
+                    : "Fires at enemies in range when idle.", small);
             }
             else
             {
-                int scouts = 0, strikes = 0, kamikazes = 0;
+                var counts = new int[LaunchNames.Length];
+                foreach (var d in sel) counts[(int)d.type]++;
+                int underFire = 0, rearming = 0;
                 foreach (var d in sel)
                 {
-                    if (d.type == DroneType.Scout) scouts++;
-                    else if (d.type == DroneType.Strike) strikes++;
-                    else kamikazes++;
+                    if (d.UnderFire) underFire++;
+                    if (d.StatusTag == "REARMING" || d.StatusTag == "RETURNING") rearming++;
                 }
-                Line($"<b>{sel.Count} drones selected</b>", label);
-                Line($"Scout {scouts}     Strike {strikes}     Kamikaze {kamikazes}", label);
+                string trouble = (underFire > 0 ? $"     <color=#FF5040><b>{underFire} under fire</b></color>" : "")
+                               + (rearming > 0 ? $"     {rearming} rearming" : "");
+                Line($"<b>{sel.Count} drones selected</b>{trouble}", label);
+                Line($"Scout {counts[0]}     Strike {counts[1]}     Kamikaze {counts[2]}" + (counts[3] > 0 ? $"     Nightjar {counts[3]}" : ""), label);
                 Line("Right-click an enemy to attack together.", small);
             }
-            Line("Right-click ground: move", small);
+            Line("Right-click: move   Shift: queue   Ctrl: attack-move", small);
         }
 
         void DrawHelp()
@@ -354,7 +534,11 @@ namespace DroneSandbox
             float s = Scale;
             if (!showHelp)
             {
-                GUI.Label(new Rect(Screen.width - 140f * s, 12f * s, 128f * s, 22f * s), "H  -  help", small);
+                // The essentials in one line; H for the rest.
+                var hint = new Rect(Screen.width - 520f * s, 12f * s, 508f * s, 22f * s);
+                Fill(hint, new Color(PanelColor.r, PanelColor.g, PanelColor.b, 0.6f));
+                GUI.Label(hint, "H controls    Tab pause    G sync strike    C fight    V feed    B home",
+                    new GUIStyle(small) { alignment = TextAnchor.MiddleCenter });
                 return;
             }
             Rect r = HelpPanel();
@@ -364,14 +548,64 @@ namespace DroneSandbox
                     i == 0 ? label : small);
         }
 
+        // Photo mode keeps the screen clear: the controls for a few seconds after it opens, and saved-photo news.
+        void DrawPhotoMode()
+        {
+            var photo = PhotoMode.Instance;
+            if (photo.Capturing) return;
+            if (Time.unscaledTime < photo.HintUntil)
+            {
+                float s = Scale;
+                var r = new Rect((Screen.width - 900f * s) / 2f, Screen.height - 70f * s, 900f * s, 52f * s);
+                Fill(r, PanelColor);
+                GUI.Label(new Rect(r.x, r.y + 4f * s, r.width, 22f * s), "<b>PHOTO MODE</b>", Tinted(centered, TargetColor));
+                GUI.Label(new Rect(r.x, r.y + 26f * s, r.width, 20f * s),
+                    "WASD fly   R / F up, down   Q / E turn   right-drag look   wheel zoom   Shift fast   [ ] time of day   F12 save   P exit",
+                    new GUIStyle(small) { alignment = TextAnchor.MiddleCenter });
+            }
+            DrawMessage();
+        }
+
         // Short news at the top of the screen: a target spotted or destroyed, no drones of a type left.
+        // The event feed: the newest news on top, older lines smaller and fading, coloured by what they mean
+        // (orders and phases teal, enemy activity orange, losses red, the rest amber).
         void DrawMessage()
         {
-            if (string.IsNullOrEmpty(game.Message) || Time.unscaledTime > game.MessageUntil) return;
-            float s = Scale;
-            var r = new Rect((Screen.width - 420f * s) / 2f, 16f * s, 420f * s, 34f * s);
-            Fill(r, PanelColor);
-            GUI.Label(r, $"<b>{game.Message}</b>", targetLabel);
+            float s = Scale, now = Time.unscaledTime;
+            float y = 16f * s + (PhotoMode.Active ? 0f : DrawCriticalAlert()); // a drone under fire comes first
+            game.Feed.RemoveAll(f => now > f.until);
+            for (int i = 0; i < game.Feed.Count; i++)
+            {
+                var (text, until) = game.Feed[i];
+                string lower = text.ToLowerInvariant();
+                // Photo mode shows only its own news: a battle's "pinned down" banner turned up across a dam picture.
+                if (PhotoMode.Active && !lower.Contains("photo")) continue;
+                float alpha = Mathf.Clamp01((until - now) / 0.6f) * (i == 0 ? 1f : 0.8f);
+                Color colour = lower.Contains("lost") || lower.Contains("down") || lower.Contains("left behind") ? Hostile
+                    : lower.Contains("alerted") || lower.Contains("spotted") || lower.Contains("identified") || lower.Contains("jammed") ? DravinOrange
+                    : lower.StartsWith("recon") || lower.StartsWith("strike") || lower.StartsWith("extract") || lower.StartsWith("returning") || lower.StartsWith("following") ? Teal
+                    : TargetColor;
+                float h = (i == 0 ? 30f : 22f) * s, w = (i == 0 ? 560f : 480f) * s;
+                var r = new Rect((Screen.width - w) / 2f, y, w, h);
+                Fill(r, new Color(PanelColor.r, PanelColor.g, PanelColor.b, PanelColor.a * alpha));
+                Fill(new Rect(r.x, r.y, 3f * s, r.height), new Color(colour.r, colour.g, colour.b, alpha));
+                var style = Tinted(i == 0 ? centered : new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, new Color(colour.r, colour.g, colour.b, alpha));
+                GUI.Label(r, i == 0 ? $"<b>{text}</b>" : text, style);
+                y += h + 3f * s;
+            }
+        }
+
+        // A tip from the Coach (the first two Operations), just above the launch bar, gone as soon as it's done.
+        void DrawCoach()
+        {
+            if (Coach.Current == null || PhotoMode.Active) return;
+            float s = Scale, w = 620f * s, h = 44f * s;
+            var r = new Rect((Screen.width - w) / 2f, Screen.height - 128f * s - h, w, h);
+            Fill(r, new Color(PanelColor.r, PanelColor.g, PanelColor.b, 0.94f));
+            Fill(new Rect(r.x, r.y, 4f * s, r.height), Teal);
+            GUI.Label(new Rect(r.x + 14f * s, r.y, 40f * s, r.height), "<b>TIP</b>", Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleLeft, richText = true }, Teal));
+            GUI.Label(new Rect(r.x + 52f * s, r.y + 2f * s, r.width - 64f * s, r.height - 4f * s), Coach.Current,
+                new GUIStyle(smallWrap) { alignment = TextAnchor.MiddleLeft, richText = true, fontSize = Mathf.RoundToInt(12f * s) });
         }
 
         // ---- Menu, briefing, results ----
@@ -382,14 +616,20 @@ namespace DroneSandbox
             var missions = Missions.All;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
             float rowHeight = 50f, gap = 8f;
-            float height = 172f + (missions.Count + 1) * (rowHeight + gap) + 56f;
+            int missionRows = (missions.Count + 1) / 2; // two columns of missions
+            float height = 172f + (missionRows + 3) * (rowHeight + gap) + 56f;
             Rect r = Centered(580f, height);
             Fill(r, ModalColor);
+            // A teal rule along the top and the Norvane emblem either side of the title.
+            Fill(new Rect(r.x, r.y, r.width, 3f * s), Teal);
+            float emblem = 40f * s;
+            GUI.DrawTexture(new Rect(r.x + 34f * s, r.y + 20f * s, emblem, emblem), Factions.PlayerEmblem);
+            GUI.DrawTexture(new Rect(r.xMax - 34f * s - emblem, r.y + 20f * s, emblem, emblem), Factions.PlayerEmblem);
 
             GUI.Label(new Rect(r.x, r.y + 18f * s, r.width, 44f * s), "DRONE WARFARE", big);
             GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), "<b>ASSET HUNT</b>", Tinted(centered, TargetColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 94f * s, r.width - 60f * s, 22f * s),
-                "Destroy enemy targets with a limited stock of drones. Fewer drones, more stars.",
+                "Find them. Strike them. Bring them home. Every drone spent or lost costs a star.",
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(13f * s) }, small.normal.textColor));
             GUI.Label(new Rect(r.x + 30f * s, r.y + 120f * s, r.width - 60f * s, 40f * s),
                 $"{Capitalised(Factions.Region)}: you fly for the {Factions.Player} against the {Factions.Enemy}. " +
@@ -397,21 +637,94 @@ namespace DroneSandbox
                 Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * s) }, small.normal.textColor));
 
             float y = r.y + 172f * s;
+            var theatre = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+            string campaign = Theatre.Victory ? "campaign complete: start a new one from the map"
+                : Theatre.FinalOpen ? "the final operation is open"
+                : $"the campaign: turn {Theatre.Turn}, progress {Theatre.Standing}/{Theatre.ProgressForFinal} to break the Dravin line";
+            if (GUI.Button(theatre, "<b>Theatre of war</b>   <size=" + Mathf.RoundToInt(12f * s) + ">" + campaign + "</size>", leftButton))
+            {
+                TheatreOpen = true;
+                chosen = null;
+            }
+            y += (rowHeight + gap) * s;
+            float column = (r.width - 60f * s - gap * s) / 2f;
             for (int i = 0; i < missions.Count; i++)
             {
-                var row = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+                var row = new Rect(r.x + 30f * s + (i % 2) * (column + gap * s), y + (i / 2) * (rowHeight + gap) * s, column, rowHeight * s);
                 bool open = SandboxGame.Unlocked(i);
                 GUI.enabled = open;
                 if (GUI.Button(row, $"<b>{i + 1}.  {missions[i].name}</b>", leftButton)) game.StartMission(i);
                 GUI.enabled = true;
-                if (open) DrawStars(new Rect(row.xMax - 110f * s, row.y + 13f * s, 96f * s, 24f * s), SandboxGame.BestStars(i));
-                else GUI.Label(new Rect(row.xMax - 110f * s, row.y, 96f * s, row.height), "Locked", lockedLabel);
+                if (open) DrawStars(new Rect(row.xMax - 84f * s, row.y + 15f * s, 72f * s, 18f * s), SandboxGame.BestStars(i));
+                else GUI.Label(new Rect(row.xMax - 84f * s, row.y, 72f * s, row.height), "Locked", lockedLabel);
+            }
+            y += missionRows * (rowHeight + gap) * s;
+            var sandbox = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
+            if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, all tech, enemies respawn</size>", leftButton))
+                game.StartSandbox();
+            y += (rowHeight + gap) * s;
+            float halfWidth = (r.width - 60f * s - gap * s) / 2f;
+            var shop = new Rect(r.x + 30f * s, y, halfWidth, rowHeight * s);
+            if (GUI.Button(shop, "<b>Tech shop</b>", leftButton))
+                ShopOpen = true;
+            if (GUI.Button(new Rect(shop.xMax + gap * s, y, halfWidth, rowHeight * s), "<b>Settings</b>", leftButton))
+                SettingsOpen = true;
+            GUI.Label(new Rect(shop.xMax - 130f * s, shop.y, 116f * s, shop.height), $"<b>{Tech.Points}</b> points",
+                Tinted(new GUIStyle(label) { alignment = TextAnchor.MiddleRight }, TargetColor));
+            if (GUI.Button(new Rect(r.x + 30f * s, r.yMax - 42f * s, r.width - 60f * s, 28f * s), "Achievements", button)) AchievementsOpen = true;
+        }
+
+        // Buy new drones and upgrades with points earned in missions. Purchases are kept between missions.
+        void DrawShop()
+        {
+            float s = Scale;
+            var items = Tech.Items;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.3f));
+            float rowHeight = 62f, gap = 6f;
+            Rect r = Centered(700f, 132f + items.Length * (rowHeight + gap) + 72f);
+            Fill(r, ModalColor);
+
+            GUI.Label(new Rect(r.x, r.y + 16f * s, r.width, 44f * s), "TECH SHOP", big);
+            GUI.Label(new Rect(r.x, r.y + 62f * s, r.width, 24f * s),
+                $"<b>{Tech.Points}</b> points     {Tech.OwnedCount} of {items.Length} bought", Tinted(centered, TargetColor));
+            GUI.Label(new Rect(r.x + 40f * s, r.y + 90f * s, r.width - 80f * s, 36f * s),
+                "Earn points by destroying Dravin units in missions, plus a bonus for each new star. " +
+                "Free play has all the tech.",
+                Tinted(new GUIStyle(wrap) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * s) }, small.normal.textColor));
+
+            float y = r.y + 132f * s;
+            foreach (var item in items)
+            {
+                var row = new Rect(r.x + 24f * s, y, r.width - 48f * s, rowHeight * s);
+                bool owned = Tech.Owns(item.id);
+                Fill(row, owned ? new Color(Friendly.r, Friendly.g, Friendly.b, 0.08f) : new Color(1f, 1f, 1f, 0.04f));
+                float textWidth = row.width - 190f * s;
+                Color branch = item.branch == "RECON" ? Amber : item.branch == "STRIKE" ? DravinOrange : Teal;
+                Fill(new Rect(row.x, row.y, 4f * s, row.height), branch);
+                GUI.Label(new Rect(row.x + 14f * s, row.y + 7f * s, textWidth, 22f * s),
+                    $"<b>{item.name}</b>   <size={Mathf.RoundToInt(10f * s)}><color=#{ColorUtility.ToHtmlStringRGB(branch)}>{item.branch}</color></size>", label);
+                GUI.Label(new Rect(row.x + 14f * s, row.y + 29f * s, textWidth, 32f * s), item.info, smallWrap);
+                var buy = new Rect(row.xMax - 160f * s, row.y + 12f * s, 146f * s, row.height - 24f * s);
+                if (owned)
+                {
+                    GUI.Label(buy, "<b>OWNED</b>", Tinted(centered, Friendly));
+                }
+                else
+                {
+                    GUI.enabled = Tech.CanBuy(item);
+                    if (GUI.Button(buy, $"<b>Buy</b>    {item.cost} pts", button)) Tech.Buy(item);
+                    GUI.enabled = true;
+                }
                 y += (rowHeight + gap) * s;
             }
-            var sandbox = new Rect(r.x + 30f * s, y, r.width - 60f * s, rowHeight * s);
-            if (GUI.Button(sandbox, "<b>Free play sandbox</b>   <size=" + Mathf.RoundToInt(12f * s) + ">unlimited drones, enemies respawn</size>", leftButton))
-                game.StartSandbox();
-            GUI.Label(new Rect(r.x, r.yMax - 40f * s, r.width, 24f * s), "Finish a mission to unlock the next one.", Tinted(centered, small.normal.textColor));
+
+            var back = new Rect(r.x + (r.width - 200f * s) / 2f, r.yMax - 60f * s, 200f * s, 42f * s);
+            bool escape = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape;
+            if (GUI.Button(back, "<b>Back</b>  (Esc)", button) || escape)
+            {
+                if (escape) Event.current.Use();
+                ShopOpen = false;
+            }
         }
 
         void DrawBriefing()
@@ -419,17 +732,54 @@ namespace DroneSandbox
             float s = Scale;
             var m = game.Mission;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
-            Rect r = Centered(620f, 340f);
+            bool campaign = game.Hotspot != null;
+            Rect r = Centered(620f, campaign ? 414f : 340f);
             Fill(r, ModalColor);
             float x = r.x + 28f * s, w = r.width - 56f * s;
-            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s),
-                $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}", Tinted(small, TargetColor));
+            string where = game.Hotspot != null
+                ? $"{MapLayout.Plan.name.ToUpperInvariant()}  \u00b7  {MapLayout.Plan.Type.name.ToUpperInvariant()}  \u00b7  {game.Hotspot.weather.ToString().ToUpperInvariant()}"
+                : $"MISSION {game.MissionIndex + 1}  \u00b7  {Factions.Region.Replace("the ", "").ToUpperInvariant()}";
+            GUI.Label(new Rect(x, r.y + 20f * s, w, 20f * s), where, Tinted(small, TargetColor));
             GUI.Label(new Rect(x, r.y + 40f * s, w, 34f * s), m.name, heading);
+            GUI.Label(new Rect(x, r.yMax - 26f * s, w, 20f * s), $"Difficulty: {Settings.Difficulty}", small);
             GUI.Label(new Rect(x, r.y + 84f * s, w, 96f * s), m.briefing, wrap);
+            int bombers = game.StockLeft(DroneType.Bomber);
+            string Extra(DroneType t) => game.SupportFor(t) > 0 ? $" <color=#5AADFF>(+{game.SupportFor(t)} support)</color>" : "";
             GUI.Label(new Rect(x, r.y + 188f * s, w, 22f * s),
-                $"Drones:   Scout x{m.scouts}     Strike x{m.strikes}     Kamikaze x{m.kamikazes}", label);
+                $"Drones:   Scout x{game.StockLeft(DroneType.Scout)}{Extra(DroneType.Scout)}     Strike x{game.StockLeft(DroneType.Strike)}{Extra(DroneType.Strike)}     " +
+                $"Kamikaze x{game.StockLeft(DroneType.Kamikaze)}{Extra(DroneType.Kamikaze)}" + (bombers > 0 ? $"     Nightjar x{bombers}" : ""), label);
             GUI.Label(new Rect(x, r.y + 212f * s, w, 22f * s),
-                $"Targets: {game.TargetsTotal}     Three stars: use {m.par} drones or fewer", label);
+                $"Targets: {game.TargetsTotal}     Three stars: {m.par} drones or fewer, none lost", label);
+            // The campaign's reserve: a support charge buys one more drone of a type the mission already has.
+            if (campaign)
+            {
+                float y = r.y + 242f * s, bx = x + 236f * s;
+                int charges = Theatre.Charges;
+                GUI.Label(new Rect(x, y, 236f * s, 24f * s), $"Support <b>{charges}</b>/{Theatre.MaxCharges}" + (charges > 0 ? ":  spend 1 for +1 drone" : ":  none left"), label);
+                foreach (var t in new[] { DroneType.Scout, DroneType.Strike, DroneType.Kamikaze })
+                {
+                    if (SandboxGame.MissionStock(m, t) <= 0) continue;
+                    GUI.enabled = charges > 0;
+                    if (GUI.Button(new Rect(bx, y - 2f * s, 104f * s, 26f * s), $"+1 {t}", button) && game.SpendSupport(t)) Sound.Ui("click");
+                    GUI.enabled = true;
+                    bx += 112f * s;
+                }
+                // How the theatre around the sector stands: on edge after an ignored threat or after seeing our drones, and
+                // what we've mapped of the Dravin positions nearby.
+                float note = y + 28f * s;
+                if (Theatre.IsAlerted(game.Hotspot) || Theatre.OnGuard(game.Hotspot))
+                {
+                    GUI.Label(new Rect(x, note, w, 22f * s), Theatre.IsAlerted(game.Hotspot)
+                        ? "<b>ALERTED:</b> on edge here: drones are noticed further off, the alarm spreads wider"
+                        : "<b>ON GUARD:</b> Dravin nearby saw our drones: they notice drones further off",
+                        Tinted(label, Hostile));
+                    note += 22f * s;
+                }
+                int mapped = Theatre.Mapped(game.Hotspot);
+                if (mapped > 0)
+                    GUI.Label(new Rect(x, note, w, 22f * s), $"<b>Theatre intel:</b> {mapped} Dravin position{(mapped == 1 ? "" : "s")} mapped around the sector: reports {mapped * 10}% sharper",
+                        Tinted(label, Teal));
+            }
             var start = new Rect(r.x + (r.width - 220f * s) / 2f, r.yMax - 76f * s, 220f * s, 46f * s);
             bool enter = Event.current.type == EventType.KeyDown &&
                          (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
@@ -445,22 +795,246 @@ namespace DroneSandbox
             float s = Scale;
             bool won = game.Result == MissionResult.Won;
             Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.35f));
-            Rect r = Centered(480f, 320f);
+            // The result on the left and the debrief map beside it, the pair centred on screen.
+            float pair = (520f + 12f + 400f) * s;
+            Rect r = new Rect((Screen.width - pair) / 2f, (Screen.height - 350f * s) / 2f, 520f * s, 350f * s);
             Fill(r, ModalColor);
-            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), won ? "MISSION COMPLETE" : "MISSION FAILED",
+            DrawDebriefMap(new Rect(r.xMax + 12f * s, (Screen.height - 470f * s) / 2f, 400f * s, 470f * s));
+            // The final operation succeeded: a drone unit doesn't win a war on its own, it opens the way for the ground
+            // offensive, so the result says that.
+            bool victory = won && game.Hotspot != null && game.Hotspot.final;
+            GUI.Label(new Rect(r.x, r.y + 22f * s, r.width, 40f * s), victory ? "MISSION SUCCESSFUL" : won ? "MISSION COMPLETE" : "MISSION FAILED",
                 Tinted(new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter }, won ? Friendly : Hostile));
-            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s), game.ResultReason, centered);
-            DrawStars(new Rect(r.x + (r.width - 180f * s) / 2f, r.y + 100f * s, 180f * s, 52f * s), game.Stars);
-            GUI.Label(new Rect(r.x, r.y + 166f * s, r.width, 22f * s),
-                $"Drones used: <b>{game.DronesUsed}</b>  (three stars: {game.Mission.par} or fewer)     Time: {Clock(game.MissionTime)}", centered);
+            GUI.Label(new Rect(r.x, r.y + 66f * s, r.width, 22f * s),
+                victory ? "Their front command is destroyed. The ground offensive can break through." : game.ResultReason, centered);
+            var starRow = new Rect(r.x + (r.width - 330f * s) / 2f, r.y + 96f * s, 330f * s, 46f * s);
+            DrawStars(starRow, game.Stars);
+            // What each star is for, under each star.
+            string[] criteria = { "WON", $"{game.DronesUsed}/{game.Mission.par} DRONES", "NONE LOST" };
+            bool[] met = { won, won && game.DronesUsed <= game.Mission.par, won && game.dronesLost == 0 };
+            float starSize = Mathf.Min(starRow.height, starRow.width / 3f), starGap = (starRow.width - 3f * starSize) / 2f;
+            for (int i = 0; i < 3; i++)
+            {
+                float middle = starRow.x + i * (starSize + starGap) + starSize / 2f;
+                var cell = new Rect(middle - 60f * s, starRow.yMax, 120f * s, 16f * s);
+                GUI.Label(cell, criteria[i], Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold },
+                    met[i] ? TargetColor : new Color(1f, 1f, 1f, 0.35f)));
+            }
+            GUI.Label(new Rect(r.x, r.y + 160f * s, r.width, 22f * s),
+                $"Launched <b>{game.DronesUsed}</b> (par {game.Mission.par})  \u00b7  expended <b>{game.dronesExpended}</b>  \u00b7  shot down or left <b>{game.dronesLost}</b>  \u00b7  " +
+                $"home <b>{game.DronesHome}</b>  \u00b7  {Clock(game.MissionTime)}", centered);
+            GUI.Label(new Rect(r.x, r.y + 178f * s, r.width, 18f * s),
+                victory ? $"Campaign complete: {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost."
+                    : game.Hotspot != null && Theatre.Outcome.Length > 0 ? Theatre.Outcome
+                    : "One star for the win, one for using par or fewer drones, one for losing none.",
+                Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter }, victory ? Friendly : small.normal.textColor));
+            string bonus = game.StarBonus > 0 ? $"  ({game.StarBonus} for new stars)" : "";
+            GUI.Label(new Rect(r.x, r.y + 202f * s, r.width, 22f * s),
+                $"Points earned: <b>+{game.PointsEarned}</b>{bonus}     Total: <b>{Tech.Points}</b>", targetLabel);
+            if (game.Hotspot != null && Theatre.TheatreNews.Length > 0)
+                GUI.Label(new Rect(r.x + 16f * s, r.y + 228f * s, r.width - 32f * s, 36f * s), Theatre.TheatreNews,
+                    Tinted(new GUIStyle(small) { alignment = TextAnchor.UpperCenter, wordWrap = true }, Teal));
 
             float bw = 130f * s, gap = 12f * s;
             float x0 = r.x + (r.width - 3f * bw - 2f * gap) / 2f, y = r.yMax - 72f * s;
+            GUI.enabled = game.Hotspot == null; // a campaign operation is played once: the turn moves on either way
             if (GUI.Button(new Rect(x0, y, bw, 44f * s), "<b>Retry</b>", button)) game.RetryMission();
-            GUI.enabled = won && game.HasNextMission;
-            if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Next mission</b>", button)) game.NextMission();
             GUI.enabled = true;
+            if (game.Hotspot != null)
+            {
+                if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Theatre</b>", button))
+                {
+                    game.OpenMenu();
+                    TheatreOpen = true;
+                    chosen = null;
+                }
+            }
+            else
+            {
+                GUI.enabled = won && game.HasNextMission;
+                if (GUI.Button(new Rect(x0 + bw + gap, y, bw, 44f * s), "<b>Next mission</b>", button)) game.NextMission();
+                GUI.enabled = true;
+            }
             if (GUI.Button(new Rect(x0 + 2f * (bw + gap), y, bw, 44f * s), "<b>Menu</b>", button)) game.OpenMenu();
+        }
+
+        void DrawLoading()
+        {
+            float s = Scale;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.55f));
+            Rect r = Centered(420f, 90f);
+            Fill(r, ModalColor);
+            GUI.Label(r, "<b>Flying in...</b>   laying out the sector", centered);
+        }
+
+        // The theatre of war: the front on a map, hotspots glowing where the enemy is active. Pick one to see what's
+        // there, then fly in.
+        void DrawTheatre()
+        {
+            float s = Scale;
+            Fill(new Rect(0f, 0f, Screen.width, Screen.height), new Color(0f, 0f, 0f, 0.55f));
+            Rect r = Centered(1080f, 830f);
+            Fill(r, ModalColor);
+            GUI.Label(new Rect(r.x, r.y + 12f * s, r.width, 40f * s), "THEATRE OF WAR", big);
+            string progress = Theatre.Victory
+                ? $"<b>CAMPAIGN COMPLETE:</b> their front command is destroyed and the ground offensive is through.   {Theatre.Fights} fights, {Theatre.Wins} sectors won, {Theatre.Losses} lost, {Theatre.DronesLost} drones lost"
+                : Theatre.FinalOpen
+                    ? "<b>FINAL OPERATION OPEN:</b> the front is at the Dravin lines. Destroy their front command so the ground offensive can break through."
+                    : $"Turn <b>{Theatre.Turn}</b>     progress <b>{Theatre.Standing}/{Theatre.ProgressForFinal}</b>  (a win +2, Ground +3)     " +
+                      $"support charges <b>{Theatre.Charges}</b>/{Theatre.MaxCharges}     intel +{Theatre.Stacks(Theatre.Bonus.Intel)}  rearm +{Theatre.Stacks(Theatre.Bonus.Rearm)}     <b>{Tech.Points}</b> points";
+            GUI.Label(new Rect(r.x, r.y + 52f * s, r.width, 22f * s), progress,
+                Tinted(centered, Theatre.Victory ? Friendly : Theatre.FinalOpen ? Hostile : TargetColor));
+            // A new war: asks once more before it throws the campaign away.
+            bool asking = Time.unscaledTime - newCampaignAsked < 4f;
+            var fresh = new Rect(r.x + 20f * s, r.y + 16f * s, 190f * s, 36f * s);
+            if (GUI.Button(fresh, asking ? "<b>Sure? Click again</b>" : Theatre.Victory ? "<b>New campaign</b>" : "New campaign", button))
+            {
+                if (asking)
+                {
+                    Theatre.NewCampaign();
+                    chosen = null;
+                    newCampaignAsked = -100f;
+                }
+                else newCampaignAsked = Time.unscaledTime;
+            }
+
+            var mapRect = new Rect(r.x + 24f * s, r.y + 86f * s, r.width - 48f * s, (r.width - 48f * s) * 560f / 1024f);
+            GUI.DrawTexture(mapRect, Theatre.Map());
+            GUI.Label(new Rect(mapRect.x + 10f * s, mapRect.yMax - 26f * s, 300f * s, 20f * s), "<b>NORVANE</b>  (you)", Tinted(small, Friendly));
+            GUI.Label(new Rect(mapRect.x + 10f * s, mapRect.y + 6f * s, 300f * s, 20f * s), "<b>DRAVIN COALITION</b>", Tinted(small, Hostile));
+            // The announced threat, and what the last turn brought, across the top of the map.
+            var threat = Theatre.ThreatSpot;
+            if (!Theatre.Victory && (threat != null || Theatre.News.Length > 0))
+            {
+                var strip = new Rect(mapRect.x + 210f * s, mapRect.y + 4f * s, mapRect.width - 420f * s, 40f * s);
+                Fill(strip, new Color(Ink.r, Ink.g, Ink.b, 0.8f));
+                var line = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, richText = true, wordWrap = true };
+                if (threat != null)
+                    GUI.Label(new Rect(strip.x + 6f * s, strip.y + 2f * s, strip.width - 12f * s, 18f * s),
+                        $"<b>DRAVIN THREAT AT {threat.sectorName.ToUpperInvariant()}</b>   " +
+                        (Theatre.ThreatDue <= Theatre.Turn ? "<b>LAST TURN</b> to deal with it" : $"expires in {Theatre.ThreatDue - Theatre.Turn + 1} turns") +
+                        "   ignored, the front gives ground", Tinted(line, Hostile));
+                if (Theatre.News.Length > 0)
+                    GUI.Label(new Rect(strip.x + 6f * s, strip.y + 20f * s, strip.width - 12f * s, 18f * s), Theatre.News, Tinted(line, TargetColor));
+            }
+
+            Hotspot hovered = null;
+            Vector2 mouse = Event.current.mousePosition;
+            foreach (var h in Theatre.Hotspots)
+            {
+                var c = new Vector2(mapRect.x + h.mapPosition.x * mapRect.width, mapRect.yMax - h.mapPosition.y * mapRect.height);
+                bool done = Theatre.Done(h), offered = Theatre.Offered(h);
+                float radius = (12f + 6f * h.heat) * s;
+                bool over = (mouse - c).magnitude < radius + 4f * s;
+                if (over) hovered = h;
+                HotspotBadge(c, h, done, h == chosen, over, !offered && !done && !Theatre.Victory);
+                if (Theatre.IsThreat(h))
+                {
+                    float pulse = Mathf.Repeat(Time.unscaledTime * 0.9f, 1f), size = (24f + 12f * h.heat) * s;
+                    Ring(c, size * (0.8f + 0.6f * pulse), new Color(Hostile.r, Hostile.g, Hostile.b, 0.8f * (1f - pulse)));
+                }
+                // This turn's offers say what they're for; the threat and an alerted sector say so.
+                if (offered && !h.final && !Theatre.Victory)
+                {
+                    string tag = Theatre.RewardOf(h).ToString().ToUpperInvariant();
+                    string headline = Theatre.IsThreat(h) ? "DRAVIN THREAT" : Theatre.IsAlerted(h) ? "ALERTED" : Theatre.OnGuard(h) ? "ON GUARD" : null;
+                    var tagStyle = Tinted(new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold }, Teal);
+                    float width = tagStyle.CalcSize(new GUIContent(headline != null && headline.Length > tag.Length ? headline : tag)).x + 12f * s;
+                    float height = (headline != null ? 30f : 15f) * s;
+                    float top = c.y - (24f + 12f * h.heat) * s * 0.62f - height - 2f * s;
+                    float left = Mathf.Clamp(c.x - width / 2f, mapRect.x + 2f * s, mapRect.xMax - width - 2f * s);
+                    Fill(new Rect(left, top, width, height), new Color(Ink.r, Ink.g, Ink.b, 0.8f));
+                    if (headline != null)
+                        GUI.Label(new Rect(left, top, width, 15f * s), headline, Tinted(tagStyle, Theatre.IsThreat(h) ? Hostile : DravinOrange));
+                    GUI.Label(new Rect(left, top + height - 15f * s, width, 15f * s), tag, tagStyle);
+                }
+            }
+            if (hovered != null && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+            {
+                chosen = hovered;
+                Event.current.Use();
+            }
+
+            // The card for the picked (or hovered) hotspot.
+            var spot = chosen ?? hovered;
+            var card = new Rect(r.x + 24f * s, mapRect.yMax + 12f * s, r.width - 48f * s, r.yMax - mapRect.yMax - 24f * s);
+            Fill(card, new Color(1f, 1f, 1f, 0.04f));
+            if (spot != null)
+            {
+                var type = SectorTypes.Get(spot.kind);
+                float km = spot.mapPosition.x * Theatre.FrontKilometres;
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 10f * s, card.width - 300f * s, 30f * s),
+                    (spot.final ? "<b>FINAL OPERATION</b>  \u00b7  " : "") + $"<b>{spot.sectorName}</b>  \u00b7  {type.name}" +
+                    (Theatre.IsThreat(spot) ? "   <color=#FF5040><b>DRAVIN THREAT</b></color>" : "") +
+                    (Theatre.IsAlerted(spot) ? "   <color=#FFA040><b>ALERTED</b></color>" : Theatre.OnGuard(spot) ? "   <color=#FFA040><b>ON GUARD</b></color>" : ""), heading);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 44f * s, card.width - 300f * s, 22f * s),
+                    $"<b>{Situations.Name(spot.situation)}</b>     {spot.daylight}, {spot.weather.ToString().ToLowerInvariant()}     km {km:0} of the front     " +
+                    $"activity {Mathf.RoundToInt(spot.heat * 100f)}%" + (Theatre.Done(spot) ? "     <b>WON</b>" : ""), label);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 68f * s, card.width - 300f * s, 22f * s),
+                    $"<b>Threat:</b> {ThreatOf(spot.situation)}     <b>Intel:</b> {IntelConfidence(spot)}%     " +
+                    $"<b>Reward:</b> about {Mathf.RoundToInt((60f + 140f * spot.heat) / 10f) * 10} pts     " +
+                    $"<b>Difficulty:</b> {(spot.heat < 0.35f ? "low" : spot.heat < 0.7f ? "medium" : "high")}", label);
+                var reward = Theatre.RewardOf(spot);
+                bool onOffer = Theatre.Offered(spot);
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 92f * s, card.width - 300f * s, 22f * s),
+                    spot.final ? "<b>On success:</b> their front command is destroyed, the ground offensive breaks through and the campaign is complete"
+                        : Theatre.Done(spot) ? "<b>Won.</b> Nothing more to gain here."
+                        : !onOffer ? "<b>Intel developing:</b> not on offer this turn."
+                        : $"<b>{reward.ToString().ToUpperInvariant()}:</b> {Theatre.RewardText(reward)}" + (Theatre.RewardMaxed(reward) ? "  (already at most)" : "") +
+                          "     <b>A loss:</b> -1 progress", Tinted(label, onOffer || spot.final ? Teal : new Color(1f, 1f, 1f, 0.5f)));
+                GUI.Label(new Rect(card.x + 16f * s, card.y + 114f * s, card.width - 300f * s, 30f * s), type.blurb, smallWrap);
+                string theatre = TheatreNote(spot);
+                if (theatre.Length > 0)
+                    GUI.Label(new Rect(card.xMax - 280f * s, card.y + 80f * s, 264f * s, card.height - 84f * s), theatre, smallWrap);
+                if (chosen != null && (Theatre.Offered(chosen) || Theatre.Victory))
+                {
+                    var fly = new Rect(card.xMax - 250f * s, card.y + 22f * s, 230f * s, 50f * s);
+                    bool enter = Event.current.type == EventType.KeyDown &&
+                                 (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
+                    if (GUI.Button(fly, "<b>Fly in</b>  (Enter)", button) || enter)
+                    {
+                        if (enter) Event.current.Use();
+                        TheatreOpen = false;
+                        game.PlayHotspot(chosen);
+                    }
+                }
+            }
+            else
+            {
+                GUI.Label(card, Theatre.Victory ? "Hotspots glow where the Dravin are active. Pick one to fly in."
+                    : "Three operations are on offer this turn, each for a different reward. Pick one; the rest are intel developing.", centered);
+            }
+
+            var back = new Rect(r.xMax - 150f * s, r.y + 16f * s, 130f * s, 36f * s);
+            bool escape = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape;
+            if (GUI.Button(back, "<b>Back</b>  (Esc)", button) || escape)
+            {
+                if (escape) Event.current.Use();
+                TheatreOpen = false;
+            }
+        }
+
+        // A soft round dot.
+        void Dot(Vector2 c, float radius, Color color)
+        {
+            if (dotTexture == null)
+            {
+                const int size = 64;
+                dotTexture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+                var pixels = new Color[size * size];
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
+                    {
+                        float d = new Vector2(x + 0.5f - size / 2f, y + 0.5f - size / 2f).magnitude / (size / 2f);
+                        pixels[y * size + x] = new Color(1f, 1f, 1f, Mathf.Clamp01((1f - d) * 6f));
+                    }
+                dotTexture.SetPixels(pixels);
+                dotTexture.Apply();
+            }
+            Color old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(c.x - radius, c.y - radius, radius * 2f, radius * 2f), dotTexture);
+            GUI.color = old;
         }
 
         // Three stars side by side in the rect, the first `filled` of them gold.
@@ -523,6 +1097,19 @@ namespace DroneSandbox
 
         static string Capitalised(string text) => string.IsNullOrEmpty(text) ? text : char.ToUpperInvariant(text[0]) + text.Substring(1);
 
+        // A 6 x 6 button background: a fill with a one-pixel edge (the style's border keeps the edge thin when stretched).
+        static Texture2D Flat(Color fill, Color edge)
+        {
+            var t = new Texture2D(6, 6, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            var pixels = new Color[36];
+            for (int y = 0; y < 6; y++)
+                for (int x = 0; x < 6; x++)
+                    pixels[y * 6 + x] = x == 0 || y == 0 || x == 5 || y == 5 ? edge : fill;
+            t.SetPixels(pixels);
+            t.Apply();
+            return t;
+        }
+
         static GUIStyle Tinted(GUIStyle style, Color color)
         {
             var tinted = new GUIStyle(style);
@@ -553,9 +1140,9 @@ namespace DroneSandbox
             Fill(new Rect(back.x, back.y, w * Mathf.Clamp01(fraction), h), color);
         }
 
-        void Brackets(Vector2 c, float half, Color color)
+        void Brackets(Vector2 c, float half, Color color, float thickness = 0f)
         {
-            float t = Mathf.Max(1f, 2f * Scale);
+            float t = thickness > 0f ? thickness : Mathf.Max(1f, 2f * Scale);
             float len = half * 0.6f;
             float left = c.x - half, right = c.x + half, top = c.y - half, bottom = c.y + half;
             Fill(new Rect(left, top, len, t), color);

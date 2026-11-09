@@ -1,0 +1,31 @@
+--- a/Assets/DroneSandbox/Scripts/Ground.cs
++++ b/Assets/DroneSandbox/Scripts/Ground.cs
+@@ -704,6 +704,8 @@
+             foreach (var p in woodland) { Spread(canopy, p, 1f); lo = Vector2.Min(lo, p); hi = Vector2.Max(hi, p); }
+             for (int t = 0; t < trees.Count; t++)
+             {
++                // Varrow's decorative bank/garden trees cull independently; only logical woods keep a distant floor.
++                if (MapLayout.Plan.kind == SectorKind.VarrowValley && !SectorForest.HasFloorCoverage(trees[t])) continue;
+                 Spread(canopy, trees[t], 0.5f);
+                 Spread(stems, trees[t], 1f);
+                 lo = Vector2.Min(lo, trees[t]); hi = Vector2.Max(hi, trees[t]);
+@@ -890,8 +892,8 @@
+                 Layer("rock", "rock", 12f, Color.white, new Color(0.42f, 0.41f, 0.39f), new Color(0.30f, 0.29f, 0.28f)),
+                 Layer("dry", "meadow", 8f, new Color(0.68f, 0.83f, 0.80f), new Color(0.40f, 0.40f, 0.22f), new Color(0.31f, 0.31f, 0.17f)),
+                 // Fallen leaves, needles and twigs (Tools/make_forest_floor.py), toned from its orange-brown to the
+-                // dull grey-brown litter seen between trees from the air (66, 58, 42); warmer read as rust halos (hd141).
+-                Layer("litter", "litter", 6f, new Color(0.59f, 0.88f, 1.55f), new Color(0.30f, 0.23f, 0.15f), new Color(0.18f, 0.14f, 0.09f)),
++                // shadowed olive understorey seen between crowns (49, 70, 45), shared with ForestPalette.Ground.
++                Layer("litter", "litter", 6f, new Color(0.337f, 1.280f, 1.775f), new Color(0.21f, 0.30f, 0.19f), new Color(0.17f, 0.25f, 0.16f)),
+                 // Reuse the dirt photo: wet mud and pale gravel occupy the two unused slots of HDRP's existing
+                 // eight-layer pass. Linear tints match WaterAppearance's filtered distant colours.
+                 Layer("wet mud", "dirt", 5f, new Color(.53001f, .66905f, .72861f), new Color(.34f, .32f, .26f), new Color(.27f, .25f, .20f)),
+@@ -901,7 +903,7 @@
+ 
+         // The litter layer's average colour in linear light (its photo's mean times the tint above), for the world
+         // picture's collar round the sector (FarDetailEdge).
+-        public static readonly Vector3 LitterMean = new Vector3(0.0539f, 0.0421f, 0.0229f);
++        public static readonly Vector3 LitterMean = new Vector3(0.03071f, 0.06125f, 0.02624f);
+         public const int LitterLayer = 5;
+ 
+         // Uses Resources/Textures/Terrain/<file>_diff (and _nor) when present, else a generated noise texture.

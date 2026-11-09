@@ -1,0 +1,777 @@
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace DroneSandbox
+{
+    // Recipe woods retain a 4 m surface; world tiles use 16/32 m interiors and 8 m rims in 2 km draw blocks.
+    // Flight generation stays in timed main-thread slices; sector loading joins its workers before play can resume.
+    // Coarse blocks are also built ahead round the followed drone and along its route (FarDetail.Route).
+    public sealed class ForestHlod
+    {
+        public const int BlockSize = 2048, TileSize = 256;
+        const int BlockCount = 28;
+        const double BuildMilliseconds = 0.85;
+        const int SampleSide = (BlockSize + 16) / 4 + 1, SampleCount = SampleSide * SampleSide;
+
+        // The default long hash XORs x and z into the same few buckets on a regular grid; mix both axes instead.
+        sealed class CoordinateComparer : IEqualityComparer<long>
+        {
+            // Keep exact coordinate identity, including negative normal samples outside a block.
+            public bool Equals(long a, long b) => a == b;
+
+            // Avalanche the packed coordinates so grid spacing cannot create long dictionary chains.
+            public int GetHashCode(long value)
+            {
+                unchecked
+                {
+                    uint h = (uint)(value >> 32) * 0x9e3779b9u ^ (uint)value;
+                    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+                    return (int)h;
+                }
+            }
+        }
+        static readonly CoordinateComparer Coordinates = new CoordinateComparer();
+
+        // The same plain mesh data goes to Unity and the offline harness; no substitute forest recipe.
+        public sealed class Data
+        {
+            public Vector2 corner;
+            public int step, textureSize;
+            public bool adaptive, local;
+            public Vector3 focus;
+            public Vector3[] vertices, normals;
+            public Vector2[] uv;
+            public float[] ground, crown;
+            public int[] triangles;
+            public Color32[] pixels;
+            internal float[] sampledGround;
+        }
+
+        // Shader fades keep surfaces immutable, so uploaded blocks need no retained CPU vertex copy.
+        sealed class Block
+        {
+            public Data data;
+            public Mesh mesh;
+            public Material material;
+            public Texture2D texture;
+            public Bounds bounds;
+            public int lastSeen;
+            public int triangles;
+            public Block previous;
+            public float changedAt;
+        }
+
+        readonly Dictionary<int, Block> blocks = new Dictionary<int, Block>();
+        readonly List<int> stale = new List<int>();
+        readonly Stopwatch timer = new Stopwatch();
+        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
+        IEnumerator builder;
+        Data pending;
+        Block pendingBlock;
+        int pendingKey, frame, builtFrame = -1;
+        Vector3 buildingFrom;
+        Camera buildingCamera;
+        public static int BlocksDrawn { get; private set; }
+        public static int TrianglesDrawn { get; private set; }
+        public static int CachedBlocks { get; private set; }
+        public static float BuildMs { get; private set; }
+        public static int CompletedBuilds { get; private set; }
+        public static bool Building { get; private set; }
+        public static int MissingBlocks { get; private set; }
+        public static int CoarseBlocks { get; private set; }
+        public static int NearCoarseBlocks { get; private set; }
+        public static float SliceBudgetMs { get; private set; }
+        public static int RefinementsStarted { get; private set; }
+        public static int CancelledBuilds { get; private set; }
+        public static int DeferredFrames { get; private set; }
+        public static float BuildMeanMs { get; private set; }
+        public static float BuildWorstMs { get; private set; }
+        // This frame's canopy main-thread time over every camera, bytes handed to Mesh/Texture2D, prefetch zone blocks
+        // still missing, and coarse blocks started for the prefetch zone since ResetTimings.
+        public static float LastFrameMs { get; private set; }
+        public static long UploadBytes { get; private set; }
+        public static int PrefetchMissing { get; private set; }
+        public static int PrefetchBuilds { get; private set; }
+        static double buildTotal;
+        static int buildSamples, countedFrame = -1;
+        static long frameBytes;
+        float cruiseUntil;
+        Scratch scratch;
+
+        // Destroy all native allocations as well as a partially built block when the terrain origin changes.
+        public void Clear()
+        {
+            foreach (var block in blocks.Values) Discard(block);
+            if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
+            blocks.Clear(); builder = null; pending = null; builtFrame = -1;
+            BlocksDrawn = TrianglesDrawn = CachedBlocks = MissingBlocks = CoarseBlocks = 0;
+            CompletedBuilds = 0; BuildMs = 0f; Building = false; cruiseUntil = 0f;
+        }
+
+        // Keep interval counters separate from the last camera, which may render after a flight has stopped.
+        public static void ResetTimings()
+        {
+            RefinementsStarted = CancelledBuilds = DeferredFrames = buildSamples = PrefetchBuilds = 0;
+            buildTotal = 0; BuildMeanMs = BuildWorstMs = 0f;
+        }
+
+        // Sector construction has already sampled these coarse blocks; uploading does not re-run the recipe.
+        public void AdoptSector()
+        {
+            scratch ??= new Scratch(); // the flight builder's reusable arrays, allocated while the sector loads
+            var prepared = SectorForest.PreparedCanopy;
+            if (prepared == null) return;
+            foreach (var data in prepared)
+            {
+                int i = Mathf.RoundToInt((data.corner.x + WorldPlan.Half) / BlockSize);
+                int j = Mathf.RoundToInt((data.corner.y + WorldPlan.Half) / BlockSize);
+                blocks[j * BlockCount + i] = Upload(data);
+            }
+            CachedBlocks = blocks.Count;
+        }
+
+        // Each cached block owns exactly these three Unity resources.
+        static void Discard(Block block)
+        {
+            if (block.previous != null) Discard(block.previous);
+            Art.Discard(block.mesh); Art.Discard(block.material); Art.Discard(block.texture);
+        }
+
+        // Select by distance to the block's footprint, including altitude, rather than its distant centre.
+        public static int Step(Vector3 camera, Vector2 corner)
+        {
+            float x = Mathf.Clamp(camera.x, corner.x, corner.x + BlockSize);
+            float z = Mathf.Clamp(camera.z, corner.y, corner.y + BlockSize);
+            float d = Vector3.Distance(camera, new Vector3(x, WorldPlan.Height(x, z) + 16f, z));
+            return d < 1800f ? 16 : d < 4000f ? 32 : d < 9000f ? 64 : 128;
+        }
+
+        // Time every camera's pass, so a spike log can tell canopy work from the rest of the frame.
+        public void Update(Camera camera, Plane[] planes, bool cruising = false)
+        {
+            if (countedFrame != Time.frameCount) { countedFrame = Time.frameCount; LastFrameMs = 0f; frameBytes = 0; }
+            long started = Stopwatch.GetTimestamp();
+            Refresh(camera, planes, cruising);
+            LastFrameMs += (float)((Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency);
+            UploadBytes = frameBytes;
+        }
+
+        // Fill missing coverage first, then the prefetch zone; fast flight defers fine work and caps coarse work at
+        // 0.20 ms per frame.
+        void Refresh(Camera camera, Plane[] planes, bool cruising)
+        {
+            BlocksDrawn = TrianglesDrawn = MissingBlocks = CoarseBlocks = NearCoarseBlocks = 0; frame++;
+            if (!FarTerrain.ForestCanopyHlod) return;
+            if (!WorldPlan.Ready)
+            {
+                foreach (var block in blocks.Values)
+                    if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
+                return;
+            }
+            Vector3 local = camera.transform.position;
+            Vector3 world = local + new Vector3(FarTerrain.Origin.x, 0f, FarTerrain.Origin.y);
+            if (cruising) cruiseUntil = Time.unscaledTime + 0.5f;
+            bool moving = Time.unscaledTime < cruiseUntil;
+            // A teleport must not wait for an obsolete fine texture before receiving coarse woodland.
+            if (builder != null && buildingCamera == camera && pending.step < 256 && (world - buildingFrom).sqrMagnitude > 1024f * 1024f)
+            {
+                if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
+                builder = null; pending = null;
+                CancelledBuilds++;
+            }
+            int wantedKey = -1, wantedStep = 256;
+            float best = float.MaxValue;
+            for (int j = 0; j < BlockCount; j++)
+                for (int i = 0; i < BlockCount; i++)
+                {
+                    int key = j * BlockCount + i;
+                    Vector2 corner = new Vector2(-WorldPlan.Half + i * BlockSize, -WorldPlan.Half + j * BlockSize);
+                    Vector2 middle = corner + Vector2.one * (BlockSize / 2f) - FarTerrain.Origin;
+                    // Conservative bounds before construction; actual mesh bounds are used for submission.
+                    var bounds = new Bounds(new Vector3(middle.x, 500f, middle.y), new Vector3(BlockSize, 2200f, BlockSize));
+                    if (!GeometryUtility.TestPlanesAABB(planes, bounds)) continue;
+                    float distance = bounds.SqrDistance(local);
+                    if (distance > 32000f * 32000f) continue;
+                    int step = Step(world, corner);
+                    if (blocks.TryGetValue(key, out Block block))
+                    {
+                        block.lastSeen = frame;
+                        if ((block.mesh != null || block.previous != null) && GeometryUtility.TestPlanesAABB(planes, block.bounds)) Draw(block, camera);
+                        // The prepared recipe crop is already finer than any requested tier; retain it while viewing that crop.
+                        Vector2 crop = block.data.corner - SectorForest.Origin;
+                        float half = Ground.Size * 0.5f;
+                        bool resolvedLocal = block.data.local && block.data.step < 256 && FarScatter.InSector(new Vector2(local.x, local.z))
+                            && crop.x < half && crop.x + BlockSize > -half && crop.y < half && crop.y + BlockSize > -half;
+                        if (resolvedLocal) continue;
+                        bool moved = block.data.adaptive && block.data.step <= 16 && (world - block.data.focus).sqrMagnitude > 256f * 256f;
+                        if (block.data.step > step || moved) { CoarseBlocks++; if (step <= 32) NearCoarseBlocks++; }
+                        if (block.data.step <= step && !moved || moving) continue;
+                        // First give every visible block a coarse shape before refining any of them.
+                        distance += 2e9f;
+                    }
+                    else MissingBlocks++;
+                    if ((builder == null || key != pendingKey) && distance < best)
+                    {
+                        best = distance; wantedKey = key;
+                        wantedStep = block == null ? 256 : step;
+                    }
+                }
+            // Turning a camera can expose missing districts without a teleport; those also preempt expensive refinement.
+            if (builder != null && pending.step < 256 && wantedKey >= 0 && wantedStep == 256)
+            {
+                if (pendingBlock != null) { Discard(pendingBlock); pendingBlock = null; }
+                builder = null; pending = null;
+                CancelledBuilds++;
+            }
+            // With every visible block covered, coarse coverage ahead comes before refinement, never cancelling one.
+            int ahead = Prefetch(builder != null ? pendingKey : -1);
+            if (builder == null && ahead >= 0 && (wantedKey < 0 || wantedStep < 256)) { wantedKey = ahead; wantedStep = 256; PrefetchBuilds++; }
+            if (builder == null && wantedKey >= 0)
+            {
+                pendingKey = wantedKey; buildingFrom = world; buildingCamera = camera;
+                pending = new Data { corner = new Vector2(-WorldPlan.Half + wantedKey % BlockCount * BlockSize,
+                    -WorldPlan.Half + wantedKey / BlockCount * BlockSize), step = wantedStep, adaptive = true, focus = world,
+                    local = MapLayout.Plan.world == null };
+                builder = Prepare(pending);
+                if (wantedStep < 256) RefinementsStarted++;
+            }
+            timer.Restart();
+            bool buildThisCamera = builtFrame != Time.frameCount;
+            builtFrame = Time.frameCount;
+            SliceBudgetMs = moving ? 0.20f : (float)BuildMilliseconds;
+            // Preserve a partially built fine block during flight, but spend time only on missing coverage.
+            bool defer = moving && pending != null && pending.step < 256;
+            if (buildThisCamera && defer) DeferredFrames++;
+            while (buildThisCamera && !defer && builder != null && timer.Elapsed.TotalMilliseconds < SliceBudgetMs)
+                if (!builder.MoveNext())
+                {
+                    var next = pendingBlock; pendingBlock = null;
+                    if (blocks.TryGetValue(pendingKey, out Block old))
+                    {
+                        if (old.previous != null) { Discard(old.previous); old.previous = null; }
+                        next.previous = old; next.changedAt = Time.unscaledTime;
+                        if (next.mesh == null) next.bounds = old.bounds;
+                    }
+                    blocks[pendingKey] = next;
+                    CompletedBuilds++;
+                    builder = null; pending = null;
+                }
+            if (buildThisCamera)
+            {
+                BuildMs = (float)timer.Elapsed.TotalMilliseconds;
+                buildTotal += BuildMs; buildSamples++; BuildMeanMs = (float)(buildTotal / buildSamples);
+                BuildWorstMs = Mathf.Max(BuildWorstMs, BuildMs);
+            }
+            Building = builder != null;
+            // Retain a short look-behind cache, but bound native memory after a long flight or camera tour.
+            stale.Clear();
+            foreach (var pair in blocks) if (frame - pair.Value.lastSeen > 180) stale.Add(pair.Key);
+            foreach (int key in stale) { Discard(blocks[key]); blocks.Remove(key); }
+            CachedBlocks = blocks.Count;
+        }
+
+        // Blocks within 4 km of the followed eye, and within 2 km of its route out to the prefetch lead plus a block, stay
+        // cached while there; returns the missing one nearest along the route (round the eye first), or -1.
+        int Prefetch(int building)
+        {
+            PrefetchMissing = 0;
+            var route = FarDetail.Route;
+            if (route == null) return -1;
+            int chosen = -1; float best = float.MaxValue;
+            Consider(route.Eye, 4096f, 0f, building, ref chosen, ref best);
+            float walked = 0f, limit = route.Lead + BlockSize;
+            for (int i = 0; i + 1 < route.PathCount && walked < limit; i++)
+            {
+                Vector2 a = route.PathPoint(i), b = route.PathPoint(i + 1);
+                float length = Vector2.Distance(a, b);
+                for (float t = 512f; t < length + 512f; t += 512f)
+                {
+                    float along = Mathf.Min(t, length);
+                    if (walked + along > limit) break;
+                    Consider(Vector2.Lerp(a, b, along / Mathf.Max(length, 1f)), 2048f, walked + along, building, ref chosen, ref best);
+                }
+                walked += length;
+            }
+            return chosen;
+        }
+
+        // Each block whose footprint lies within radius of a route point: keep it if built, else rank it by route metres.
+        void Consider(Vector2 at, float radius, float metres, int building, ref int chosen, ref float best)
+        {
+            int i0 = Mathf.Max(0, Mathf.FloorToInt((at.x - radius + WorldPlan.Half) / BlockSize)), i1 = Mathf.Min(BlockCount - 1, Mathf.FloorToInt((at.x + radius + WorldPlan.Half) / BlockSize));
+            int j0 = Mathf.Max(0, Mathf.FloorToInt((at.y - radius + WorldPlan.Half) / BlockSize)), j1 = Mathf.Min(BlockCount - 1, Mathf.FloorToInt((at.y + radius + WorldPlan.Half) / BlockSize));
+            for (int j = j0; j <= j1; j++)
+                for (int i = i0; i <= i1; i++)
+                {
+                    float x0 = -WorldPlan.Half + i * BlockSize, z0 = -WorldPlan.Half + j * BlockSize;
+                    float dx = Mathf.Max(x0 - at.x, Mathf.Max(0f, at.x - x0 - BlockSize)), dz = Mathf.Max(z0 - at.y, Mathf.Max(0f, at.y - z0 - BlockSize));
+                    if (dx * dx + dz * dz > radius * radius) continue;
+                    int key = j * BlockCount + i;
+                    if (blocks.TryGetValue(key, out Block block)) { block.lastSeen = frame; continue; }
+                    if (key == building) continue;
+                    PrefetchMissing++;
+                    float score = metres + Mathf.Sqrt(dx * dx + dz * dz) * 0.001f;
+                    if (score < best) { best = score; chosen = key; }
+                }
+        }
+
+        // Sector loading can finish synchronously before play; flight uses the same upload in small slices.
+        Block Upload(Data data)
+        {
+            // Upload releases its own CPU references; sector data remains reusable after Clear or renderer replacement.
+            var copy = new Data { corner = data.corner, step = data.step, textureSize = data.textureSize, adaptive = data.adaptive, local = data.local, focus = data.focus,
+                vertices = data.vertices, normals = data.normals, uv = data.uv, ground = data.ground,
+                crown = data.crown, triangles = data.triangles, pixels = data.pixels };
+            var block = new Block { data = copy, lastSeen = frame };
+            var upload = UploadSteps(block); while (upload.MoveNext()) { }
+            return block;
+        }
+
+        // Finish coarse sampling before native allocation, then keep every upload operation in the timed slice.
+        IEnumerator Prepare(Data data)
+        {
+            scratch ??= new Scratch();
+            var build = BuildWith(data, scratch); while (build.MoveNext()) yield return null;
+            pendingBlock = new Block { data = data, lastSeen = frame };
+            var upload = UploadSteps(pendingBlock); while (upload.MoveNext()) yield return null;
+        }
+
+        // Separate channel copies and mip generation so refinement does not commit all resources in one frame. The mesh
+        // fills through FarChunkUpload's 1024-vertex slices with bounds taken from the data, never a whole-array set
+        // followed by RecalculateBounds (hd167's worst canopy slice was 3.3 ms).
+        IEnumerator UploadSteps(Block block)
+        {
+            var data = block.data;
+            if (data.triangles.Length == 0)
+            {
+                data.vertices = data.normals = null; data.uv = null;
+                data.ground = data.crown = null; data.triangles = null; data.pixels = null;
+                yield break;
+            }
+            var mesh = new Mesh { name = "Forest canopy " + data.step };
+            block.mesh = mesh;
+            Vector3 low = data.vertices[0], high = low;
+            for (int i = 0; i < data.vertices.Length; i++)
+            {
+                low = Vector3.Min(low, data.vertices[i]); high = Vector3.Max(high, data.vertices[i]);
+                if ((i & 8191) == 8191) yield return null;
+            }
+            var bounds = new Bounds((low + high) * 0.5f, high - low);
+            for (int stage = 1; ; )
+            {
+                frameBytes += FarChunkUpload.Bytes(stage, data.vertices.Length, data.triangles.Length);
+                if (FarChunkUpload.Step(mesh, data.vertices, data.normals, data.uv, data.triangles, bounds, true, ref stage)) break;
+                yield return null;
+            }
+            yield return null;
+            var texture = new Texture2D(data.textureSize, data.textureSize, TextureFormat.RGBA32, true)
+                { name = "Forest crown field", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
+            block.texture = texture;
+            texture.SetPixels32(data.pixels); frameBytes += data.pixels.Length * 4L; yield return null;
+            texture.Apply(true, true); frameBytes += data.pixels.Length * 16L / 3; yield return null;
+            var material = ForestMaterials.Create("Canopy", null, 3);
+            material.mainTexture = texture; material.SetFloat("_Smoothness", 0.12f);
+            if (ForestMaterials.Fades(material)) material.SetTexture("_ForestDetail", Resources.Load<Texture2D>("Textures/ForestDetail"));
+            block.mesh = mesh; block.material = material; block.texture = texture; block.bounds = bounds;
+            block.triangles = data.triangles.Length / 3;
+            data.vertices = data.normals = null; data.uv = null;
+            data.ground = data.crown = null; data.triangles = null;
+            data.pixels = null;
+        }
+
+        // Crown cards overlap a lower stand surface; completed projected selections open it conservatively.
+        // The shader opens the camera's tree bubble smoothly; no vertex uploads or 16 m stepping during flight.
+        void Draw(Block block, Camera camera)
+        {
+            float fade = block.previous != null ? Mathf.Clamp01((Time.unscaledTime - block.changedAt) / 0.75f) : 1f;
+            if (block.previous != null)
+            {
+                if (fade >= 1f) { Discard(block.previous); block.previous = null; }
+                else if (block.previous.mesh != null) Submit(block.previous, camera, -Mathf.Max(0.00001f, fade));
+            }
+            if (block.mesh != null) Submit(block, camera, fade);
+        }
+
+        // Refinement shares complementary coverage for three quarters of a second instead of replacing a silhouette.
+        void Submit(Block block, Camera camera, float fade)
+        {
+            FarScatter.SetForestView(properties, camera, fade);
+            var rp = new RenderParams(block.material) { camera = camera, worldBounds = block.bounds,
+                matProps = properties, shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
+            Graphics.RenderMesh(rp, block.mesh, 0, Matrix4x4.identity);
+            BlocksDrawn++; TrianglesDrawn += block.triangles;
+        }
+
+        // The flight builder's sampling arrays, lists and maps, kept between blocks: only one flight build runs at a
+        // time, and a generation stamp marks valid entries instead of reallocating 4 MB per refinement.
+        sealed class Scratch
+        {
+            public readonly int[] indices = new int[SampleCount], vertexStamps = new int[SampleCount], heightStamps = new int[SampleCount];
+            public readonly Vector2[] heights = new Vector2[SampleCount];
+            public readonly float[] covers = new float[SampleCount];
+            public readonly Dictionary<int, Vector2> coarseHeights = new Dictionary<int, Vector2>(4096);
+            public readonly Dictionary<int, int> coarseIndices = new Dictionary<int, int>(2048);
+            public readonly Dictionary<long, int> rimSteps = new Dictionary<long, int>(Coordinates), edgeSteps = new Dictionary<long, int>(Coordinates);
+            public readonly List<Vector3> vertices = new List<Vector3>(), normals = new List<Vector3>();
+            public readonly List<Vector2> uv = new List<Vector2>();
+            public readonly List<float> ground = new List<float>(), crown = new List<float>();
+            public readonly List<int> triangles = new List<int>();
+            public int stamp;
+        }
+
+        // World-coordinate sampling and shared perimeter nodes join every refinement level without skirts.
+        sealed class Surface
+        {
+            readonly Data data;
+            readonly int[] indices, vertexStamps, heightStamps;
+            readonly Vector2[] heights;
+            readonly bool[] samples;
+            readonly float[] covers;
+            readonly int stamp;
+            readonly Dictionary<int, Vector2> coarseHeights;
+            readonly Dictionary<int, int> coarseIndices;
+            readonly Dictionary<long, int> rimSteps, edgeSteps;
+            public readonly List<Vector3> vertices, normals;
+            public readonly List<Vector2> uv;
+            public readonly List<float> ground, crown;
+            public readonly List<int> triangles;
+
+            // Sector workers own fresh caches; the flight builder passes its scratch, whose old entries the new stamp hides.
+            public Surface(Data target, bool[] groundSamples = null, Scratch scratch = null)
+            {
+                data = target; samples = groundSamples;
+                if (scratch != null)
+                {
+                    stamp = ++scratch.stamp;
+                    vertices = scratch.vertices; normals = scratch.normals; uv = scratch.uv;
+                    ground = scratch.ground; crown = scratch.crown; triangles = scratch.triangles;
+                    rimSteps = scratch.rimSteps; edgeSteps = scratch.edgeSteps;
+                    vertices.Clear(); normals.Clear(); uv.Clear(); ground.Clear(); crown.Clear(); triangles.Clear();
+                    rimSteps.Clear(); edgeSteps.Clear();
+                }
+                else
+                {
+                    stamp = 1;
+                    vertices = new List<Vector3>(); normals = new List<Vector3>(); uv = new List<Vector2>();
+                    ground = new List<float>(); crown = new List<float>(); triangles = new List<int>();
+                    rimSteps = new Dictionary<long, int>(Coordinates); edgeSteps = new Dictionary<long, int>(Coordinates);
+                }
+                if (samples != null) return;
+                // Bootstrap and distant blocks touch few nodes; avoid clearing a full four-metre cache during flight.
+                if (data.step == 256 || !data.local && data.step >= 64)
+                {
+                    if (scratch != null) { coarseHeights = scratch.coarseHeights; coarseIndices = scratch.coarseIndices; coarseHeights.Clear(); coarseIndices.Clear(); }
+                    else { coarseHeights = new Dictionary<int, Vector2>(4096); coarseIndices = new Dictionary<int, int>(2048); }
+                    return;
+                }
+                if (scratch != null) { indices = scratch.indices; heights = scratch.heights; vertexStamps = scratch.vertexStamps; heightStamps = scratch.heightStamps; }
+                else { indices = new int[SampleCount]; heights = new Vector2[SampleCount]; vertexStamps = new int[SampleCount]; heightStamps = new int[SampleCount]; }
+                if (!data.local && data.step <= 32) covers = scratch != null ? scratch.covers : new float[SampleCount];
+            }
+
+            // Use one height function for all tiers; averaging coarse vertices used to split shared block edges.
+            // Every block of a session shares data.local, so crown bumps never differ across a shared perimeter.
+            float Height(int x, int z)
+            {
+                int key = SampleIndex(x, z);
+                if (coarseHeights != null)
+                {
+                    if (coarseHeights.TryGetValue(key, out var found)) return found.y;
+                }
+                else if (heightStamps[key] == stamp) return heights[key].y;
+                Vector2 world = data.corner + new Vector2(x, z);
+                var stand = SectorForest.At(world.x, world.y);
+                float relief = ForestPattern.Canopy(stand, world.x, world.y, data.local);
+                float floor = data.sampledGround != null ? data.sampledGround[key] : FarScatter.GroundAt(world - FarTerrain.Origin);
+                float height = floor + relief - 0.3f;
+                if (coarseHeights != null) coarseHeights.Add(key, new Vector2(floor, height));
+                else { heights[key] = new Vector2(floor, height); heightStamps[key] = stamp; }
+                if (covers != null) covers[key] = stand.cover;
+                return height;
+            }
+
+            // Refine only mixed woodland margins; solid interiors retain the existing triangle budget.
+            public int RimStep(int x, int z, int step)
+            {
+                if (data.local || step > 32 || step <= 8) return step;
+                long key = ((long)x << 32) ^ (uint)z;
+                if (rimSteps.TryGetValue(key, out int result)) return result;
+                float low = 1f, high = 0f;
+                for (int i = 0; i < 5; i++)
+                {
+                    int px = x + (i == 4 ? step / 2 : (i & 1) * step);
+                    int pz = z + (i == 4 ? step / 2 : (i >> 1) * step);
+                    Height(px, pz);
+                    float cover = covers[SampleIndex(px, pz)];
+                    low = Mathf.Min(low, cover); high = Mathf.Max(high, cover);
+                }
+                // Keep the shared block perimeter at its fixed 8 m spacing, regardless of refinement order.
+                result = low < 0.95f && high > 0.02f ? 8 : step;
+                rimSteps.Add(key, result);
+                return result;
+            }
+
+            // Both sides use the coarser parent's whole edge, including any finer neighbours along that edge.
+            public int EdgeStep(int x, int z, bool horizontal)
+            {
+                if (horizontal ? z == 0 || z == BlockSize : x == 0 || x == BlockSize) return data.local ? 4 : 8;
+                int ax = horizontal ? x : x - 1, az = horizontal ? z - 1 : z;
+                int a = TileStep(data, ax / TileSize * TileSize, az / TileSize * TileSize);
+                int b = TileStep(data, x / TileSize * TileSize, z / TileSize * TileSize);
+                int span = Mathf.Max(a, b), stride = Mathf.Min(a, b);
+                if (horizontal) x = x / span * span; else z = z / span * span;
+                long key = ((long)x << 33) ^ ((long)z << 1) ^ (horizontal ? 1L : 0L);
+                if (edgeSteps.TryGetValue(key, out int result)) return result;
+                result = span;
+                for (int t = 0; t < span; t += stride)
+                {
+                    int px = x + (horizontal ? t : 0), pz = z + (horizontal ? 0 : t);
+                    ax = horizontal ? px : px - 1; az = horizontal ? pz - 1 : pz;
+                    result = Mathf.Min(result, RimStep(ax / a * a, az / a * a, a));
+                    result = Mathf.Min(result, RimStep(px / b * b, pz / b * b, b));
+                }
+                edgeSteps.Add(key, result);
+                return result;
+            }
+
+            // Central differences use the same world-space surface on both sides of every tile and block boundary.
+            public int Vertex(int x, int z)
+            {
+                int key = SampleIndex(x, z);
+                const int d = 8;
+                if (samples != null)
+                {
+                    samples[key] = true;
+                    samples[SampleIndex(x + d, z)] = samples[SampleIndex(x - d, z)] = true;
+                    samples[SampleIndex(x, z + d)] = samples[SampleIndex(x, z - d)] = true;
+                    return 0;
+                }
+                int index = coarseIndices != null ? (coarseIndices.TryGetValue(key, out int found) ? found : -1) : vertexStamps[key] == stamp ? indices[key] : -1;
+                if (index >= 0) return index;
+                Vector2 p = data.corner + new Vector2(x, z) - FarTerrain.Origin;
+                float top = Height(x, z), floor = coarseHeights != null ? coarseHeights[key].x : heights[key].x;
+                index = vertices.Count;
+                if (coarseIndices != null) coarseIndices.Add(key, index); else { indices[key] = index; vertexStamps[key] = stamp; }
+                vertices.Add(new Vector3(p.x, top, p.y)); ground.Add(floor); crown.Add(top - floor);
+                float pixel = TexelSize(data), padding = pixel * 2f;
+                uv.Add(new Vector2((x + padding) / (BlockSize + padding * 2f), (z + padding) / (BlockSize + padding * 2f)));
+                float dx = Height(x + d, z) - Height(x - d, z), dz = Height(x, z + d) - Height(x, z - d);
+                normals.Add(new Vector3(-dx, 2f * d, -dz).normalized);
+                return index;
+            }
+
+            // Only triangles outside the wood mask disappear; glades keep the understorey apron, so no level opens a hole
+            // onto coarser terrain, and the card fade still reveals the real glade floor near the camera.
+            public void Face(int a, int b, int c)
+            {
+                if (samples != null) return;
+                if (Mathf.Max(crown[a], Mathf.Max(crown[b], crown[c])) < 0.25f) return;
+                triangles.Add(a); triangles.Add(b); triangles.Add(c);
+            }
+
+            // Copy one channel per slice to avoid a large allocation-and-copy burst at the end of refinement.
+            public IEnumerator Finish()
+            {
+                data.vertices = vertices.ToArray(); yield return null;
+                data.normals = normals.ToArray(); yield return null;
+                data.uv = uv.ToArray(); yield return null;
+                data.ground = ground.ToArray(); yield return null;
+                data.crown = crown.ToArray(); yield return null;
+                data.triangles = triangles.ToArray();
+            }
+        }
+
+
+        // Stitch a quad to the finer nodes on any neighbouring edge; regular interiors need only two triangles.
+        static void Quad(Surface surface, int x, int z, int step, int south, int north, int west, int east)
+        {
+            if (south >= step && north >= step && west >= step && east >= step)
+            {
+                int a = surface.Vertex(x, z), b = surface.Vertex(x + step, z), c = surface.Vertex(x, z + step), d = surface.Vertex(x + step, z + step);
+                surface.Face(a, c, b); surface.Face(b, c, d);
+                return;
+            }
+            int center = surface.Vertex(x + step / 2, z + step / 2);
+            for (int side = 0; side < 4; side++)
+            {
+                int stride = Mathf.Min(step, side == 0 ? west : side == 1 ? north : side == 2 ? east : south);
+                int previous = -1;
+                for (int t = 0; t <= step; t += stride)
+                {
+                    int vx = x + (side == 0 ? 0 : side == 1 ? t : side == 2 ? step : step - t);
+                    int vz = z + (side == 0 ? t : side == 1 ? step : side == 2 ? step - t : 0);
+                    int vertex = surface.Vertex(vx, vz);
+                    if (previous >= 0) surface.Face(center, previous, vertex);
+                    previous = vertex;
+                }
+            }
+        }
+        // Construct in 256 m tiles, retaining one batched draw per 2 km district rather than a draw per tile.
+        public static IEnumerator Build(Data data, byte[] unused) => BuildWith(data, null);
+
+        // The same construction, optionally on the flight builder's reusable scratch.
+        static IEnumerator BuildWith(Data data, Scratch scratch)
+        {
+            // Bootstrap uses the same surface and stitched perimeter; no vertical skirts around open ground.
+            if (data.step == 256)
+            {
+                var coverage = Coverage(data, scratch); while (coverage.MoveNext()) yield return null;
+                yield break;
+            }
+            var surface = new Surface(data, null, scratch);
+            var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
+            var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
+            if (data.triangles.Length == 0) yield break;
+            int core = Mathf.RoundToInt(BlockSize / TexelSize(data));
+            int size = data.textureSize = core + 4;
+            float pixel = BlockSize / (float)core;
+            data.pixels = new Color32[size * size];
+            // The two-texel gutter uses the neighbour's world coordinates; UVs address identical boundary colours.
+            for (int j = 0; j < size; j++)
+                for (int i = 0; i < size; i++)
+                {
+                    float x = data.corner.x + (i - 1.5f) * pixel, z = data.corner.y + (j - 1.5f) * pixel;
+                    var stand = SectorForest.At(x, z);
+                    data.pixels[j * size + i] = ForestPalette.Surface(stand, x, z, pixel);
+                    if ((i & 7) == 7) yield return null;
+                }
+        }
+
+        // Snapshot exactly the recipe mesh's terrain queries on the main thread before independent block workers run.
+        internal static void SampleGround(Data data)
+        {
+            var samples = new bool[SampleCount];
+            var geometry = Geometry(data, new Surface(data, samples)); while (geometry.MoveNext()) { }
+            data.sampledGround = new float[SampleCount];
+            for (int key = 0; key < samples.Length; key++)
+            {
+                if (!samples[key]) continue;
+                Vector2 p = data.corner + new Vector2(key % SampleSide * 4 - 8, key / SampleSide * 4 - 8) - FarTerrain.Origin;
+                data.sampledGround[key] = FarScatter.GroundAt(p);
+            }
+        }
+
+        // Every stitched node lies on the 4 m lattice; an 8 m border also stores central-difference normal samples.
+        static int SampleIndex(int x, int z) => (z + 8) / 4 * SampleSide + (x + 8) / 4;
+
+        // Sampling and construction traverse identical stitched quads, so workers never need a native terrain fallback.
+        static IEnumerator Geometry(Data data, Surface surface)
+        {
+            for (int tz = 0; tz < BlockSize; tz += TileSize)
+                for (int tx = 0; tx < BlockSize; tx += TileSize)
+                {
+                    int step = TileStep(data, tx, tz);
+                    int seam = data.local ? 4 : 8;
+                    int south = tz == 0 ? seam : TileStep(data, tx, tz - TileSize);
+                    int north = tz + TileSize == BlockSize ? seam : TileStep(data, tx, tz + TileSize);
+                    int west = tx == 0 ? seam : TileStep(data, tx - TileSize, tz);
+                    int east = tx + TileSize == BlockSize ? seam : TileStep(data, tx + TileSize, tz);
+                    for (int z = tz; z < tz + TileSize; z += step)
+                        for (int x = tx; x < tx + TileSize; x += step)
+                        {
+                            // Empty recipe quads emit no faces; avoid their native terrain calls and crown searches too.
+                            if (data.local && !SectorForest.MayHaveCanopy(data.corner + new Vector2(x, z) - SectorForest.Origin, step))
+                            {
+                                yield return null;
+                                continue;
+                            }
+                            if (data.local || data.step >= 64)
+                            {
+                                Quad(surface, x, z, step, z == tz ? south : step, z + step == tz + TileSize ? north : step,
+                                    x == tx ? west : step, x + step == tx + TileSize ? east : step);
+                                yield return null;
+                                continue;
+                            }
+                            int detail = surface.RimStep(x, z, step);
+                            for (int vz = z; vz < z + step; vz += detail)
+                                for (int vx = x; vx < x + step; vx += detail)
+                                {
+                                    Quad(surface, vx, vz, detail,
+                                        vz == z ? surface.EdgeStep(vx, z, true) : detail,
+                                        vz + detail == z + step ? surface.EdgeStep(vx, z + step, true) : detail,
+                                        vx == x ? surface.EdgeStep(x, vz, false) : detail,
+                                        vx + detail == x + step ? surface.EdgeStep(x + step, vz, false) : detail);
+                                    yield return null;
+                                }
+                        }
+                }
+        }
+
+        // Small recipe groves need 4 m geometry; streamed world tiles retain their bounded 16/32 m refinement.
+        static int TileStep(Data data, int x, int z)
+        {
+            if (data.step == 256) return 64;
+            if (data.local)
+            {
+                Vector2 p = data.corner + new Vector2(x, z) - SectorForest.Origin;
+                float half = Ground.Size * 0.5f;
+                if (p.x < half && p.x + TileSize > -half && p.y < half && p.y + TileSize > -half) return 4;
+            }
+            if (!data.adaptive || data.step >= 64) return data.step;
+            Vector2 corner = data.corner + new Vector2(x, z);
+            float px = Mathf.Clamp(data.focus.x, corner.x, corner.x + TileSize);
+            float pz = Mathf.Clamp(data.focus.z, corner.y, corner.y + TileSize);
+            float distance = Vector3.Distance(data.focus, new Vector3(px, WorldPlan.Height(px, pz) + 16f, pz));
+            return Mathf.Max(data.step, distance < 900f ? 16 : distance < 4000f ? 32 : 64);
+        }
+
+        // The macro map carries stand colour and glade coverage; stochastic world detail resolves individual crowns.
+        static float TexelSize(Data data) => data.step == 256 ? 64f : data.local || data.step <= 32 ? 16f : 32f;
+
+        // Coarse interiors share exact perimeter heights with refined blocks, removing the old 32 m vertical skirts.
+        static IEnumerator Coverage(Data data, Scratch scratch)
+        {
+            var surface = new Surface(data, null, scratch);
+            var geometry = Geometry(data, surface); while (geometry.MoveNext()) yield return null;
+            var finish = surface.Finish(); while (finish.MoveNext()) yield return null;
+            if (data.triangles.Length == 0) yield break;
+            const int stride = 64, size = BlockSize / stride + 4;
+            data.textureSize = size; data.pixels = new Color32[size * size];
+            for (int z = 0; z < size; z++) for (int x = 0; x < size; x++)
+            {
+                Vector2 p = data.corner + new Vector2((x - 1.5f) * stride, (z - 1.5f) * stride);
+                data.pixels[z * size + x] = ForestPalette.Surface(SectorForest.At(p.x, p.y), p.x, p.y, stride);
+                if ((x & 3) == 3) yield return null;
+            }
+        }
+
+        // Find the largest connected forest district, then its densest neighbourhood for the autotest shot.
+        public static Vector2 LargestForest()
+        {
+            int n = WorldPlan.CellCount;
+            var seen = new bool[n * n];
+            var queue = new Queue<int>();
+            float largest = -1f; int chosen = 0;
+            for (int start = 0; start < seen.Length; start++)
+            {
+                if (seen[start] || WorldPlan.Cell(start % n, start / n).forest < 0.3f) continue;
+                seen[start] = true; queue.Enqueue(start);
+                float area = 0f, best = -1f; int peak = start;
+                while (queue.Count > 0)
+                {
+                    int cell = queue.Dequeue(), i = cell % n, j = cell / n;
+                    area += WorldPlan.Cell(i, j).forest;
+                    float score = WorldPlan.Cell(i, j).forest * 4f;
+                    for (int z = -1; z <= 1; z++)
+                        for (int x = -1; x <= 1; x++)
+                            if (i + x >= 0 && j + z >= 0 && i + x < n && j + z < n) score += WorldPlan.Cell(i + x, j + z).forest;
+                    if (score > best || (score == best && cell < peak)) { best = score; peak = cell; }
+                    for (int side = 0; side < 4; side++)
+                    {
+                        int x = i + (side == 0 ? -1 : side == 1 ? 1 : 0), z = j + (side == 2 ? -1 : side == 3 ? 1 : 0);
+                        if (x < 0 || z < 0 || x >= n || z >= n) continue;
+                        int next = z * n + x;
+                        if (seen[next] || WorldPlan.Cell(x, z).forest < 0.3f) continue;
+                        seen[next] = true; queue.Enqueue(next);
+                    }
+                }
+                if (area > largest) { largest = area; chosen = peak; }
+            }
+            return new Vector2(-WorldPlan.Half + (chosen % n + 0.5f) * WorldPlan.CellSize,
+                -WorldPlan.Half + (chosen / n + 0.5f) * WorldPlan.CellSize);
+        }
+    }
+}

@@ -1,0 +1,35 @@
+check_shader.py (D3DCompile ps_5_0; DXBC instructions include ForestFade and a stand-in lighting line)
+before raster: compiled, 301 instructions (6 texture samples), 300 slots
+before ray-helper: compiled, 261 instructions (6 texture samples), 260 slots
+after raster: compiled, 879 instructions (1 texture samples), 878 slots
+after ray-helper: compiled, 143 instructions (0 texture samples), 142 slots
+after, far path (footprint >= 3.6 m or no macro cover; the lattice branch is skipped): 155 instructions, 0 texture samples
+
+check_parity.py (ForestDetail.hlsl executed on D3D11 WARP vs crowns.py, 256x256 per footprint)
+footprint 0.25 m: factor mean 1.1038 vs 1.1037, |diff| mean 0.00059 p99.9 0.0051 max 0.1978; slope |diff| mean 0.00118 p99.9 0.0134; pixels over 0.02: 0.026%
+footprint 1.00 m: factor mean 1.0434 vs 1.0434, |diff| mean 0.00037 p99.9 0.0018 max 0.0473; slope |diff| mean 0.00043 p99.9 0.0020; pixels over 0.02: 0.005%
+footprint 2.00 m: factor mean 1.0143 vs 1.0143, |diff| mean 0.00029 p99.9 0.0016 max 0.0654; slope |diff| mean 0.00028 p99.9 0.0015; pixels over 0.02: 0.005%
+footprint 3.00 m: factor mean 0.9982 vs 0.9982, |diff| mean 0.00008 p99.9 0.0005 max 0.0243; slope |diff| mean 0.00006 p99.9 0.0005; pixels over 0.02: 0.003%
+PARITY OK: WARP-executed ForestDetail.hlsl matches crowns.py (99.9th percentile factor error 0.0051)
+
+calibrate.py ramp / means (lit sun+sky radiance of a flat patch, relative to the far-field surface)
+before near/far radiance by footprint: 0.25 m 0.953, 0.50 m 0.956, 1.00 m 0.960, 1.50 m 0.969, 2.00 m 0.975, 2.50 m 0.983, 3.00 m 0.987, 3.50 m 0.990, 4.00 m 0.992
+after near/far radiance by footprint: 0.25 m 0.972, 0.50 m 0.972, 1.00 m 0.982, 1.50 m 0.988, 2.00 m 0.998, 2.50 m 1.011, 3.00 m 1.010, 3.50 m 1.000, 4.00 m 1.000
+before broadleaf 0.0 near/far radiance 0.9526
+before broadleaf 0.5 near/far radiance 0.9526
+before broadleaf 1.0 near/far radiance 0.9526
+after broadleaf 0.0 near/far radiance 0.9687
+after broadleaf 0.5 near/far radiance 0.9699
+after broadleaf 1.0 near/far radiance 0.9695
+
+run.py after cracks
+review: compile passed (zero warnings/errors)
+GAP CHECK internal 0, shared 0 over 128 level pairs and 65536 perimeter units, worst seam height difference 0.0000 m; flipped 0, degenerate 0, vertical 0
+exposure bootstrap: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure coarse64: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure prepared32: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined32-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure refined16-centre: woodland samples 1048576, holes 0.00%, below far chunk 0.00%, below detail 0.00%, dense-woodland exposed 0.000%, exposed blobs 0.0/km2
+exposure 1.1 s
+run.py api
+api: compile passed (zero warnings/errors)

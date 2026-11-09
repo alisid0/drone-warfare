@@ -1,0 +1,115 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace DroneSandbox
+{
+    // Permanent yard surfaces and distant masses hand over to instanced FBX buildings without scenery objects.
+    public sealed class LandmarkHlod
+    {
+        // Native resources live until FarScatter clears its origin/seed cache or the owner is destroyed.
+        sealed class Batch
+        {
+            public Mesh mesh;
+            public Bounds bounds;
+            public readonly List<int> materials = new List<int>();
+            public int triangles;
+        }
+
+        readonly Dictionary<int, Batch> batches = new Dictionary<int, Batch>();
+        readonly Material[] materials = new Material[LandmarkMesh.MaterialCount];
+        readonly LandmarkInstances instances = new LandmarkInstances();
+        readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
+        // The compound being meshed, about a millisecond per frame, and its id; null when none is in progress.
+        LandmarkMesh.Builder building;
+        int buildingId;
+        public static int DrawCalls { get; private set; }
+        // For the autotest's hitch experiment: leave out the real instanced models near a compound (the distant mesh stays).
+        public static bool HideModels;
+        public static int TrianglesDrawn { get; private set; }
+
+        // Match ForestHlod's lifecycle, explicitly releasing every mesh and owned material.
+        public void Clear()
+        {
+            foreach (var batch in batches.Values) Art.Discard(batch.mesh);
+            batches.Clear();
+            building = null;
+            instances.Clear();
+            for (int i = 0; i < materials.Length; i++) { if (i != LandmarkMesh.SurfaceSlot) Art.Discard(materials[i]); materials[i] = null; }
+            DrawCalls = TrianglesDrawn = 0;
+        }
+
+        // Build only visible compounds; fixed geometry remains useful down to the sector boundary on any visit.
+        public void Update(Camera camera, Plane[] planes)
+        {
+            DrawCalls = TrianglesDrawn = 0;
+            instances.Warm(); // the compounds' models and photo materials, loading in the background
+            instances.Prime(camera); // then each drawn once, out of sight, so its shaders are ready before it's seen
+            // One compound is meshed at a time, a slice per frame, so neither a sector change nor a large soft-edged yard
+            // turns into one long stage.
+            bool meshed = building != null;
+            if (meshed && building.Step(1.0)) { batches[buildingId] = Upload(building.mesh); building = null; }
+            foreach (var f in WorldPlan.Features)
+            {
+                Vector2 p = f.center - FarTerrain.Origin;
+                float radius = f.halfLength + f.halfWidth + 100f;
+                var bounds = new Bounds(new Vector3(p.x, f.elevation + 35f, p.y), new Vector3(radius * 2f, 90f, radius * 2f));
+                if (bounds.SqrDistance(camera.transform.position) > 22000f * 22000f || !GeometryUtility.TestPlanesAABB(planes, bounds)) continue;
+                if (!batches.TryGetValue(f.id, out Batch batch))
+                {
+                    if (meshed) continue;
+                    meshed = true;
+                    building = new LandmarkMesh.Builder(f, FarTerrain.Origin, false); buildingId = f.id;
+                    if (!building.Step(1.0)) continue;
+                    batch = Upload(building.mesh); batches.Add(f.id, batch); building = null;
+                }
+                if (batch.mesh == null) continue;
+                Vector2 projection = LandmarkLod.Projection(camera);
+                float distance = projection.y >= 0f ? projection.y : Mathf.Sqrt(bounds.SqrDistance(camera.transform.position)) * projection.x;
+                if (distance < LandmarkLod.Far && !HideModels)
+                {
+                    instances.Draw(f, camera, bounds);
+                    DrawCalls += instances.DrawCalls; TrianglesDrawn += instances.Triangles;
+                }
+                LandmarkInstances.SetView(properties, camera, true);
+                for (int sub = 0; sub < batch.materials.Count; sub++)
+                {
+                    int index = batch.materials[sub];
+                    if (index == LandmarkMesh.SurfaceSlot) materials[index] = Features.LandmarkSurfaceMaterial(); // shared, never discarded here
+                    else if (materials[index] == null)
+                    {
+                        materials[index] = Art.NewMaterial(LandmarkMesh.Color(index));
+                        materials[index].SetFloat("_Smoothness", 0.12f);
+                        if (LandmarkMesh.IsBuilding(index))
+                        {
+                            var adapted = LandmarkInstances.Adapt(materials[index]);
+                            if (adapted != null) { Art.Discard(materials[index]); materials[index] = adapted; }
+                        }
+                    }
+                    var rp = new RenderParams(materials[index]) { camera = camera, worldBounds = batch.bounds,
+                        matProps = LandmarkMesh.IsBuilding(index) ? properties : null,
+                        shadowCastingMode = ShadowCastingMode.Off, receiveShadows = true };
+                    Graphics.RenderMesh(rp, batch.mesh, sub, Matrix4x4.identity); DrawCalls++;
+                }
+                TrianglesDrawn += batch.triangles;
+            }
+        }
+
+        // One mesh holds all nonempty submeshes; only small geometry arrays are retained by Unity.
+        static Batch Upload(LandmarkMesh.Data data)
+        {
+            var batch = new Batch();
+            if (data.vertices.Count == 0) return batch;
+            var mesh = new Mesh { name = "World landmark", indexFormat = IndexFormat.UInt32 };
+            mesh.SetVertices(data.vertices); mesh.SetNormals(data.normals); mesh.SetUVs(0, data.uvs);
+            for (int i = 0; i < data.triangles.Length; i++) if (data.triangles[i].Count > 0) batch.materials.Add(i);
+            mesh.subMeshCount = batch.materials.Count;
+            for (int sub = 0; sub < batch.materials.Count; sub++)
+            {
+                var triangles = data.triangles[batch.materials[sub]]; mesh.SetTriangles(triangles, sub); batch.triangles += triangles.Count / 3;
+            }
+            mesh.RecalculateBounds(); batch.mesh = mesh; batch.bounds = mesh.bounds;
+            return batch;
+        }
+    }
+}

@@ -1,0 +1,102 @@
+Woods build - codex/woods-build, based on cd8b1e6
+
+Changes
+
+Only SectorForest.cs and ForestHlod.cs change in the game.
+
+Recipe groves now cache their rotations and 64 m neighbour bins. The grove
+ripple is evaluated once per query. Conservative grove bounds include the
+7 m ripple and largest crown, so empty quads can be omitted without removing
+rendered faces. Crop seams and special Deep Forest reserves retain exact sampling.
+
+The 4 m canopy lattice now indexes arrays directly. Packed long coordinates
+previously hashed by x XOR z, collapsing a regular grid into very few buckets.
+The two remaining sparse rim/edge dictionaries use a mixed coordinate hash.
+Each cached height also retains its floor, avoiding a second terrain query.
+
+At recipe-sector startup, the same geometry traversal first marks the required
+terrain samples. Main-thread terrain lookups populate temporary arrays; at most
+four independent block workers then build the geometry and macro textures.
+Parallel.For joins before returning; snapshots are released afterwards. Workers
+only read completed plans/stems and write their own block. Native Terrain,
+Transform, Mesh and Texture access stays on the main thread. Flight generation
+still uses the existing timed slices; no coverage or refinement is deferred by
+this patch. Occupied woods keep their 4 m startup surface and existing crowns.
+
+Managed timings (milliseconds)
+
+Fresh sequential baseline/candidate pairs, same machine and runtime settings:
+
+                              before       after
+Varrow World woods lap          1681         159
+Varrow SectorForest run 0      1661.1       140.1
+  stems                         66.7        23.7
+  indices / occupancy            9.2         7.2
+  canopy preparation          1585.2       109.2
+Varrow repeat 1                1639.5        95.7
+Varrow repeat 2                1546.5       128.9
+Deep Forest World woods lap     1004         543
+No-world preview woods lap      1870         165
+
+The earlier concurrent-build baseline was slower (woods 3418 ms), so the table
+uses the fresh matched pair, not timings taken under different machine load.
+DOTNET_TieredCompilation=0 keeps the short measurements on optimized code.
+
+Each pair hashes identical rendered triangle positions, normals, UVs and macro
+texture bytes, plus stem cell/position/species/height/radius. Three repeated
+builds restore the actual pre-woods gardens and replay the original grove RNG
+draws; their signatures match too. Varrow retains all 7,898 harness stems and
+119,529 triangles. Only unused vertices disappear: 315,376 -> 126,250. Preview
+retains 8,606 stems / 42,361 triangles; Deep Forest 104,860 / 229,929.
+
+These are production-source managed timings, not native Unity acceptance data.
+The reused harness supplies managed engine storage and unrelated service stubs
+(including Farmland, Grass, Art and HDRP); it is not the full native Varrow RNG
+or asset path. Native Perlin noise, allocations/uploads and player performance
+must be verified by Claude. The native <=600 ms woods target is not yet measured.
+
+Logging
+
+Add this immediately after World.Build in the existing sector/Varrow log:
+
+log.WriteLine($"forest build ms: total {SectorForest.BuildMilliseconds:F1}, stems {SectorForest.StemsMilliseconds:F1}, indices {SectorForest.IndicesMilliseconds:F1}, canopy preparation {SectorForest.CanopyMilliseconds:F1}; stems {SectorForest.Stems.Count}, cells {SectorForest.LocalCells.Count}");
+
+Stems includes reset, grove planning and candidate workers. Indices includes
+terrain placement, garden exclusion, local cells and occupancy publication.
+Canopy preparation includes the terrain snapshot and joined block workers.
+The total excludes Features.Build, decorative riverbank trees and renderer
+attachment: compare it with the existing World.Timings woods lap.
+
+Verification
+
+C# 9 forest/current-consumer compilation against Unity 6000.6.7f1 assemblies:
+zero warnings and errors. Unrelated Art/HDRP services retain harness contracts;
+this is not a whole-game compile. No Unity or Blender was launched. No new
+packages or LINQ. Edited source is CRLF. Ground, World, Features, Undergrowth,
+Canopy, protected gameplay files and Codex B's files are unchanged.
+
+Reproduce with Python 3.13 -I, sequentially:
+  Tools/WoodsBuild/run.py api
+  Tools/WoodsBuild/run.py before varrow
+  Tools/WoodsBuild/run.py after varrow
+  Tools/WoodsBuild/run.py before deep
+  Tools/WoodsBuild/run.py after deep
+  Tools/WoodsBuild/run.py before preview
+  Tools/WoodsBuild/run.py after preview
+
+One setup and three forest builds per process; no frames, asset exports or
+renders. Logs and generated scaffolding stay in Temp/woods-build. An after run
+compares its geometry signature with the corresponding saved before log.
+
+Build checklist for Claude
+
+1. Integrate and compile/build normally. Add the exact log line above alongside
+   World.Timings. Confirm Varrow's native woods lap <=600 ms on the same build
+   settings, and check the three phases if the total differs from the harness.
+2. Check Varrow base/bridge on the first frame and at 0.5 s, then outer woods and
+   crop seams. Confirm startup canopy/crowns still cover litter. Test preview
+   without an active world and a second sector load (cache/reset ownership).
+3. Check Deep Forest and Border Line, then a short flight/teleport. Confirm no
+   seams, worker-thread Unity API errors or fallbacks. Check the existing canopy
+   slice/worst-frame counters during refinement; uploads remain on the main
+   thread. No gameplay occupancy or drone-clearance behavior should change.

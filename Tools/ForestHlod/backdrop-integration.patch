@@ -1,0 +1,12 @@
+diff --git a/Assets/DroneSandbox/Scripts/Backdrop.cs b/Assets/DroneSandbox/Scripts/Backdrop.cs
+--- a/Assets/DroneSandbox/Scripts/Backdrop.cs
++++ b/Assets/DroneSandbox/Scripts/Backdrop.cs
+@@ -63,7 +63,7 @@ namespace DroneSandbox
+                 {
+                     Vector2 p = start + dir * Steps[r];
+                     float blend = Mathf.SmoothStep(0f, 1f, Steps[r] / 400f);
+-                    float h = world ? FarTerrain.SurfaceAt(p) : Mathf.Lerp(edgeHeight, Hills(p, Steps[r]), blend);
++                    float h = world ? FarTerrain.VisualSurfaceAt(p) : Mathf.Lerp(edgeHeight, Hills(p, Steps[r]), blend);
+                     if (r > 0) h -= 0.3f; // tucked just under the terrain's edge
+                     vertices.Add(new Vector3(p.x, h, p.y));
+                     uvs.Add(p);

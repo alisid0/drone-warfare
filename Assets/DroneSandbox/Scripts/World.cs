@@ -1,39 +1,86 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DroneSandbox
 {
-    // Builds everything on the map that isn't a unit: terrain, river, fields, villages, woods, the bridge and
-    // both bases, all from MapLayout. Used by the game (SandboxGame) and by the editor preview (MapPreview).
+    // Builds everything on the map that isn't a unit: terrain, river, fields, villages, woods, bridges, the
+    // sector's special features and both bases, all from MapLayout. Used by the game (SandboxGame) and by the
+    // editor preview (MapPreview).
     public static class World
     {
+        const int TreeLimit = 11500; // shared by woods, lake, gardens, field edges and orchards
+        public static int TreeCount { get; private set; }
+
+        // Builds one sector and resets the shared scenery budget before any builder plants trees.
+        // How long each part of the last Build took, for the test log (a 2 km sector has to load quickly).
+        public static string Timings { get; private set; } = "";
+
+        // The seed of the one big world every sector sits in (FarTerrain, WorldPlan).
+        public const int WorldSeed = 1200;
+
         public static Transform Build(Transform parent, bool preview)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var times = new System.Text.StringBuilder();
+            void Lap(string what) { times.Append($"{what} {clock.ElapsedMilliseconds}, "); clock.Restart(); }
             MapLayout.Prepare();
+            Lap("layout");
+            TreeCount = 0;
+            Undergrowth.Reset(); // every tree builder shares its spacing grid
             var root = new GameObject("World").transform;
             root.SetParent(parent, false);
-            var rng = new System.Random(7); // same map every run
+            var rng = new System.Random(MapLayout.Plan.worldSeed); // same map every time for a sector
 
             Ground.Build(root);
+            Lap("ground");
+            if (!preview)
+            {
+                // The whole 56 km world round the sector (made the first time), then its terrain out to the horizon.
+                if (!WorldPlan.Ready) WorldPlan.Generate(WorldSeed);
+                FarTerrain.Build();
+                Lap("world");
+            }
+            Backdrop.Build(root);
             Water.Build(root);
+            Reservoir.Build(root);
+            Lap("water");
+            RoadSurface.Build(root);
+            Lap("roads");
             Farmland.Build(root, rng);
+            Lap("fields");
             var scenery = new GameObject("Scenery").transform;
             scenery.SetParent(root, false);
-            BuildBridge(scenery);
+            foreach (var bridge in MapLayout.Bridges) BuildBridge(scenery, bridge);
             BuildVillages(scenery, rng);
+            Lap("villages");
+            Features.Build(scenery); // reserve orchard trees before filling the wild woods
             BuildWoods(scenery, rng);
+            Lap("woods");
+            Ground.PaintForestFloor(woodland, Undergrowth.Trees);
+            Lap("forest floor");
+            Grass.Plant(Ground.Current); // after the villages and woods, so it keeps off worn paths, yards and forest floor
+            Lap("grass");
             BuildRocks(scenery, rng);
+            Undergrowth.Build(scenery);
+            Lap("undergrowth");
             Bases.BuildPlayerBase(root);
             Bases.BuildEnemyHq(root);
             if (preview) Bases.PreviewUnits(root);
-            AddReflections(root);
+            Lap("bases");
+            Timings = $"{times}{TreeCount} trees, {VillageHouses} houses on {MapLayout.VillageStreets.Count} streets; layout: {MapLayout.Timings}{MapLayout.FieldTimings}";
             return root;
         }
 
         // Places Resources/Models/<model> on the ground (sunk a little so it doesn't float on slopes),
-        // or builds a primitive stand-in when the model is missing.
+        // or builds a primitive stand-in when the model is missing. Trees return null when crowded or over budget.
         public static GameObject Place(string model, Vector3 pos, float yaw, float scale, float sink, Transform parent,
             System.Action<Transform> fallback = null)
         {
+            bool tree = model == "Scenery_Tree" || model == "Scenery_Tree_B" || model == "Scenery_Birch"
+                || model == "Scenery_Poplar" || model == "Scenery_Spruce" || model == "Scenery_Pine" || model == "Scenery_Pine_B";
+            var p = new Vector2(pos.x, pos.z);
+            if (tree && (TreeCount >= TreeLimit || Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge
+                || Undergrowth.UnderTrees(p, 3.2f))) return null;
             var root = new GameObject(model).transform;
             root.SetParent(parent, false);
             float r = 1.2f * scale;
@@ -43,6 +90,11 @@ namespace DroneSandbox
             root.position = new Vector3(pos.x, ground - sink, pos.z);
             root.rotation = Quaternion.Euler(0f, yaw, 0f);
             if (Art.TryModel(model, root, scale) == null) (fallback ?? (t => StandIn(t, scale)))(root);
+            if (tree)
+            {
+                TreeCount++;
+                Undergrowth.NoteTree(p);
+            }
             return root.gameObject;
         }
 
@@ -53,9 +105,15 @@ namespace DroneSandbox
 
         // ---- Bridge ----
 
-        static void BuildBridge(Transform parent)
+        // Instanced roadside trees consume the same logical tree slots and spacing grid as ordinary scenery.
+        public static bool ReserveRoadTree(Vector2 p)
         {
-            Vector2 p = MapLayout.BridgePoint;
+            if (TreeCount >= TreeLimit || Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge || Undergrowth.UnderTrees(p, 3.2f)) return false;
+            TreeCount++; Undergrowth.NoteTree(p); return true;
+        }
+
+        static void BuildBridge(Transform parent, Vector2 p)
+        {
             MapLayout.RoadField.Query(p.x, p.y, out _, out int segment);
             Vector2 dir = MapLayout.RoadField.Direction(segment);
             // The deck sits level with the road where it meets the banks, and spans the dip between them.
@@ -78,129 +136,563 @@ namespace DroneSandbox
             bridge.position = new Vector3(p.x, deck - 0.3f, p.y);
             bridge.rotation = Quaternion.Euler(0f, Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg, 0f);
             var model = Art.TryModel("Scenery_Bridge", bridge);
-            if (model != null) model.transform.localScale = new Vector3(1f, 1f, Mathf.Clamp((span * 2f + 3f) / 18f, 0.9f, 1.8f));
+            if (model != null) model.transform.localScale = new Vector3(Mathf.Max(1f, MapLayout.RoadWidth(segment) * 2f / 5.2f), 1f, Mathf.Clamp((span * 2f + 3f) / 18f, 0.9f, 1.8f));
         }
 
         // ---- Villages ----
 
+        // Records the main buildings before gardens are planted, so later rows cannot land on earlier props.
+        sealed class VillageBuilding
+        {
+            public Transform root;
+            public Vector2 at, center, facing, pathEnd;
+            public string model;
+            public VillagePlot plot;
+            // A house on a street plot: the street's direction, away from the street, the plot's frontage, and how
+            // far its garden runs behind the house (zero for the church and farmsteads).
+            public Vector2 along, outward;
+            public float frontage, back;
+        }
+
+        static readonly List<(Vector2 at, float radius)> villagePlots = new List<(Vector2, float)>();
+
+        // How many houses the last Build put in villages, for the test log.
+        public static int VillageHouses { get; private set; }
+        public static int VillagePropRenderers { get; private set; }
+        static int gardenTrees;
+
+        // Villages the way aerial photos show them: houses on plots down both sides of each street (MapLayout's
+        // VillageStreets, a 250-450 m stretch of road and a lane or two off it), a garden behind each. The first
+        // village's church takes its centre.
         static void BuildVillages(Transform parent, System.Random rng)
         {
-            for (int v = 0; v < MapLayout.Villages.Length; v++)
+            var plan = MapLayout.Plan;
+            villagePlots.Clear();
+            Features.ClearVillagePlots();
+            VillagePropRenderers = gardenTrees = 0;
+            var buildings = new List<VillageBuilding>();
+            var roots = new Transform[plan.villages.Count];
+            bool needsChurch = true;
+            for (int v = 0; v < plan.villages.Count; v++)
             {
-                var root = new GameObject("Village " + (v + 1)).transform;
-                root.SetParent(parent, false);
-                Vector2 center = MapLayout.Villages[v];
-                bool farmstead = v == MapLayout.Villages.Length - 1;
+                roots[v] = new GameObject("Village " + (v + 1)).transform;
+                roots[v].SetParent(parent, false);
+                Vector2 center = plan.villages[v];
                 MapLayout.RoadField.Query(center.x, center.y, out _, out int segment);
                 Vector2 along = MapLayout.RoadField.Direction(segment);
                 Vector2 across = new Vector2(-along.y, along.x);
-                float[] slots = farmstead ? new[] { -6f, 7f } : new[] { -19f, -6.5f, 6.5f, 19f };
-                foreach (float side in new[] { -1f, 1f })
+                if (plan.farmsteads[v])
                 {
-                    foreach (float s in slots)
-                    {
-                        if (farmstead && side > 0f && s > 0f) continue;
-                        Vector2 p = center + along * s + across * side * (MapLayout.RoadHalfWidth + 8f);
-                        if (!Buildable(p)) continue;
-                        string model;
-                        if (v == 0 && side < 0f && Mathf.Abs(s - 6.5f) < 0.1f) model = "Scenery_Church";
-                        else if (farmstead) model = s < 0f ? "Scenery_Barn" : "Scenery_House_A";
-                        else
-                        {
-                            double roll = rng.NextDouble();
-                            model = roll < 0.5 ? "Scenery_House_A" : roll < 0.82 ? "Scenery_House_B" : "Scenery_Barn";
-                        }
-                        // Doors (the model's +Z) face the road.
-                        Vector2 facing = -across * side;
-                        float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg + Range(rng, -4f, 4f);
-                        Place(model, new Vector3(p.x, 0f, p.y), yaw, 1f, 0.35f, root);
-                        Garden(root, p, along, across * side, rng);
-                    }
+                    BuildFarmstead(roots[v], center, along, across, v, buildings);
+                    continue;
+                }
+                // Reserve the church first and try both verges if water or a junction blocks its first plot.
+                if (needsChurch && plan.world == null)
+                    foreach (float side in new[] { -1f, 1f })
+                        foreach (float s in new[] { 0f, -15f, 15f })
+                            if (needsChurch && VillageBuildingAt("Scenery_Church", center + along * s + across * side * 16f,
+                                -across * side, 1f, center + along * s, center, roots[v], v, buildings)) needsChurch = false;
+            }
+            foreach (var b in buildings)
+                if(b.model=="Scenery_Church")
+                {
+                    b.along=new Vector2(-b.facing.y,b.facing.x); b.outward=-b.facing; b.frontage=30f; b.back=30f;
+                    b.plot=new VillagePlot {front=b.at+b.facing*16f,along=b.along,outward=b.outward,frontage=30f,depth=46f,setback=16f,church=true,model=b.model};
+                }
+            var occupiedPlots = new List<VillagePlot>();
+            var squares = new List<VillagePlot>();
+            foreach (var b in buildings) if (b.frontage > 0f) occupiedPlots.Add(b.plot);
+            foreach (var proposed in MapLayout.VillagePlots)
+            {
+                var plot = proposed;
+                bool clear = VillagePlotClear(plot, occupiedPlots);
+                while (!clear && plan.world == null && plot.depth > 25f)
+                { plot.depth = Mathf.Max(25f, plot.depth - 5f); clear = VillagePlotClear(plot, occupiedPlots); }
+                if (!clear) continue;
+                if (plot.square) { squares.Add(plot); occupiedPlots.Add(plot); continue; }
+                if (!VillageBuildingAt(plot.model, plot.House, plot.gable ? plot.along : -plot.outward, plot.Scale, plot.front, plot.front, roots[plot.owner], plot.owner, buildings, plot)) continue;
+                var b = buildings[buildings.Count - 1]; b.plot = plot; b.along = plot.along; b.outward = plot.outward;
+                b.frontage = plot.frontage; b.back = plot.depth - plot.setback;
+                occupiedPlots.Add(plot);
+            }
+
+            // Check paths after every settlement's buildings are reserved: a driveway to about half the houses, a
+            // footpath to the rest. Then gardens, on an allowance of resident renderers that grows with the village
+            // (counting all three LOD renderers of each fruit tree).
+            var houses = new Dictionary<Transform, int>();
+            foreach (var b in buildings)
+            {
+                bool house = b.model.StartsWith("Scenery_House_") || b.model.StartsWith("Scenery_Townhouse_");
+                if (b.frontage <= 0f) VillagePath(b.at, b.pathEnd, b.model == "Scenery_Church" ? 3f : house && rng.NextDouble() < 0.45 ? 3f : 1.6f, b.at);
+                if (house) houses[b.root] = houses.TryGetValue(b.root, out int n) ? n + 1 : 1;
+            }
+            VillageHouses = 0;
+            foreach (var n in houses.Values) VillageHouses += n;
+            var budgets = new Dictionary<Transform, int>();
+            // Two batched LOD renderers per settlement replace individual fence panels; pay from the same cap.
+            for (int v = 0; v < roots.Length; v++)
+            {
+                int housesHere = houses.TryGetValue(roots[v], out int n) ? n : 0;
+                int budget = Mathf.Min(220, 8 + 4 * housesHere);
+                var plots = new List<VillagePlot>();
+                foreach (var b in buildings) if (b.root == roots[v] && b.frontage > 0f) plots.Add(b.plot);
+                foreach (var plot in squares) if (plot.owner == v) plots.Add(plot);
+                int used = Features.VillagePlots(roots[v], plots, budget);
+                VillagePropRenderers += used; budgets[roots[v]] = budget - used;
+            }
+            // Shared fixtures first, so garden clutter cannot spend the allowance they need.
+            for (int v = 0; v < roots.Length; v++)
+            {
+                Utility(roots[v], v, occupiedPlots, houses.TryGetValue(roots[v], out int count) ? count : 0, budgets);
+                Orchards(roots[v], v, occupiedPlots, budgets);
+            }
+            StreetTrees(roots, budgets);
+            foreach (var b in buildings)
+            {
+                if (b.model == "Scenery_Church")
+                {
+                    int allowance = budgets[b.root];
+                    Vector2 along = b.frontage > 0f ? b.along : new Vector2(-b.facing.y,b.facing.x), outward = -b.facing;
+                    foreach(float side in new[]{-1f,1f})
+                        if(gardenTrees<128 && VillageProp("Scenery_Tree",b.at+outward*19f+along*(side*9f),side*45f,.45f,3f,b.root,ref allowance)) gardenTrees++;
+                    budgets[b.root]=allowance; continue;
+                }
+                if (!b.model.StartsWith("Scenery_House_") && !b.model.StartsWith("Scenery_Townhouse_")) continue;
+                int budget = budgets[b.root];
+                if (b.frontage > 0f) Garden(b.root, b.plot, ref budget);
+                budgets[b.root] = budget;
+            }
+            foreach (var p in occupiedPlots)
+            {
+                if (p.landUse != 1 && p.landUse != 4) continue;
+                var root = roots[p.owner]; int budget = budgets[root];
+                float yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg;
+                if (p.landUse == 1)
+                    for (int i = 0; i < 4; i++) VillageProp("Scenery_Hut", p.Point(-p.frontage*.5f+7f+i*16f,p.depth-4f),yaw,.65f,2.3f,root,ref budget,false);
+                else
+                {
+                    for (int i = 0; i < 3; i++) VillageProp("Scenery_FreightGroup",p.Point(-21f+i*21f,13f),yaw,1f,5f,root,ref budget,false);
+                    VillageProp("Scenery_MachineryShed",p.Point(21f,58f),yaw,1f,5.5f,root,ref budget,false);
+                }
+                budgets[root] = budget;
+            }
+            // Each vegetable plot's tool shed stands by its compost corner, from what the gardens leave of the allowance.
+            foreach (var p in occupiedPlots)
+            {
+                if (p.landUse != 9) continue;
+                var root = roots[p.owner]; int budget = budgets[root];
+                VillageProp("Scenery_Hut", p.Point(-p.frontage * .5f + 2.6f, p.depth - 2.6f), Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg,
+                    .55f, 2f, root, ref budget, false);
+                budgets[root] = budget;
+            }
+            Ground.FlushWear(); // every path, yard and hedge line into the terrain at once
+        }
+
+        // Larger villages have a transformer kiosk, and the largest a pump house, at a plot corner by the street:
+        // spare fringe land first, then a garden's front corner away from its drive.
+        static void Utility(Transform root, int village, List<VillagePlot> plots, int houses, Dictionary<Transform, int> budgets)
+        {
+            if (houses < 14 || !budgets.TryGetValue(root, out int budget)) return;
+            var models = houses >= 28 ? new[] { "Scenery_TransformerKiosk", "Scenery_PumpHouse" } : new[] { "Scenery_TransformerKiosk" };
+            int placed = 0;
+            for (int pass = 0; pass < 2 && placed < models.Length; pass++)
+                foreach (var p in plots)
+                {
+                    if (placed >= models.Length) break;
+                    if (p.owner != village || (pass == 0 ? p.landUse < 6 : p.square || p.farm || p.landUse != 0)) continue;
+                    float radius = models[placed] == "Scenery_PumpHouse" ? 3.4f : 2.2f, u = -p.frontage * .5f + radius + .7f, v = radius + .7f;
+                    float yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg;
+                    if (VillageProp(models[placed], p.Point(u, v), yaw, 1f, radius, root, ref budget)) placed++;
+                }
+            budgets[root] = budget;
+        }
+
+        // A town's avenues (VillagePlan.trees, as MapLayout.VillageTrees): each on its verge where the road and the buildings
+        // leave room, posed as the far scatter poses it, from its settlement's allowance.
+        static void StreetTrees(Transform[] roots, Dictionary<Transform, int> budgets)
+        {
+            var plan = MapLayout.Plan;
+            int planted = 0;
+            foreach (var at in MapLayout.VillageTrees)
+            {
+                if (planted >= 160) break;
+                int owner = -1; float best = float.MaxValue;
+                for (int v = 0; v < plan.villages.Count; v++)
+                {
+                    float d = (plan.villages[v] - at).sqrMagnitude;
+                    if (d < best) { best = d; owner = v; }
+                }
+                if (owner < 0 || !budgets.TryGetValue(roots[owner], out int budget)) continue;
+                if (!VillageGround(at) || MapLayout.RoadField.Distance(at.x, at.y) < MapLayout.RoadWidthAt(at.x, at.y) + .4f) continue;
+                bool clear = true;
+                foreach (var plot in villagePlots) if (Vector2.Distance(at, plot.at) < plot.radius + 1f) { clear = false; break; }
+                if (!clear) continue;
+                var pos = new Vector3(at.x, 0f, at.y);
+                int cost = Art.ModelRendererCount("Scenery_Tree", pos);
+                if (cost > budget) continue;
+                SettlementPattern.TreePose(at + plan.world.center, out float yaw, out float scale);
+                var tree = Place("Scenery_Tree", pos, yaw, scale, 0.1f, roots[owner]);
+                if (tree == null) continue;
+                Features.VillagePropLods(tree);
+                budgets[roots[owner]] = budget - cost;
+                VillagePropRenderers += cost;
+                villagePlots.Add((at, 2.5f));
+                planted++;
+            }
+        }
+
+        // Small fringe orchards: up to six fruit trees on their painted 7 m rows, from the garden tree allowance.
+        static void Orchards(Transform root, int village, List<VillagePlot> plots, Dictionary<Transform, int> budgets)
+        {
+            if (!budgets.TryGetValue(root, out int budget)) return;
+            foreach (var p in plots)
+            {
+                if (p.owner != village || p.landUse != 7) continue;
+                int planted = 0;
+                for (float u = -p.frontage * .5f + 4.8f; u < p.frontage * .5f - 2f && planted < 6; u += 7f)
+                    for (float v = 6f; v < p.depth - 3f && planted < 6; v += 8f)
+                        if (gardenTrees < 120 && VillageProp("Scenery_Tree", p.Point(u, v), (p.identity + planted * 47) % 360,
+                            .32f + (p.identity >> (planted % 8) & 3) * .025f, 2f, root, ref budget)) { gardenTrees++; planted++; }
+            }
+            budgets[root] = budget;
+        }
+
+        // Test entire gardens before building: otherwise a clear roof can leave a hedge crossing a lane or a yard.
+        static bool VillagePlotClear(VillagePlot p,List<VillagePlot> occupied)
+        {
+            foreach(var q in occupied) if(VillagePlan.Intersects(p,q))return false;
+            int nu=Mathf.CeilToInt(p.frontage/3f),nv=Mathf.CeilToInt(p.depth/3f);
+            for(int j=0;j<=nv;j++)for(int i=0;i<=nu;i++)
+            {
+                Vector2 q=p.front+p.along*(p.frontage*(i/(float)nu-.5f))+p.outward*(p.depth*j/nv);
+                if(!p.Contains(q)) continue;
+                if(!VillageGround(q)||MapLayout.RoadField.Distance(q.x,q.y)<MapLayout.RoadWidthAt(q.x,q.y)+.7f||MapLayout.TrackField.Distance(q.x,q.y)<2.5f)return false;
+            }
+            return true;
+        }
+
+        // Conservative pivot-centred radii include roofs, porches and the barn's lean-to, not only wall centres.
+        static float VillageRadius(string model)
+        {
+            switch (model)
+            {
+                case "Scenery_Church": return 11f;
+                case "Scenery_Barn": return 9f;
+                case "Scenery_Hut": return 3.5f;
+                case "Scenery_Silo": return 7.3f;
+                case "Scenery_Townhouse_Row": return 13.3f;
+                case "Scenery_Townhouse_Old": return 10.8f;
+                case "Scenery_House_Semi": return 7.8f;
+                case "Scenery_House_C": return 9.5f;
+                case "Scenery_Shop": return 7.5f;
+                case "Scenery_Apartment": return 16.5f;
+                case "Scenery_FillingStation": return 11.5f;
+                case "Scenery_OfficeBlock": return 17f;
+                case "Scenery_Warehouse": return 18f;
+                case "Scenery_MachineryShed": return 5.5f;
+                default: return 6.5f;
+            }
+        }
+
+        // Places one main building only when its full footprint fits, then reserves it for every later plot.
+        static bool VillageBuildingAt(string model, Vector2 p, Vector2 facing, float scale, Vector2 pathEnd,
+            Vector2 center, Transform root, int village, List<VillageBuilding> buildings, VillagePlot? property = null)
+        {
+            float radius = VillageRadius(model) * scale;
+            bool fits = BuildingFootprint(model, out float halfWidth, out float halfDepth) ? VillageFootprint(p, facing, halfWidth * scale, halfDepth * scale)
+                : property.HasValue && model.StartsWith("Scenery_House_") ? VillageFootprint(p, facing, 4.6f * scale, 3.9f * scale) : VillageRoom(p, radius, false);
+            if (!fits) return false;
+            float yaw = Mathf.Atan2(facing.x, facing.y) * Mathf.Rad2Deg;
+            var house = Place(model, new Vector3(p.x, 0f, p.y), yaw, scale, 0.35f, root);
+            if (model != "Scenery_Church") Repaint(house, village, p, property);
+            villagePlots.Add((p, radius));
+            buildings.Add(new VillageBuilding { root = root, at = p, center = center, facing = facing,
+                pathEnd = pathEnd, model = model });
+            return true;
+        }
+
+        // Half the width and depth of the long and large buildings, which take a rectangular test (walls, eaves, balconies).
+        static bool BuildingFootprint(string model, out float width, out float depth)
+        {
+            switch (model)
+            {
+                case "Scenery_House_C": width = 7.5f; depth = 9.5f; return true;
+                case "Scenery_House_Semi": width = 6.4f; depth = 4.8f; return true;
+                case "Scenery_Townhouse_Row": width = 12.4f; depth = 5.4f; return true;
+                case "Scenery_Townhouse_Old": width = 9.3f; depth = 5.7f; return true;
+                case "Scenery_Shop": width = 7f; depth = 6.3f; return true;
+                case "Scenery_Apartment": width = 15.4f; depth = 7.4f; return true;
+                case "Scenery_OfficeBlock": width = 12.2f; depth = 8.6f; return true;
+                case "Scenery_Warehouse": width = 9.4f; depth = 15.4f; return true;
+                case "Scenery_FillingStation": width = 8.2f; depth = 8.7f; return true;
+                default: width = depth = 0f; return false;
+            }
+        }
+
+        // Long terraced rows need a rectangular roof test: a bounding circle wrongly pushes them off their street.
+        static bool VillageFootprint(Vector2 p, Vector2 facing, float width, float depth)
+        {
+            // These buildings occupy already separated planned rectangles. A second circle overlap test would
+            // remove the opposite frontage: two 24 m terraces can face across a street without touching roofs.
+            Vector2 side = new Vector2(-facing.y, facing.x);
+            int nx = Mathf.CeilToInt(width), nz = Mathf.CeilToInt(depth);
+            for (int z = -nz; z <= nz; z++) for (int x = -nx; x <= nx; x++)
+                if (!Buildable(p + side * (width * x / nx) + facing * (depth * z / nz))) return false;
+            return true;
+        }
+
+        // A barn, farmhouse, shed and silo face a shared yard on the less obstructed side of the road.
+        static void BuildFarmstead(Transform root, Vector2 center, Vector2 along, Vector2 across, int village,
+            List<VillageBuilding> buildings)
+        {
+            string[] models = { "Scenery_Barn", "Scenery_House_A", "Scenery_MachineryShed", "Scenery_Silo" };
+            Vector2[] offsets = { new Vector2(-12f, 0f), new Vector2(12f, 0f), new Vector2(0f, -10f), new Vector2(0f, 12.5f) };
+            float side = -1f;
+            int best = -1;
+            foreach (float sign in new[] { -1f, 1f })
+            {
+                Vector2 candidate = center + across * sign * 23.5f;
+                int fits = 0;
+                for (int i = 0; i < models.Length; i++)
+                    if (VillageRoom(candidate + along * offsets[i].x + across * sign * offsets[i].y,
+                        VillageRadius(models[i]), false)) fits++;
+                if (fits > best) { best = fits; side = sign; }
+            }
+            Vector2 yard = center + across * side * 23.5f;
+            for (int i = 0; i < models.Length; i++)
+            {
+                Vector2 p = yard + along * offsets[i].x + across * side * offsets[i].y;
+                VillageBuildingAt(models[i], p, (yard - p).normalized, 1f, yard, center, root, village, buildings);
+            }
+            VillagePath(yard - along * 6f, yard + along * 6f, 12f, yard);
+            // A working yard: churned mud where machinery turns, and the muck heap on whichever side has room.
+            Ground.Paint(yard - along * 5f + across * side * 2f, yard + along * 4f - across * side * 1f, 8f, .8f, 6);
+            foreach (var offset in new[] { new Vector2(-6f, 10f), new Vector2(6f, -11f), new Vector2(-20f, 8f), new Vector2(19f, 9f) })
+            {
+                Vector2 heap = yard + along * offset.x + across * side * offset.y;
+                if (!VillageRoom(heap, 4.4f, false)) continue;
+                Place("Scenery_MuckHeap", new Vector3(heap.x, 0f, heap.y), Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg, 1f, 0.1f, root);
+                villagePlots.Add((heap, 4.4f));
+                Ground.Paint(heap - along * 4f, heap + along * 4f, 7f, .7f, 6);
+                break;
+            }
+            // The drive goes through the gap beside the front shed.
+            Vector2 turn = yard - across * side * 4f, gate = yard + along * 6f - across * side * 8f;
+            VillagePath(yard, turn, 2.5f, yard);
+            VillagePath(turn, gate, 2.5f, yard);
+            VillagePath(gate, center + along * 6f, 2.5f, yard);
+        }
+
+        // Checks concentric samples no more than 2 m apart: PathField distances are capped, so a large radius
+        // cannot safely be added to one centre query. The 1.5 m point clearance covers gaps between samples.
+        // Everything stays inside the village's strip along its streets (MapLayout.NearVillage).
+        static bool VillageRoom(Vector2 p, float radius, bool keepPaths)
+        {
+            if (!MapLayout.NearVillage(p, -radius) && !InFringe(p, radius)) return false;
+            foreach (var plot in villagePlots)
+                if (Vector2.Distance(p, plot.at) < radius + plot.radius + 0.6f) return false;
+            if (!Buildable(p) || (keepPaths && Ground.Worn(p))) return false;
+            int rings = Mathf.CeilToInt(radius / 2f);
+            for (int ring = 1; ring <= rings; ring++)
+            {
+                float r = radius * ring / rings;
+                int samples = Mathf.Max(8, Mathf.CeilToInt(2f * Mathf.PI * r / 2f));
+                for (int k = 0; k < samples; k++)
+                {
+                    float a = k * 2f * Mathf.PI / samples;
+                    Vector2 q = p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                    if (!Buildable(q) || (keepPaths && Ground.Worn(q))) return false;
                 }
             }
+            return true;
         }
 
-        // A fence behind the house and a fruit tree or two.
-        static void Garden(Transform root, Vector2 house, Vector2 along, Vector2 outward, System.Random rng)
+        // Orchard trees and utility huts may also stand inside the village's paddocks, orchards and rough grass.
+        static bool InFringe(Vector2 p, float inset)
         {
-            Vector2 back = house + outward * 8f;
-            float yaw = Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg + 90f;
-            for (int k = -2; k <= 2; k++)
+            var plan = MapLayout.Plan;
+            return plan.world != null && MapLayout.DetailPlan != null && MapLayout.DetailPlan.villages.InFringe(p + plan.world.center, inset);
+        }
+
+        // Wears only dry, unfarmed access routes, stopping paths from crossing another building's footprint.
+        static void VillagePath(Vector2 from, Vector2 to, float width, Vector2 owner)
+        {
+            Vector2 line = to - from;
+            foreach (var plot in villagePlots)
             {
-                Vector2 p = back + along * (k * 3f);
-                if (rng.NextDouble() < 0.15 || !Buildable(p)) continue;
-                Place("Scenery_Fence", new Vector3(p.x, 0f, p.y), yaw, 1f, 0.1f, root);
+                if ((plot.at - owner).sqrMagnitude < 0.01f) continue;
+                float t = line.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(plot.at - from, line) / line.sqrMagnitude) : 0f;
+                if (Vector2.Distance(plot.at, from + line * t) < plot.radius + width * 0.5f) return;
             }
-            int trees = rng.Next(0, 3);
-            for (int k = 0; k < trees; k++)
+            int steps = Mathf.Max(1, Mathf.CeilToInt(line.magnitude));
+            Vector2 side = new Vector2(-line.y, line.x).normalized * width * 0.5f;
+            for (int i = 0; i <= steps; i++)
             {
-                Vector2 p = house + outward * Range(rng, 4.5f, 6.5f) + along * Range(rng, -6f, 6f);
-                if (!Buildable(p)) continue;
-                Place(rng.NextDouble() < 0.7 ? "Scenery_Tree" : "Scenery_Birch", new Vector3(p.x, 0f, p.y),
-                    Range(rng, 0f, 360f), Range(rng, 0.5f, 0.7f), 0.1f, root);
+                Vector2 p = Vector2.Lerp(from, to, i / (float)steps);
+                if (!VillageGround(p) || !VillageGround(p + side) || !VillageGround(p - side)) return;
+            }
+            Ground.Wear(from, to, width, 0.75f);
+        }
+
+        static readonly string[] Roofs = { "RoofTile", "RoofTileDark", "RoofTileWarm", "RoofSlate" };
+        static readonly string[] Walls = { "PlasterWhite", "PlasterCream", "PlasterOchre", "PlasterPink", "PlasterGrey" };
+
+        // Each village leans to its own roofs and walls, and each house varies on that, so a street isn't the same
+        // house over and over. Picked by the village and the house's position (not the map's random numbers, which
+        // would move everything built after).
+        static void Repaint(GameObject house, int village, Vector2 at, VillagePlot? property = null)
+        {
+            int h = ((Mathf.FloorToInt(at.x * 7.3f) * 73856093) ^ (Mathf.FloorToInt(at.y * 7.3f) * 19349663)) & 0x7fffffff;
+            int roof = (village + (h % 3 == 0 ? h / 7 : 0)) % Roofs.Length;
+            int wall = (village * 2 + (h % 2 == 0 ? h / 11 : 0)) % Walls.Length;
+            if (property.HasValue)
+            {
+                var plot = property.Value;
+                wall = (plot.settlement + plot.palette) % Walls.Length;
+                roof = plot.RoofTone % Roofs.Length;
+            }
+            Art.Swap(house, "RoofTile", Roofs[roof]);
+            if (property.HasValue && property.Value.roofChanged) Art.Swap(house, "RoofSlate", Roofs[roof]);
+            Art.Swap(house, "PlasterWhite", Walls[wall]);
+        }
+
+        // The property's use plan owns its small structures, paths and neglected corners.
+        static void Garden(Transform root, VillagePlot p, ref int budget)
+        {
+            float yaw = Mathf.Atan2(-p.outward.x, -p.outward.y) * Mathf.Rad2Deg;
+            if (p.farm)
+            {
+                Vector2 barn = p.Point(p.frontage < 28f ? 0f : -4f, Mathf.Min(p.depth - 9f, p.YardEnd + 5f));
+                if (VillageProp("Scenery_Barn", barn, yaw, .8f, 7.2f, root, ref budget, false))
+                {
+                    Ground.Wear(barn - p.along * 6f, barn + p.along * 6f, 14f, .9f);
+                    Ground.Wear(p.Point(p.DriveU, p.YardStart), barn - p.outward * 6f, 3.2f, .9f);
+                    // Machinery churns the ground in front of the barn doors (VillagePlot.FarmYard paints the same mud).
+                    Ground.Paint(barn - p.outward * 12f, barn - p.outward * 7f, 13f, .85f, 6);
+                }
+                VillageProp("Scenery_MuckHeap", p.MuckHeap, yaw + 90f, 1f, 4.4f, root, ref budget, false);
+            }
+            if (p.shed)
+            {
+                Vector2 at = p.Shed;
+                if (VillageProp(p.farm ? "Scenery_MachineryShed" : "Scenery_Hut", at, yaw, p.farm ? .65f : .7f,
+                    p.farm ? 3.6f : 2.45f, root, ref budget, false))
+                    Ground.Wear(at - p.along * 2.5f, at + p.along * 2.5f, 8f, .85f);
+            }
+            if (p.logs) VillageProp("Scenery_LogPile", p.Point(-p.frontage * .22f, p.YardEnd + 2f), yaw + 90f, .65f, 2f, root, ref budget, false);
+            int trees = p.untended ? 2 : p.cultivated && p.identity % 3 == 0 ? 1 : 0;
+            for (int i = 0; i < trees; i++)
+            {
+                float u = -p.frontage * .15f + i * 3.6f, v = p.depth - 4f - (i % 2) * 5f;
+                Vector2 at = p.Point(u, v);
+                if (p.Contains(at, -2f) && gardenTrees < 128 && VillageProp("Scenery_Tree", at, p.identity % 360,
+                    p.untended ? .18f + i * .03f : .35f, 2f, root, ref budget)) gardenTrees++;
             }
         }
 
-        static bool Buildable(Vector2 p)
+        // Counts all renderers, including hidden LODs, before adding a garden prop and reserving its footprint.
+        static bool VillageProp(string model, Vector2 p, float yaw, float scale, float radius,
+            Transform root, ref int budget, bool keepPaths = true)
         {
-            if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 2.5f) return false;
-            if (MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 5f) return false;
-            return !MapLayout.NearFlatSite(p, 4f) && !MapLayout.InField(p, 1f);
+            if (budget <= 0 || !VillageRoom(p, radius, keepPaths)) return false;
+            var pos = new Vector3(p.x, 0f, p.y);
+            int cost = Art.ModelRendererCount(model, pos);
+            if (cost > budget) return false;
+            var prop = Place(model, pos, yaw, scale, 0.1f, root);
+            if (prop == null) return false;
+            if (model == "Scenery_LogPile" || model == "Scenery_Tree") Features.VillagePropLods(prop);
+            budget -= cost;
+            VillagePropRenderers += cost;
+            villagePlots.Add((p, radius));
+            return true;
+        }
+
+        // Point clearance is used across each full footprint, keeping buildings and props off roads and tracks.
+        static bool Buildable(Vector2 p) => VillageGround(p)
+            && MapLayout.RoadField.Distance(p.x, p.y) >= MapLayout.RoadHalfWidth + 1.5f
+            && MapLayout.TrackField.Distance(p.x, p.y) >= 3f;
+
+        // Shared by building footprints and worn paths; unlike the old centre test this includes standing water.
+        static bool VillageGround(Vector2 p)
+        {
+            if (Mathf.Abs(p.x) > MapLayout.Edge || Mathf.Abs(p.y) > MapLayout.Edge) return false;
+            if (MapLayout.HasRiver && MapLayout.RiverField.Distance(p.x, p.y) < MapLayout.RiverHalfWidth + 2.5f) return false;
+            if (MapLayout.LakeDistance(p.x, p.y) < 1.5f || MapLayout.NearDam(p, 1.5f) || MapLayout.InGorge(p, 1.5f)) return false;
+            return !MapLayout.OnWorks(p, 1.5f) && !MapLayout.NearFlatSite(p, 2f) && !MapLayout.InField(p, 1.5f);
         }
 
         // ---- Woods ----
 
+        // Logical woods keep real spacing; FarScatter spends the render allowance around each camera.
         static void BuildWoods(Transform parent, System.Random rng)
         {
             var root = new GameObject("Woods").transform;
             root.SetParent(parent, false);
 
-            // Woods inside the battlefield (broadleaf and pine) and darker conifer forest on the hills around it.
-            int inner = 0, outer = 0;
-            for (int attempt = 0; attempt < 400 && (inner < 11 || outer < 16); attempt++)
+            SectorForest.Build(rng, woodland);
+            if (!FarTerrain.Active) root.gameObject.AddComponent<FarScatter>();
+            var plan = MapLayout.Plan;
+
+            // Sample by metres, not vertex count, so changing the river curve's tessellation cannot change
+            // the real spacing or pack all the bank trees into one end of the larger map.
+            var river = MapLayout.RiverField.points;
+            float walked = 0f, next = 0f;
+            for (int i = 1; i < river.Count; i++)
             {
-                var c = new Vector2(Range(rng, -215f, 215f), Range(rng, -215f, 215f));
-                bool isOuter = Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.y)) > 105f;
-                if (isOuter ? outer >= 16 : inner >= 11) continue;
-                if (!MapLayout.IsWild(c, 3f)) continue;
-                if (isOuter) outer++; else inner++;
-                float radius = isOuter ? Range(rng, 16f, 30f) : Range(rng, 8f, 17f);
-                float spacing = isOuter ? 5.6f : 4.6f;
-                int seed = rng.Next();
-                for (float x = -radius; x <= radius; x += spacing)
+                if (plan.world != null && !MapLayout.RiverField.IsValidSegment(i - 1)) { walked = next = 0f; continue; }
+                float length = Vector2.Distance(river[i - 1], river[i]);
+                if (length < 0.001f) continue;
+                Vector2 dir = (river[i] - river[i - 1]) / length, side = new Vector2(-dir.y, dir.x);
+                for (; next <= walked + length; next += 4f)
                 {
-                    for (float z = -radius; z <= radius; z += spacing)
+                    Vector2 bank = Vector2.Lerp(river[i - 1], river[i], (next - walked) / length);
+                    foreach (float sign in new[] { -1f, 1f })
                     {
-                        Vector2 p = c + new Vector2(x, z) + new Vector2(Range(rng, -1.6f, 1.6f), Range(rng, -1.6f, 1.6f));
-                        // Ragged edges: the radius wobbles with direction.
-                        float wobble = 0.75f + 0.35f * Mathf.PerlinNoise(seed % 1000 + Mathf.Atan2(z, x) * 1.3f, 0.5f);
-                        if (new Vector2(x, z).magnitude > radius * wobble || !MapLayout.IsWild(p, 0.5f)) continue;
-                        Place(PickTree(rng, isOuter), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.2f), 0.25f, root);
+                        if (rng.NextDouble() > 0.42) continue;
+                        float width = plan.world != null ? MapLayout.RiverWidthAt(bank.x, bank.y) : MapLayout.RiverHalfWidth;
+                        Vector2 p = bank + side * sign * (width + Range(rng, 3.2f, 9f));
+                        if (plan.world != null && (plan.world.CoverAt(p.x, p.y) != Cover.Forest || InClearing(p))) continue;
+                        if (Vector2.Distance(p, MapLayout.BridgePoint) < 14f || !MapLayout.IsWild(p, -2f)) continue;
+                        double roll = rng.NextDouble();
+                        string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
+                        Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, root);
                     }
                 }
-            }
-
-            // Trees and bushes along both river banks.
-            var river = MapLayout.RiverField.points;
-            for (int i = 0; i < river.Count - 1; i += 2)
-            {
-                Vector2 dir = (river[i + 1] - river[i]).normalized;
-                Vector2 side = new Vector2(-dir.y, dir.x);
-                foreach (float sign in new[] { -1f, 1f })
-                {
-                    if (rng.NextDouble() > 0.42) continue;
-                    Vector2 p = river[i] + side * sign * (MapLayout.RiverHalfWidth + Range(rng, 3.2f, 9f));
-                    if (Vector2.Distance(p, MapLayout.BridgePoint) < 14f || !MapLayout.IsWild(p, -2f)) continue;
-                    double roll = rng.NextDouble();
-                    string model = roll < 0.45 ? "Scenery_Tree" : roll < 0.65 ? "Scenery_Tree_B" : roll < 0.8 ? "Scenery_Birch" : "Scenery_Bush";
-                    Place(model, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), Range(rng, 0.8f, 1.15f), 0.25f, root);
-                }
+                walked += length;
             }
         }
 
-        static string PickTree(System.Random rng, bool outer)
+        // Where the woods could grow, before the tree budget thinned them: the forest floor covers all of it.
+        static readonly List<Vector2> woodland = new List<Vector2>();
+
+        // Logging clearings (Features fills them with stumps and log stacks) stay open.
+        static bool InClearing(Vector2 p)
         {
+            foreach (var c in MapLayout.Plan.clearings)
+                if (Vector2.Distance(p, c) < Scale.D(24f)) return true;
+            return false;
+        }
+
+        // A tree for a wood at p: the Varrow Valley's own mix, or, elsewhere, the sector's shares of conifers and
+        // birches (more conifers on the outer hills). Woods seen from above grow in stands of one kind 15 to 35 m
+        // across (a clump of birch, a block of spruce), so three trees in four take the kind of the stand they're
+        // in, and the rest are strays from the whole mix.
+        static string PickTree(System.Random rng, bool outer, Vector2 p)
+        {
+            var plan = MapLayout.Plan;
+            float stand = Mathf.Clamp01((Mathf.PerlinNoise(p.x * 0.04f + 300f, p.y * 0.04f + 150f) - 0.22f) / 0.56f);
             double r = rng.NextDouble();
+            r = r < 0.75 ? stand : (r - 0.75) / 0.25;
+            if (plan.kind != SectorKind.VarrowValley)
+            {
+                float roll = (float)r, conifer = outer ? Mathf.Min(1f, plan.conifer + 0.35f) : plan.conifer;
+                if (roll < conifer * 0.25f) return "Scenery_Pine";
+                if (roll < conifer * 0.4f) return "Scenery_Pine_B";
+                if (roll < conifer) return "Scenery_Spruce";
+                if (roll < conifer + plan.birch * (1f - conifer)) return "Scenery_Birch";
+                float rest = (float)rng.NextDouble();
+                return rest < 0.55f ? "Scenery_Tree" : rest < 0.85f ? "Scenery_Tree_B" : "Scenery_Poplar";
+            }
             if (outer)
                 return r < 0.4 ? "Scenery_Spruce" : r < 0.6 ? "Scenery_Pine" : r < 0.75 ? "Scenery_Pine_B" : r < 0.9 ? "Scenery_Tree" : "Scenery_Tree_B";
             return r < 0.35 ? "Scenery_Tree" : r < 0.6 ? "Scenery_Tree_B" : r < 0.72 ? "Scenery_Birch" : r < 0.86 ? "Scenery_Pine" : "Scenery_Spruce";
@@ -208,22 +700,26 @@ namespace DroneSandbox
 
         // ---- Rocks ----
 
+        // Boulders out on the open ground and against the riverbanks by the bridge: photo-scanned ones (see Scans)
+        // when they've been imported, else the procedural rocks.
         static void BuildRocks(Transform parent, System.Random rng)
         {
             var root = new GameObject("Rocks").transform;
             root.SetParent(parent, false);
             int placed = 0;
-            for (int attempt = 0; attempt < 300 && placed < 34; attempt++)
+            for (int attempt = 0; attempt < 1200 && placed < 136; attempt++)
             {
-                var p = new Vector2(Range(rng, -200f, 200f), Range(rng, -200f, 200f));
+                var p = new Vector2(Range(rng, -MapLayout.Edge, MapLayout.Edge), Range(rng, -MapLayout.Edge, MapLayout.Edge));
                 if (!MapLayout.IsWild(p, 1f)) continue;
                 float scale = Range(rng, 0.6f, 1.8f);
-                Place(rng.NextDouble() < 0.5 ? "Scenery_Rock" : "Scenery_Rock_B", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f),
-                    scale, 0.3f * scale, root);
+                double roll = rng.NextDouble();
+                Scans.Rock(Scans.Boulders, roll, new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.55f + 0.3f * scale, root,
+                    roll < 0.5 ? "Scenery_Rock" : "Scenery_Rock_B", scale, 0.3f * scale);
                 placed++;
             }
             // Boulders piled against the riverbanks by the bridge.
             Vector2 b = MapLayout.BridgePoint;
+            var variety = new System.Random(13); // picks the scans without changing rng's sequence
             for (int k = 0; k < 8; k++)
             {
                 var p = b + new Vector2(Range(rng, -11f, 11f), Range(rng, -11f, 11f));
@@ -231,29 +727,9 @@ namespace DroneSandbox
                 if (d < MapLayout.RiverHalfWidth - 0.5f || d > MapLayout.RiverHalfWidth + 3f) continue;
                 if (MapLayout.RoadField.Distance(p.x, p.y) < MapLayout.RoadHalfWidth + 3.5f) continue;
                 float scale = Range(rng, 0.5f, 0.9f);
-                Place("Scenery_Rock_B", new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), scale, 0.25f * scale, root);
+                Scans.Rock(Scans.Rocks, variety.NextDouble(), new Vector3(p.x, 0f, p.y), Range(rng, 0f, 360f), 0.4f + 0.75f * scale, root,
+                    "Scenery_Rock_B", scale, 0.25f * scale);
             }
-        }
-
-        // ---- Lighting ----
-
-        // A reflection probe covering the whole map, rendered once, so the river and metal pick up the sky.
-        // (Needs realtime reflection probes on in the quality settings.)
-        static void AddReflections(Transform root)
-        {
-            var go = new GameObject("Reflections");
-            go.transform.SetParent(root, false);
-            go.transform.position = new Vector3(0f, 25f, 0f);
-            var probe = go.AddComponent<ReflectionProbe>();
-            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
-            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
-            probe.timeSlicingMode = UnityEngine.Rendering.ReflectionProbeTimeSlicingMode.NoTimeSlicing;
-            probe.size = new Vector3(Ground.Size + 40f, 150f, Ground.Size + 40f);
-            probe.resolution = 256;
-            probe.hdr = true;
-            probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.Skybox;
-            probe.importance = 0;
-            probe.RenderProbe();
         }
 
         static float Range(System.Random rng, float min, float max) => min + (float)rng.NextDouble() * (max - min);

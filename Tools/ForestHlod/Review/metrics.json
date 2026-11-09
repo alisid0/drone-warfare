@@ -1,0 +1,154 @@
+[
+  {
+    "name": "forest_300m_before",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 3263,
+    "forestBlocks": 5,
+    "forestTriangles": 131752,
+    "draws": 20,
+    "triangles": 157856,
+    "managedSubmitMs": 0.09411166666666666,
+    "forestVertices": 69849,
+    "maximumBlockVertices": 17157,
+    "maximumBlockTriangles": 32400,
+    "forestMipmappedTextureBytes": 5679790,
+    "estimatedForestResidentBytes": 18525346
+  },
+  {
+    "name": "forest_2500m_before",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 10,
+    "forestTriangles": 240484,
+    "draws": 10,
+    "triangles": 240484,
+    "managedSubmitMs": 0.016035,
+    "forestVertices": 139698,
+    "maximumBlockVertices": 17157,
+    "maximumBlockTriangles": 32400,
+    "forestMipmappedTextureBytes": 11359580,
+    "estimatedForestResidentBytes": 36221972
+  },
+  {
+    "name": "forest_9000m_before",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 36,
+    "forestTriangles": 18650,
+    "draws": 37,
+    "triangles": 20288,
+    "managedSubmitMs": 0.024318333333333334,
+    "forestVertices": 12852,
+    "maximumBlockVertices": 357,
+    "maximumBlockTriangles": 640,
+    "forestMipmappedTextureBytes": 786456,
+    "estimatedForestResidentBytes": 2948688
+  },
+  {
+    "name": "forest_edge_before",
+    "world": [
+      14852,
+      -6532
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 6,
+    "forestTriangles": 122196,
+    "draws": 6,
+    "triangles": 122196,
+    "managedSubmitMs": 0.039925,
+    "forestVertices": 87006,
+    "maximumBlockVertices": 17157,
+    "maximumBlockTriangles": 32310,
+    "forestMipmappedTextureBytes": 7077892,
+    "estimatedForestResidentBytes": 21569644
+  },
+  {
+    "name": "forest_300m_after",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 2998,
+    "forestBlocks": 5,
+    "forestTriangles": 79647,
+    "draws": 14,
+    "triangles": 103631,
+    "managedSubmitMs": 0.09308666666666668,
+    "forestVertices": 45473,
+    "maximumBlockVertices": 11226,
+    "maximumBlockTriangles": 19668,
+    "forestMipmappedTextureBytes": 5773056,
+    "estimatedForestResidentBytes": 13915216
+  },
+  {
+    "name": "forest_2500m_after",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 10,
+    "forestTriangles": 149277,
+    "draws": 10,
+    "triangles": 149277,
+    "managedSubmitMs": 0.016793333333333334,
+    "forestVertices": 89787,
+    "maximumBlockVertices": 11502,
+    "maximumBlockTriangles": 19668,
+    "forestMipmappedTextureBytes": 11546112,
+    "estimatedForestResidentBytes": 27335376
+  },
+  {
+    "name": "forest_9000m_after",
+    "world": [
+      16500,
+      -4500
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 36,
+    "forestTriangles": 18621,
+    "draws": 37,
+    "triangles": 20259,
+    "managedSubmitMs": 0.026803333333333335,
+    "forestVertices": 12852,
+    "maximumBlockVertices": 357,
+    "maximumBlockTriangles": 640,
+    "forestMipmappedTextureBytes": 887832,
+    "estimatedForestResidentBytes": 3049020
+  },
+  {
+    "name": "forest_edge_after",
+    "world": [
+      14852,
+      -6532
+    ],
+    "meshTrees": 0,
+    "cards": 0,
+    "forestBlocks": 6,
+    "forestTriangles": 79405,
+    "draws": 6,
+    "triangles": 79405,
+    "managedSubmitMs": 0.038255000000000004,
+    "forestVertices": 53259,
+    "maximumBlockVertices": 11502,
+    "maximumBlockTriangles": 19539,
+    "forestMipmappedTextureBytes": 7193088,
+    "estimatedForestResidentBytes": 16229712
+  }
+]

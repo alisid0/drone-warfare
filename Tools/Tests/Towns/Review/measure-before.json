@@ -1,0 +1,379 @@
+{
+  "worldMs": 1397.7249,
+  "captureMs": 400.145,
+  "villagePlanMs": 235.216,
+  "settlements": [
+    {
+      "name": "Halvard",
+      "town": true,
+      "radius": 810.5747,
+      "plots": 708,
+      "farms": 3,
+      "churches": 1,
+      "squares": 60,
+      "built": 651,
+      "kinds": "0:225, 1:165, 3:95, 4:101, 7:1, 8:31, 9:30, 10:3"
+    },
+    {
+      "name": "Brenmoor",
+      "town": true,
+      "radius": 927.6463,
+      "plots": 975,
+      "farms": 3,
+      "churches": 1,
+      "squares": 60,
+      "built": 918,
+      "kinds": "0:340, 1:224, 3:158, 4:105, 7:1, 8:45, 9:42, 10:3"
+    },
+    {
+      "name": "Orren Vale",
+      "town": true,
+      "radius": 653.5932,
+      "plots": 498,
+      "farms": 3,
+      "churches": 1,
+      "squares": 60,
+      "built": 441,
+      "kinds": "0:146, 1:101, 3:57, 4:96, 7:1, 8:19, 9:18, 10:3"
+    },
+    {
+      "name": "Velden",
+      "town": true,
+      "radius": 763.8527,
+      "plots": 669,
+      "farms": 3,
+      "churches": 1,
+      "squares": 60,
+      "built": 612,
+      "kinds": "0:211, 1:126, 3:102, 4:106, 7:1, 8:37, 9:26, 10:3"
+    },
+    {
+      "name": "Esterhay",
+      "town": false,
+      "radius": 415.1546,
+      "plots": 57,
+      "farms": 1,
+      "churches": 1,
+      "squares": 33,
+      "built": 25,
+      "kinds": "0:5, 1:4, 3:14, 7:1, 10:1"
+    },
+    {
+      "name": "Marrowfield",
+      "town": false,
+      "radius": 434.95807,
+      "plots": 49,
+      "farms": 1,
+      "churches": 1,
+      "squares": 29,
+      "built": 21,
+      "kinds": "0:5, 1:2, 3:12, 7:1, 10:1"
+    },
+    {
+      "name": "Tolbeck",
+      "town": false,
+      "radius": 367.88702,
+      "plots": 50,
+      "farms": 1,
+      "churches": 1,
+      "squares": 31,
+      "built": 20,
+      "kinds": "0:2, 1:4, 3:12, 7:1, 10:1"
+    },
+    {
+      "name": "Grisham",
+      "town": false,
+      "radius": 359.39954,
+      "plots": 58,
+      "farms": 1,
+      "churches": 1,
+      "squares": 34,
+      "built": 25,
+      "kinds": "0:5, 1:4, 3:14, 7:1, 10:1"
+    },
+    {
+      "name": "Wenlow",
+      "town": false,
+      "radius": 286.3978,
+      "plots": 52,
+      "farms": 1,
+      "churches": 1,
+      "squares": 32,
+      "built": 21,
+      "kinds": "0:6, 1:1, 3:12, 7:1, 10:1"
+    },
+    {
+      "name": "Carrick",
+      "town": false,
+      "radius": 237.61679,
+      "plots": 48,
+      "farms": 1,
+      "churches": 1,
+      "squares": 28,
+      "built": 21,
+      "kinds": "0:7, 1:1, 3:11, 7:1, 10:1"
+    },
+    {
+      "name": "Dunmere",
+      "town": false,
+      "radius": 336.29868,
+      "plots": 51,
+      "farms": 1,
+      "churches": 1,
+      "squares": 31,
+      "built": 21,
+      "kinds": "0:4, 1:1, 3:14, 7:1, 10:1"
+    },
+    {
+      "name": "Ashcombe",
+      "town": false,
+      "radius": 266.85236,
+      "plots": 56,
+      "farms": 1,
+      "churches": 1,
+      "squares": 34,
+      "built": 23,
+      "kinds": "0:7, 1:4, 3:10, 7:1, 10:1"
+    },
+    {
+      "name": "Fallow Cross",
+      "town": false,
+      "radius": 276.9773,
+      "plots": 45,
+      "farms": 1,
+      "churches": 1,
+      "squares": 28,
+      "built": 18,
+      "kinds": "0:5, 1:4, 3:7, 7:1, 10:1"
+    },
+    {
+      "name": "Redwick",
+      "town": false,
+      "radius": 265.3218,
+      "plots": 39,
+      "farms": 1,
+      "churches": 1,
+      "squares": 24,
+      "built": 16,
+      "kinds": "0:2, 1:4, 3:8, 7:1, 10:1"
+    },
+    {
+      "name": "Sorrel",
+      "town": false,
+      "radius": 399.0532,
+      "plots": 64,
+      "farms": 1,
+      "churches": 1,
+      "squares": 38,
+      "built": 27,
+      "kinds": "0:12, 1:2, 3:11, 7:1, 10:1"
+    },
+    {
+      "name": "Hythe Green",
+      "town": false,
+      "radius": 425.02765,
+      "plots": 61,
+      "farms": 1,
+      "churches": 1,
+      "squares": 37,
+      "built": 25,
+      "kinds": "0:6, 1:4, 3:13, 7:1, 10:1"
+    },
+    {
+      "name": "Kelmarsh",
+      "town": false,
+      "radius": 307.729,
+      "plots": 56,
+      "farms": 1,
+      "churches": 1,
+      "squares": 34,
+      "built": 23,
+      "kinds": "0:7, 1:2, 3:12, 7:1, 10:1"
+    },
+    {
+      "name": "Orrin",
+      "town": false,
+      "radius": 311.6803,
+      "plots": 51,
+      "farms": 2,
+      "churches": 1,
+      "squares": 30,
+      "built": 23,
+      "kinds": "0:4, 1:3, 3:13, 7:1, 10:2"
+    },
+    {
+      "name": "Lowfold",
+      "town": false,
+      "radius": 391.52905,
+      "plots": 49,
+      "farms": 1,
+      "churches": 1,
+      "squares": 29,
+      "built": 21,
+      "kinds": "0:3, 1:2, 3:14, 7:1, 10:1"
+    },
+    {
+      "name": "Brackwater",
+      "town": false,
+      "radius": 264.17148,
+      "plots": 53,
+      "farms": 1,
+      "churches": 1,
+      "squares": 33,
+      "built": 21,
+      "kinds": "0:4, 1:2, 3:13, 7:1, 10:1"
+    },
+    {
+      "name": "Merrow",
+      "town": false,
+      "radius": 228.52608,
+      "plots": 45,
+      "farms": 1,
+      "churches": 1,
+      "squares": 27,
+      "built": 19,
+      "kinds": "0:4, 1:1, 3:12, 7:1, 10:1"
+    },
+    {
+      "name": "Alderfen",
+      "town": false,
+      "radius": 229.6388,
+      "plots": 31,
+      "farms": 1,
+      "churches": 1,
+      "squares": 19,
+      "built": 13,
+      "kinds": "0:5, 3:6, 7:1, 10:1"
+    },
+    {
+      "name": "Rillford",
+      "town": false,
+      "radius": 240.97131,
+      "plots": 57,
+      "farms": 1,
+      "churches": 1,
+      "squares": 34,
+      "built": 24,
+      "kinds": "0:7, 1:4, 3:11, 7:1, 10:1"
+    },
+    {
+      "name": "Harth",
+      "town": false,
+      "radius": 255.63913,
+      "plots": 57,
+      "farms": 1,
+      "churches": 1,
+      "squares": 34,
+      "built": 24,
+      "kinds": "0:8, 1:1, 3:13, 7:1, 10:1"
+    }
+  ],
+  "towns": [
+    {
+      "name": "Halvard",
+      "houses": 647,
+      "roadFacingShare": 1,
+      "parcels": 648,
+      "irregularOrEmptyShare": 0.16203703,
+      "emptyShare": 0.0015432099,
+      "attachedShare": 0,
+      "frontage": [
+        25.905478,
+        30,
+        30
+      ],
+      "streets": 21,
+      "blockCount": 352,
+      "block": [
+        80,
+        112,
+        138
+      ],
+      "blockShareIn80to180": 0.9005682,
+      "hlodTriangles": 9052
+    },
+    {
+      "name": "Brenmoor",
+      "houses": 914,
+      "roadFacingShare": 1,
+      "parcels": 915,
+      "irregularOrEmptyShare": 0.16065574,
+      "emptyShare": 0.0010928962,
+      "attachedShare": 0,
+      "frontage": [
+        24.809837,
+        30,
+        30
+      ],
+      "streets": 25,
+      "blockCount": 480,
+      "block": [
+        88,
+        110,
+        138
+      ],
+      "blockShareIn80to180": 0.9166667,
+      "hlodTriangles": 12762
+    },
+    {
+      "name": "Orren Vale",
+      "houses": 437,
+      "roadFacingShare": 1,
+      "parcels": 438,
+      "irregularOrEmptyShare": 0.16210045,
+      "emptyShare": 0.002283105,
+      "attachedShare": 0,
+      "frontage": [
+        23.435246,
+        30,
+        30
+      ],
+      "streets": 17,
+      "blockCount": 227,
+      "block": [
+        84,
+        118,
+        124
+      ],
+      "blockShareIn80to180": 0.88105726,
+      "hlodTriangles": 6136
+    },
+    {
+      "name": "Velden",
+      "houses": 608,
+      "roadFacingShare": 1,
+      "parcels": 609,
+      "irregularOrEmptyShare": 0.16091955,
+      "emptyShare": 0.0016420361,
+      "attachedShare": 0,
+      "frontage": [
+        24.441154,
+        30,
+        30
+      ],
+      "streets": 21,
+      "blockCount": 313,
+      "block": [
+        92,
+        122,
+        132
+      ],
+      "blockShareIn80to180": 0.9297125,
+      "hlodTriangles": 8494
+    }
+  ],
+  "timing": {
+    "tiles": {
+      "halvard": 239.6407,
+      "brenmoor": 253.9971,
+      "ashcombe": 136.3528
+    },
+    "pattern": {
+      "Halvard": 0.2092,
+      "Brenmoor": 0.2209,
+      "Orren Vale": 0.1366,
+      "Velden": 0.3365
+    },
+    "worldPicture512Ms": 520.7473
+  }
+}

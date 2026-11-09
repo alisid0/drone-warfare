@@ -4,7 +4,6 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.Rendering.Universal;
 
 namespace DroneSandbox.EditorTools
 {
@@ -16,18 +15,35 @@ namespace DroneSandbox.EditorTools
         const string WindowsBuild = "Builds/Windows/DroneWarfare.exe";
 
         [MenuItem("Drone Sandbox/Build for Windows")]
-        public static void BuildWindows()
+        public static void BuildWindows() => Build(WindowsBuild, BuildOptions.None);
+
+        // A development build beside the release one, for profiler captures of hitches (the autotest records them to files
+        // with Profiler.enableBinaryLog and ProfilerDump reads them back). Command line: -executeMethod
+        // DroneSandbox.EditorTools.BuildTools.BuildWindowsDevelopment
+        public static void BuildWindowsDevelopment() => Build("Builds/WindowsDev/DroneWarfare.exe", BuildOptions.Development);
+
+        // Builds the enabled scenes for 64-bit Windows to the path, with the given options.
+        static void Build(string path, BuildOptions buildOptions)
         {
             EnsureMainScene();
+            // CPU render-thread and GPU frame times for the autotest's hitch report (FrameTimingManager); near-free.
+            PlayerSettings.enableFrameTimingStats = true;
+            // Direct3D 11 first, 12 as the fallback. On the RTX 3050 laptop D3D12 piled up 6.4 GB of upload scratch
+            // buffers in long sessions until the device failed (hd173) or the machine thrashed (hd174), and compiled
+            // pipeline states mid-flight; D3D11 held shared GPU memory under 0.32 GB over the same run at the same
+            // frame rate (hd175).
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64,
+                new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11, UnityEngine.Rendering.GraphicsDeviceType.Direct3D12 });
             var options = new BuildPlayerOptions
             {
                 scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray(),
-                locationPathName = WindowsBuild,
+                locationPathName = path,
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.None,
+                options = buildOptions,
             };
             BuildReport report = BuildPipeline.BuildPlayer(options);
-            Debug.Log($"Build {report.summary.result}: {report.summary.totalErrors} errors, {report.summary.totalSize / (1024 * 1024)} MB, {WindowsBuild}");
+            Debug.Log($"Build {report.summary.result}: {report.summary.totalErrors} errors, {report.summary.totalSize / (1024 * 1024)} MB, {path}");
             if (Application.isBatchMode && report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(1);
         }
 
@@ -50,7 +66,7 @@ namespace DroneSandbox.EditorTools
             cam.transform.LookAt(new Vector3(-20f, 0f, -20f));
             cam.farClipPlane = 900f;
             cam.allowHDR = true;
-            cameraObject.AddComponent<UniversalAdditionalCameraData>().renderPostProcessing = true;
+            Atmosphere.SetUpCamera(cam);
             var target = new RenderTexture(1600, 900, 24);
             cam.targetTexture = target;
             cam.Render();

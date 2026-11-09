@@ -1,0 +1,62 @@
+{
+  "sides": [
+    {
+      "side": 0,
+      "insideLinear": [
+        0.16009617,
+        0.19717324,
+        0.08422789
+      ],
+      "outsideLinear": [
+        0.15937202,
+        0.19723597,
+        0.0836335
+      ],
+      "maxChannelPercent": 0.70569515
+    },
+    {
+      "side": 1,
+      "insideLinear": [
+        0.1622831,
+        0.19770284,
+        0.08496548
+      ],
+      "outsideLinear": [
+        0.16142735,
+        0.19770063,
+        0.08424054
+      ],
+      "maxChannelPercent": 0.85321665
+    },
+    {
+      "side": 2,
+      "insideLinear": [
+        0.16105595,
+        0.19752876,
+        0.08456854
+      ],
+      "outsideLinear": [
+        0.1605275,
+        0.19773787,
+        0.08403906
+      ],
+      "maxChannelPercent": 0.62609315
+    },
+    {
+      "side": 3,
+      "insideLinear": [
+        0.16169333,
+        0.19763732,
+        0.08477636
+      ],
+      "outsideLinear": [
+        0.16076195,
+        0.19774283,
+        0.08405382
+      ],
+      "maxChannelPercent": 0.85228086
+    }
+  ],
+  "worldPaintSeconds": 2.2221235,
+  "note": "Actual Ground.BuildSplat and FarDetailEdge output, 8 m strips on all four sides, linear albedo. Managed Perlin; no lighting, geometry or exposure claim."
+}

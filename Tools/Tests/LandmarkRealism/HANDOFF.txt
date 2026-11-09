@@ -1,0 +1,157 @@
+Landmark realism - 6 November 2026
+
+Branch: codex/landmark-realism, based on 6a1ed17.
+Runtime commits: 5aedeb1 (models), 77f0c5f (landmarks), 737b384 (picture painter).
+The review/harness commit also moves one parked rail-yard group 2 m off the lane edge.
+
+Works now have three differently sized production halls, a connected 7 m service
+loop, 24 m turning courts, storage/loading areas, tank utilities, stacks and an
+existing cooling-tower model. A dry, unobstructed approach admits a real railway
+spur through an 8 m fence opening into the loading court. Six main surface zones
+replace the single concrete rectangle; irregular soil shoulders, wear, wheel
+tracks and unused corners share the same permanent recipe. There are 12 freight
+groups, two pairs of parked civilian utility vehicles and two aggregate piles.
+
+Airfields have hangars facing their aprons, three dispersal shelters/pads, separate
+fuel/service access and a perimeter inspection track. Rail yards have loading
+platforms, warehouses, freight groups and four wagon rakes, with an open rail
+throat and a separate road-service spine. Gates are 8 m; fences are 2.4 m with
+terrain-sampled posts about 3.2 m apart. No military units or targets were added.
+
+The feature variant seed owns all choices. Inventory RNG rolls are separate from
+surface decoration so old tank and wagon counts do not inflate accidentally.
+WorldFeatureMap clones polygon outlines into worker snapshots. Sector slabs,
+streamed colour/control maps and the world painter use those same surface rules.
+Overlapping slabs are cut into disjoint polygons to prevent distant z fighting.
+The original graded reserve remains clear, as required by LandmarkCheck. Its
+coarse pasture cover is retained; irregular soil tongues break up the visible
+yard edge but do not replace that outer cover classification.
+
+Three new FBXs have direct-child LOD meshes, stable metadata and three shared
+colours: FreightGroup (828/108/24 triangles), UtilityVehicles (792/344/192),
+AggregatePile (236/80/44). Only these small new assets are CPU-readable. Runtime
+equipment batches use LOD1/2, share materials by colour, cast no shadows and
+crossfade around 150 m before culling at 275 m (normal FOV and lodBias=1).
+Pipes, cranes and wagon models receive the same short terminal fade. Distant
+HLOD retains buildings, tanks, cooling tower/stacks, surfaces and rail ballast;
+equipment, vehicles, piles, pipes and wagons do not enter the distant mesh.
+
+Review artifacts
+----------------
+Review/IndustrialZone_comparison.jpg, Airfield_comparison.jpg and
+RailJunction_comparison.jpg each show before/after at 300 m and 2.5 km.
+The twelve full-resolution PNGs are beside them. Before is exactly 6a1ed17.
+Distances are camera-to-site-centre; 300 m is deliberately a closer, cropped
+view, with the whole compound shown at 2.5 km. LOD/culling is distance-approximated
+in the offline renderer; its lighting, macro ground and materials are not HDRP.
+Review/RailJunction_150m_after.png additionally exposes the rakes inside the fade
+range; most wagon detail is already culled in the requested 300 m centre view.
+Review/models/contact.jpg and the three animated .webp turntables show every new
+asset. Eight source frames per model can be regenerated and are git-ignored.
+
+Budget evidence (seed 1200; actual FBX material slots and generated geometry)
+-------------------------------------------------------------------------
+                           Works       Airfield       Rail yard
+Added submissions LOD0       +42          +43             +42
+Added submissions LOD1       +43          +38             +42
+Added submissions LOD2       +38          +32             +35
+Far HLOD submissions        7 -> 11      6 -> 10          6 -> 9
+Far HLOD triangles        330 -> 8987  196 -> 8963      344 -> 3788
+Managed build before/after 1028/930 ms   961/960 ms      1057/853 ms
+Near + far mesh build          39 ms        60 ms           30 ms
+
+These are steady-LOD material submissions, NOT measured HDRP SetPass calls.
+Crossfade overlaps, shadow passes, SRP batching and actual camera visibility can
+change the runtime counts. Full-visible works +0.5 ms GPU/+50 SetPass, sector
+build under 10 s and no regression versus hd143 remain integration gates.
+The managed builds execute production world/terrain/planning with engine storage
+stubs; they omit native terrain upload, FBX import and the new CombineMeshes path.
+They cannot be compared directly with the 15.1 s hd143 Unity build. Raw counts,
+triangles and timings are in Review/budgets.json. No extra packages were added.
+
+Picture paint investigation
+---------------------------
+WorldPixels(4096) was run on Unity 6000.6.7f1's shipped Mono JIT, with fresh
+snapshots and whole-world first-touch district construction, then warm repeats.
+The world-picture path does not call Mathf.PerlinNoise: native roughness is in
+the separate height/detail path. Field colour/noise on this path is managed.
+Colour encoding previously performed roughly 50 million Math.Pow transfers per
+picture, plus repeated transfers of constant road/hedge colours. Encoding now
+uses a 64 KiB immutable table; those constant colours are decoded once. A million
+uniform probes bound the transfer difference to one byte per channel.
+
+Three-run median cold paint (snapshot included): 6616 -> 5311 ms.
+Three-run median warm paint: 5112 -> 3917 ms.
+Median process CPU time: cold 90578 -> 69641 ms; warm 63297 -> 56688 ms.
+Raw ranges are wide: cold 6266-12655 -> 4745-11550 ms. An after snapshot alone
+spiked to 796 ms versus 83-89 ms in its other runs. Host contention is material;
+these are indicative savings, not proof of the requested +0.5 s Unity bound or
+an explanation of the entire hd139-to-hd143 difference. Raw samples are in
+Review/picture-mono-before.json and picture-mono-after.json. The baseline and
+after runs were sequential, with no other harness/render launched by this task.
+
+Verification
+------------
+Real Unity Core/Terrain/TerrainPhysics/Physics/Animation assemblies: C# 9 build,
+warnings as errors, zero warnings/errors for changed production code and helpers.
+Full-game dependencies are stubbed in this isolated API build; Claude still owns
+the complete game compilation. New Unity API signatures were checked in source:
+https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Graphics/Mesh.cs
+https://github.com/Unity-Technologies/UnityCsReference/blob/master/Runtime/Export/Graphics/LOD.bindings.cs
+
+Seeds 1200-1202: LandmarkCheck passes on all ten features in each world;
+46,790 parent-harness assertions, 129 crop/visit windows and three sector builds.
+Additional yard checks: 482 convex outlines and 271,196 matching world/snapshot
+surface samples per seed; main service lanes clear actual building footprints
+and conservative measured equipment bounds, including both lane edges;
+mesh triangle centroids agree with the shared surface query. Degenerate and
+sub-4 cm clipping slivers are excluded from the centroid test because world
+coordinates near 28 km have millimetre float precision. Repeated generation
+checks complete layouts, props, fences and polygon fingerprints. Snapshots also
+survive the following world's generation. Review/validation-after.json records
+the fingerprints and seed results. Baseline results are included separately.
+
+Reproduce from the repository root (Python 3.13; no Unity launch)
+-------------------------------------------------------------
+python -I Tools/Tests/LandmarkRealism/prepare.py before
+python -I Tools/Tests/LandmarkRealism/run.py before 1200 3
+python -I Tools/Tests/LandmarkRealism/prepare.py after
+python -I Tools/Tests/LandmarkRealism/run.py after 1200 3
+python -I Tools/Tests/LandmarkRealism/mono.py before 3
+python -I Tools/Tests/LandmarkRealism/mono.py after 3
+
+Run Blender 5.2 headless with --background --factory-startup --python, using:
+  Tools/Tests/LandmarkRealism/render.py                 (all twelve captures)
+  Tools/Tests/LandmarkRealism/render.py -- after RailJunction 150
+  Tools/Tests/LandmarkRealism/budgets.py
+Then: python -I Tools/Tests/LandmarkRealism/package.py
+
+Regenerate models/turntable frames with the same Blender flags and:
+  Tools/Blender/make_landmark_props.py -- Assets/DroneSandbox/Resources/Models Tools/Tests/LandmarkRealism/Review/models
+All temporary compiled projects, exported meshes and scratch files live in Temp.
+Harness helpers reuse the existing WorldLandmarks/ForestHlod readers without
+editing their files. The optional .NET picture benchmark is run with:
+  python -I Tools/Tests/LandmarkRealism/run.py after 1200 1 benchmark
+
+Claude's build checklist
+------------------------
+[ ] Review these commits and integrate on environment-and-asset-hunt.
+[ ] Compile the full game in the main checkout; import three new FBXs and verify
+    readable LOD1/2 children, material colours and native CombineMeshes batches.
+[ ] Run the full autotest. Require LandmarkCheck PASS after every sector and
+    unchanged feature identities/placements on repeat visits and boundary crops.
+[ ] Inspect works loading access, rail gate, silo clearances, apron-facing hangars,
+    yard rakes, fences on slopes, worn edges and slab seams in actual HDRP.
+[ ] Compare sector, streamed tiles and world picture at the same coordinates.
+[ ] Profile a fully visible works against hd143: <= +0.5 ms GPU, <= +50 SetPass,
+    including LOD transitions/shadows. Check normal and zoomed cameras/lodBias.
+[ ] Check clutter fade from 150-275 m, no wagon/equipment silhouettes at 2.5 km,
+    and mesh cleanup/material reuse after several sector unloads.
+[ ] Measure isolated and loaded Industrial build time; aim <10 s and no
+    regression against hd143. Recheck FarTerrain.Build/Varrow world paint with
+    competing harnesses stopped; require <= +0.5 s versus the accepted baseline.
+
+Ground.cs and Atmosphere.cs need no edits for these surface hooks. Neither was
+changed. Forest files and the protected gameplay/HUD/campaign/autotest files were
+not edited. Unity was not opened or run; no Library was imported, and no branch
+was pushed, merged or rebased.

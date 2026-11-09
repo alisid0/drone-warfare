@@ -1,0 +1,566 @@
+{
+  "seed": 1200,
+  "checks": 9646,
+  "spots": [
+    {
+      "name": "river-crossing",
+      "center": [
+        2750,
+        -4000
+      ],
+      "kind": "RiverCrossing",
+      "milliseconds": 139.5147,
+      "roads": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            697.90985
+          ],
+          [
+            -742.9373,
+            -1000
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            697.90985
+          ],
+          [
+            -742.9373,
+            -1000
+          ]
+        ]
+      },
+      "preparedRoads": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            697.90985
+          ],
+          [
+            -742.9373,
+            -1000
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            697.90985
+          ],
+          [
+            -742.9373,
+            -1000
+          ]
+        ]
+      },
+      "rivers": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            36.09961
+          ],
+          [
+            -1000,
+            110.166504
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            36.09961
+          ],
+          [
+            -1000,
+            110.166504
+          ]
+        ]
+      },
+      "legacyRiver": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            36.09961
+          ],
+          [
+            -1000,
+            110.166504
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            36.09961
+          ],
+          [
+            -1000,
+            110.166504
+          ]
+        ]
+      },
+      "missions": 29,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0.003008,
+      "fields": 0.698492,
+      "minHeight": 49.289875,
+      "maxHeight": 68.50606
+    },
+    {
+      "name": "town-edge",
+      "center": [
+        -13000,
+        17250
+      ],
+      "kind": "MarketTown",
+      "milliseconds": 41.3726,
+      "roads": {
+        "worldCount": 3,
+        "sectorCount": 3,
+        "maxMetres": 0,
+        "world": [
+          [
+            593.81525,
+            -1000
+          ],
+          [
+            -1000,
+            -9.629738
+          ],
+          [
+            -724.4077,
+            1000
+          ]
+        ],
+        "sector": [
+          [
+            593.81525,
+            -1000
+          ],
+          [
+            -1000,
+            -9.629738
+          ],
+          [
+            -724.4077,
+            1000
+          ]
+        ]
+      },
+      "preparedRoads": {
+        "worldCount": 3,
+        "sectorCount": 3,
+        "maxMetres": 0,
+        "world": [
+          [
+            593.81525,
+            -1000
+          ],
+          [
+            -1000,
+            -9.629738
+          ],
+          [
+            -724.4077,
+            1000
+          ]
+        ],
+        "sector": [
+          [
+            593.81525,
+            -1000
+          ],
+          [
+            -1000,
+            -9.629738
+          ],
+          [
+            -724.4077,
+            1000
+          ]
+        ]
+      },
+      "rivers": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "legacyRiver": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "missions": 29,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0,
+      "fields": 0.563624,
+      "minHeight": 35.66463,
+      "maxHeight": 65.21712
+    },
+    {
+      "name": "forest",
+      "center": [
+        3500,
+        -6500
+      ],
+      "kind": "DeepForest",
+      "milliseconds": 31.1113,
+      "roads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "preparedRoads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "rivers": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "legacyRiver": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "missions": 28,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0.97018,
+      "fields": 0.018716,
+      "minHeight": 44.927444,
+      "maxHeight": 56.755936
+    },
+    {
+      "name": "reservoir",
+      "center": [
+        10250,
+        15000
+      ],
+      "kind": "Reservoir",
+      "milliseconds": 76.1144,
+      "roads": {
+        "worldCount": 4,
+        "sectorCount": 4,
+        "maxMetres": 0,
+        "world": [
+          [
+            -307.4305,
+            1000
+          ],
+          [
+            -411.67447,
+            1000
+          ],
+          [
+            -637.81757,
+            1000
+          ],
+          [
+            -748.2046,
+            -1000
+          ]
+        ],
+        "sector": [
+          [
+            -307.4305,
+            1000
+          ],
+          [
+            -411.67447,
+            1000
+          ],
+          [
+            -637.81757,
+            1000
+          ],
+          [
+            -748.2046,
+            -1000
+          ]
+        ]
+      },
+      "preparedRoads": {
+        "worldCount": 4,
+        "sectorCount": 4,
+        "maxMetres": 0,
+        "world": [
+          [
+            -307.4305,
+            1000
+          ],
+          [
+            -411.67447,
+            1000
+          ],
+          [
+            -637.81757,
+            1000
+          ],
+          [
+            -748.2046,
+            -1000
+          ]
+        ],
+        "sector": [
+          [
+            -307.4305,
+            1000
+          ],
+          [
+            -411.67447,
+            1000
+          ],
+          [
+            -637.81757,
+            1000
+          ],
+          [
+            -748.2046,
+            -1000
+          ]
+        ]
+      },
+      "rivers": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            767.6431
+          ],
+          [
+            -1000,
+            452.61523
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            767.6431
+          ],
+          [
+            -1000,
+            452.61523
+          ]
+        ]
+      },
+      "legacyRiver": {
+        "worldCount": 2,
+        "sectorCount": 2,
+        "maxMetres": 0,
+        "world": [
+          [
+            1000,
+            767.6431
+          ],
+          [
+            -1000,
+            452.61523
+          ]
+        ],
+        "sector": [
+          [
+            1000,
+            767.6431
+          ],
+          [
+            -1000,
+            452.61523
+          ]
+        ]
+      },
+      "missions": 29,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0.781864,
+      "fields": 0,
+      "minHeight": 153.79745,
+      "maxHeight": 202.75577
+    },
+    {
+      "name": "farmland",
+      "center": [
+        3500,
+        -9500
+      ],
+      "kind": "RollingFarmland",
+      "milliseconds": 17.1641,
+      "roads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "preparedRoads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "rivers": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "legacyRiver": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "missions": 26,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0,
+      "fields": 0.950212,
+      "minHeight": 49.203735,
+      "maxHeight": 60.808437
+    },
+    {
+      "name": "confluence",
+      "center": [
+        -12000,
+        20000
+      ],
+      "kind": "RiverValley",
+      "milliseconds": 18.052,
+      "roads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "preparedRoads": {
+        "worldCount": 0,
+        "sectorCount": 0,
+        "maxMetres": 0,
+        "world": [],
+        "sector": []
+      },
+      "rivers": {
+        "worldCount": 3,
+        "sectorCount": 3,
+        "maxMetres": 0,
+        "world": [
+          [
+            33.483887,
+            1000
+          ],
+          [
+            -311.9624,
+            -1000
+          ],
+          [
+            1000,
+            -918.2113
+          ]
+        ],
+        "sector": [
+          [
+            33.483887,
+            1000
+          ],
+          [
+            -311.9624,
+            -1000
+          ],
+          [
+            1000,
+            -918.2113
+          ]
+        ]
+      },
+      "legacyRiver": {
+        "worldCount": 3,
+        "sectorCount": 2,
+        "maxMetres": 1314.5093,
+        "world": [
+          [
+            33.483887,
+            1000
+          ],
+          [
+            -311.9624,
+            -1000
+          ],
+          [
+            1000,
+            -918.2113
+          ]
+        ],
+        "sector": [
+          [
+            33.483887,
+            1000
+          ],
+          [
+            -311.9624,
+            -1000
+          ]
+        ]
+      },
+      "missions": 29,
+      "straightFallbacks": 0,
+      "unitsOverWater": 0,
+      "forest": 0,
+      "fields": 0.876608,
+      "minHeight": 44.50913,
+      "maxHeight": 70.06853
+    }
+  ],
+  "kinds": [],
+  "orientation": {
+    "damCenter": [
+      10094.109,
+      15570.252
+    ],
+    "varrowDown": [
+      0.9499078,
+      -0.31253025
+    ],
+    "varrowArm": [
+      -209.44418,
+      323.3201
+    ],
+    "worldArm": [
+      3543.0068,
+      1467.9756
+    ],
+    "rotationDegrees": -100.429115
+  }
+}

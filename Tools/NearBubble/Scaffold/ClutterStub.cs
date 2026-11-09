@@ -1,0 +1,1 @@
+namespace DroneSandbox { public static class LandmarkClutter { public static void Build(UnityEngine.Transform t) {} public static void Tune(UnityEngine.GameObject p,Site s) {} } }
