@@ -122,6 +122,14 @@ namespace DroneSandbox
                 Application.Quit();
                 yield break;
             }
+            if (only == "rules")
+            {
+                yield return FlightRules(game, rts);
+                log.WriteLine($"Done at {Time.realtimeSinceStartup:F1}s real time. Errors: {errors}");
+                yield return new WaitForSecondsRealtime(0.5f);
+                Application.Quit();
+                yield break;
+            }
             if (only == "seek")
             {
                 yield return HuntMission(game, rts, false);
@@ -322,6 +330,7 @@ namespace DroneSandbox
             yield return UnitShots(game, rts);
             Recon.ForceShowAll = false;
             yield return EmptyAndRearm(game, rts);
+            yield return FlightRules(game, rts);
             yield return PlayMissions(game, rts);
             yield return CampaignToVictory(game);
             yield return QualityCheck(game, rts);
@@ -1470,6 +1479,109 @@ namespace DroneSandbox
             else
             {
                 log.WriteLine("Nightjar: shot down on the way home");
+            }
+        }
+
+        // Two flight rules the three.js port turned up. A Swift recalled to the base circles 150 m round it (a fixed
+        // wing can't hover), and that has to count as home at extraction. A Kamikaze's dive is a straight line from
+        // where it was ordered, and it went through any hill in the way: sent from behind a hill, it has to stay over
+        // the ground until the last few metres to its target.
+        IEnumerator FlightRules(SandboxGame game, RtsController rts)
+        {
+            float Flat(Vector3 a, Vector3 b) => new Vector2(a.x - b.x, a.z - b.z).magnitude;
+            var swift = game.SpawnDrone(DroneType.Recon);
+            if (swift == null)
+            {
+                log.WriteLine("Flight rules: no Swift could launch");
+                errors++;
+                yield break;
+            }
+            // Out 600 m away from the Dravin HQ, then home.
+            Vector3 away = game.basePosition - game.enemyHqPosition;
+            away.y = 0f;
+            swift.MoveTo(game.basePosition + away.normalized * 600f);
+            float t = 0f;
+            for (; t < 40f && swift != null && !(swift.LoiterCentre.HasValue && Flat(swift.LoiterCentre.Value, game.basePosition) > 300f); t += 0.5f)
+                yield return new WaitForSeconds(0.5f);
+            bool homeWhileAway = swift != null && game.IsHome(swift);
+            if (swift != null) game.Recall(new List<Drone> { swift });
+            for (t = 0f; t < 40f && swift != null && !(swift.LoiterCentre.HasValue && Flat(swift.LoiterCentre.Value, game.basePosition) <= SandboxGame.HomeRadius); t += 0.5f)
+                yield return new WaitForSeconds(0.5f);
+            rts.LookAt(game.basePosition, 120f * Scale.Camera, 45f);
+            yield return new WaitForSeconds(4f); // out on its circle
+            float batteryBefore = swift != null ? swift.Battery : 0f;
+            yield return new WaitForSeconds(4f);
+            bool swiftHome = swift != null && game.IsHome(swift), charging = swift != null && swift.Battery >= batteryBefore;
+            float circling = swift != null ? Flat(swift.transform.position, game.basePosition) : -1f;
+            int home = game.CountHome(out int flying);
+            log.WriteLine($"Flight rules: Swift home while 600 m out {homeWhileAway}, circling the base {circling:F0} m out after {t:F0} s, " +
+                          $"home {swiftHome} ({home} of {flying} counted home), charging {charging} ({batteryBefore:P2} to {(swift != null ? swift.Battery : 0f):P2})");
+            if (homeWhileAway || !swiftHome || !charging) errors++;
+
+            // Starts behind a hill from a target: the straight line from 40 m over the ground there to the target
+            // passes under the hillside on the way, by the most of all the starts tried for that target.
+            float Under(Vector3 from, Unit to)
+            {
+                float worst = float.MinValue;
+                for (int k = 1; k < 60; k++)
+                {
+                    Vector3 p = Vector3.Lerp(from, to.AimPoint, k / 60f);
+                    if (Flat(p, to.AimPoint) < to.radius + 5f) continue;
+                    worst = Mathf.Max(worst, Ground.HeightAt(p) + 1.2f - p.y);
+                }
+                return worst;
+            }
+            var behind = new List<(float under, Unit target, Vector3 start)>();
+            foreach (var e in game.enemies)
+            {
+                if (e == null || !e.IsAlive || e.transform.position.y - Ground.HeightAt(e.transform.position) > 5f) continue;
+                (float under, Unit target, Vector3 start) best = (0f, null, Vector3.zero);
+                for (int a = 0; a < 24; a++)
+                    for (int r = 0; r < 4; r++)
+                    {
+                        float angle = a * Mathf.PI / 12f;
+                        Vector3 s = e.transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (400f + 300f * r);
+                        s.y = Ground.HeightAt(s) + 40f;
+                        float under = Under(s, e);
+                        if (under > best.under) best = (under, e, s);
+                    }
+                if (best.target != null) behind.Add(best);
+                if (behind.Count >= 20) break;
+            }
+            behind.Sort((x, y) => y.under.CompareTo(x.under));
+            log.WriteLine($"Flight rules: {behind.Count} targets with a hill in the way, the most {(behind.Count > 0 ? behind[0].under : 0f):F0} m under it");
+            bool dived = false;
+            for (int attempt = 0; attempt < 3 && attempt < behind.Count && !dived; attempt++)
+            {
+                var (under, target, start) = behind[attempt];
+                if (under < 8f) break;
+                var kamikaze = game.SpawnDrone(DroneType.Kamikaze);
+                if (kamikaze == null) break;
+                kamikaze.transform.position = start;
+                kamikaze.Attack(target);
+                float lowest = float.MaxValue, closest = float.MaxValue, range = Flat(start, target.transform.position);
+                for (t = 0f; t < 90f && kamikaze != null && target != null && target.IsAlive; t += Time.deltaTime)
+                {
+                    Vector3 p = kamikaze.transform.position;
+                    float off = Flat(p, target.AimPoint);
+                    closest = Mathf.Min(closest, off);
+                    if (off >= target.radius + 5f) lowest = Mathf.Min(lowest, p.y - Ground.HeightAt(p));
+                    rts.LookAt(p, 60f * Scale.Camera, 45f);
+                    yield return null;
+                }
+                bool reached = target != null && closest < target.radius + 5f;
+                bool hit = target == null || !target.IsAlive;
+                log.WriteLine($"Flight rules: Kamikaze from behind a hill {under:F0} m over its straight line, {range:F0} m out: " +
+                              $"lowest {lowest:F1} m over the ground before its final dive, reached {reached || hit}, target hit {hit}, {t:F0} s");
+                if (!reached && !hit && kamikaze == null) continue; // shot down on the way: try another
+                dived = true;
+                if (lowest < 0.5f || !(reached || hit)) errors++;
+                if (kamikaze != null) kamikaze.TakeDamage(1000f);
+            }
+            if (!dived)
+            {
+                log.WriteLine("Flight rules: no Kamikaze dive from behind a hill was flown");
+                errors++;
             }
         }
 

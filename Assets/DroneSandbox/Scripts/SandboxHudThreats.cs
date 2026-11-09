@@ -226,9 +226,9 @@ namespace DroneSandbox
             foreach (var d in game.drones)
             {
                 if (d == null || d.IsKamikaze || !symbolAt.TryGetValue(d, out Vector2 c)) continue;
+                if (game.IsHome(d)) continue;
                 Vector3 off = game.basePosition - d.transform.position;
                 off.y = 0f;
-                if (off.magnitude <= SandboxGame.HomeRadius) continue;
                 float eta = off.magnitude / Mathf.Max(1f, d.speed);
                 Color colour = eta < left - 10f ? Teal : eta < left ? Amber : Hostile;
                 var style = Tinted(small, colour);

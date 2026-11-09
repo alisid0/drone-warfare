@@ -63,6 +63,8 @@ namespace DroneSandbox
         public const int TypeCount = 5;
         Vector3? loiterCentre;
         float loiterAngle;
+        // Where the Swift is circling, if it is: over the base, that counts as home (it can't hover there).
+        public Vector3? LoiterCentre => loiterCentre;
         public int BombsLeft { get; private set; }
         public int MissilesLeft { get; private set; }
         bool OutOfAmmo => (IsBomber && BombsLeft == 0) || (type == DroneType.Strike && MissilesLeft == 0);
@@ -513,9 +515,10 @@ namespace DroneSandbox
             velocity = Vector3.MoveTowards(velocity, desired, speed * 2.5f * dt);
             transform.position += velocity * dt;
 
-            // Never fly into a hillside (a kamikaze dive is meant to hit the ground).
+            // Never fly into a hillside. A kamikaze's dive is a straight line from wherever it was ordered, so it may
+            // go under this floor only in the last few metres to its target; a hill in the way it skims up and over.
             float floor = Ground.HeightAt(transform.position) + 1.2f;
-            if (!diving && transform.position.y < floor)
+            if (transform.position.y < floor && (!diving || !InFinalDive()))
             {
                 transform.position = new Vector3(transform.position.x, floor, transform.position.z);
                 velocity.y = Mathf.Max(velocity.y, 0f);
@@ -547,6 +550,15 @@ namespace DroneSandbox
             float beat = Mathf.Repeat(Time.time + bobOffset, 1.3f); // the strobe double-flashes every 1.3 s
             bool flash = beat < 0.05f || (beat > 0.16f && beat < 0.21f);
             foreach (var strobe in strobes) strobe.enabled = flash;
+        }
+
+        // In the last few metres to its target, where a kamikaze's dive may go below the hillside floor.
+        bool InFinalDive()
+        {
+            if (attackTarget == null) return true;
+            Vector3 flat = attackTarget.AimPoint - transform.position;
+            flat.y = 0f;
+            return flat.magnitude < attackTarget.radius + 5f;
         }
 
         // Cruise altitude is above the ground, taking the higher of here and the destination so the drone
@@ -614,13 +626,16 @@ namespace DroneSandbox
             else if (type == DroneType.Strike) MissilesLeft = StrikeLoad;
         }
 
-        // The battery, every frame: drains while the drone is out, charges over the base, turns it home in time
-        // (not a Kamikaze: it isn't coming back), and brings it down if it's empty. False once it has fallen.
+        // The battery, every frame: drains while the drone is out, charges over the base (a Swift circling round it
+        // too), turns it home in time (not a Kamikaze: it isn't coming back), and brings it down if it's empty. False
+        // once it has fallen.
         bool UpdateBattery(float dt)
         {
             Vector3 home = SandboxGame.Instance.basePosition;
             float fromHome = Vector2.Distance(new Vector2(transform.position.x, transform.position.z), new Vector2(home.x, home.z));
-            if (fromHome > Scale.D(25f)) Flown += dt;
+            bool circlingHome = loiterCentre.HasValue
+                && Vector2.Distance(new Vector2(loiterCentre.Value.x, loiterCentre.Value.z), new Vector2(home.x, home.z)) <= SandboxGame.HomeRadius;
+            if (fromHome > Scale.D(25f) && !circlingHome) Flown += dt;
             else Flown = Mathf.Max(0f, Flown - dt * Endurance / ChargeSeconds);
             if (Flown >= Endurance)
             {

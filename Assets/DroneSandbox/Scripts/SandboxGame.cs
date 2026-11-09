@@ -359,11 +359,18 @@ namespace DroneSandbox
             {
                 if (d == null || d.IsKamikaze) continue;
                 flying++;
-                Vector3 offset = d.transform.position - basePosition;
-                offset.y = 0f;
-                if (offset.magnitude <= HomeRadius) home++;
+                if (IsHome(d)) home++;
             }
             return home;
+        }
+
+        // Over the base: inside the home circle, or for a Swift, which can't hover, circling round it (150 m out).
+        public bool IsHome(Drone d)
+        {
+            Vector3 at = d.IsRecon && d.LoiterCentre.HasValue ? d.LoiterCentre.Value : d.transform.position;
+            Vector3 offset = at - basePosition;
+            offset.y = 0f;
+            return offset.magnitude <= HomeRadius;
         }
 
         // ---- Coordinated strike ----
